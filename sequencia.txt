@@ -1,0 +1,27 @@
+Fluxo no Admin (primeiro teste real)
+
+Brands → Brand: crie 1 brand (ex.: smclab)
+
+Brands → BrandAsset: (opcional) suba um INTRO e OUTRO mp4
+
+Mediahub → SourceVideo: suba uma live (mp4)
+
+Cuts → Cut: crie um corte (ex.: 00:00:10 até 00:01:10)
+
+Jobs → Job: selecione os cortes, marque as redes (TikTok, Instagram Reels, etc.), intro/outro
+
+Na lista de Jobs: marque o job → Action: Enfileirar
+
+Saída final vai para:
+storage\media\exports\job_<id>.mp4
+
+
+
+
+
+subir o server
+python manage.py runserver
+
+
+subir o worker
+celery -A config worker -l INFO -P solo
