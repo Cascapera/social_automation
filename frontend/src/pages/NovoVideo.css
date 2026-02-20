@@ -1,0 +1,247 @@
+.novo-video h1 {
+  margin-bottom: 1.5rem;
+}
+
+.steps {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.step-indicator {
+  padding: 0.5rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.step-indicator.active {
+  color: var(--text);
+}
+
+.step-indicator.current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.form-error {
+  background: rgba(244, 33, 46, 0.15);
+  color: var(--error);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.step-form {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.step-desc {
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.novo-video .btn-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+  margin-top: 0.5rem;
+  display: inline-block;
+}
+
+.novo-video .btn-link:hover {
+  text-decoration: underline;
+}
+
+.novo-video .new-brand-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.novo-video .new-brand-form input {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.novo-video .new-brand-form button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.novo-video .new-brand-form button[type="submit"] {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+
+.novo-video .new-brand-form button[type="button"] {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.form-group input,
+.form-group select {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.form-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.cut-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cut-row input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.btn-remove {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.btn-remove:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.btn-add {
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  align-self: flex-start;
+}
+
+.btn-add:hover {
+  background: rgba(29, 155, 240, 0.1);
+}
+
+.step-form > button[type="submit"],
+.step-form > .btn-primary,
+.step-form > .btn-secondary {
+  padding: 0.75rem 1.25rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.step-form > button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.step-form > .btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+.step-form > .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.job-status-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.job-status-card .progress-bar {
+  margin: 1rem 0;
+}
+
+.btn-download {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-download:hover {
+  text-decoration: underline;
+}
+
+.job-error {
+  color: var(--error);
+  margin-top: 0.5rem;
+}
+
+.success-msg {
+  color: var(--success);
+  font-size: 1.1rem;
+}

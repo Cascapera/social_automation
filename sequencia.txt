@@ -22,6 +22,25 @@ storage\media\exports\job_<id>.mp4
 subir o server
 python manage.py runserver
 
-
 subir o worker
 celery -A config worker -l INFO -P solo
+
+---
+
+API (ver API.md)
+1. POST /api/register/ - criar usuário
+2. POST /api/auth/token/ - obter JWT
+3. POST /api/sources/ - upload vídeo
+4. POST /api/cuts/ - criar cortes (source + cuts[])
+5. POST /api/jobs/ - criar job (cut_ids, target_platforms, ...)
+6. POST /api/jobs/<id>/run/ - enfileirar
+7. GET /api/jobs/<id>/ - status + output_url quando DONE
+8. POST /api/scheduled-posts/ - agendar postagem
+
+---
+
+FRONTEND REACT (http://localhost:5173)
+1. Instalar Node.js (nodejs.org)
+2. cd frontend && npm install
+3. npm run dev
+4. Backend deve estar rodando (python manage.py runserver) e executar na pasta frontend

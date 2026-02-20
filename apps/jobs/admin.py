@@ -1,6 +1,6 @@
 from django import forms
 from django.contrib import admin
-from .models import Job, JobCut, RenderOutput
+from .models import Job, JobCut, RenderOutput, ScheduledPost
 
 
 class JobCutInline(admin.TabularInline):
@@ -51,7 +51,7 @@ class JobAdminForm(forms.ModelForm):
 class JobAdmin(admin.ModelAdmin):
     form = JobAdminForm
     inlines = [JobCutInline]
-    list_display = ("id", "status", "make_vertical", "transition", "target_platforms_display", "cuts_count", "created_at")
+    list_display = ("id", "name", "archived", "status", "make_vertical", "transition", "target_platforms_display", "cuts_count", "created_at")
 
     def cuts_count(self, obj):
         return obj.job_cuts.count()
@@ -70,7 +70,7 @@ class JobAdmin(admin.ModelAdmin):
         if db_field.name == "transition_duration":
             kwargs["help_text"] = "Duração em segundos (ex: 0.5, 1.0, 0.2). Usado quando transição ≠ Nenhuma."
         return super().formfield_for_dbfield(db_field, request, **kwargs)
-    list_filter = ("status",)
+    list_filter = ("status", "archived")
     search_fields = ("job_cuts__cut__source__title", "job_cuts__cut__name")
     readonly_fields = (
         "status", "progress", "log", "error",
@@ -88,3 +88,9 @@ class JobAdmin(admin.ModelAdmin):
 @admin.register(RenderOutput)
 class RenderOutputAdmin(admin.ModelAdmin):
     list_display = ("job", "file", "created_at")
+
+
+@admin.register(ScheduledPost)
+class ScheduledPostAdmin(admin.ModelAdmin):
+    list_display = ("id", "job", "scheduled_at", "status", "created_at")
+    list_filter = ("status",)

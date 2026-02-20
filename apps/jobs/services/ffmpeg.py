@@ -243,6 +243,53 @@ def ffprobe_duration(input_file: Path) -> float:
         raise RuntimeError(f"ffprobe duration failed: {res.stderr}")
     return float(res.stdout.strip())
 
+
+def ffprobe_video_info(input_file: Path) -> dict:
+    """Retorna duração (segundos), width, height. Usado para analisar uploads."""
+    cmd = [
+        settings.FFPROBE_BIN, "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-show_entries", "format=duration",
+        "-of", "json",
+        str(input_file),
+    ]
+    res = run_cmd(cmd)
+    if not res.ok:
+        raise RuntimeError(f"ffprobe failed: {res.stderr}")
+
+    import json
+    data = json.loads(res.stdout)
+    stream = data.get("streams", [{}])[0]
+    fmt = data.get("format", {})
+    width = int(stream.get("width", 0))
+    height = int(stream.get("height", 0))
+    dur_val = fmt.get("duration", 0)
+    duration = float(dur_val) if dur_val else 0.0
+    return {"duration": duration, "width": width, "height": height}
+
+
+def seconds_to_tc(sec: float) -> str:
+    """Converte segundos para HH:MM:SS."""
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = int(sec % 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def tc_to_seconds(tc: str) -> float:
+    """Converte HH:MM:SS ou MM:SS ou SS para segundos."""
+    if not tc or not isinstance(tc, str):
+        return 0.0
+    parts = [int(x) for x in tc.strip().split(":") if x.isdigit()]
+    if not parts:
+        return 0.0
+    if len(parts) == 1:
+        return float(parts[0])
+    if len(parts) == 2:
+        return float(parts[0] * 60 + parts[1])
+    return float(parts[0] * 3600 + parts[1] * 60 + parts[2])
+
 def concat_videos_filter(parts: List[Path], output_file: Path, use_gpu: bool) -> None:
     fps = "30"  # escolha fixa para shorts; pode virar preset depois
     w, h = 1080, 1920  # formato vertical para Reels/Shorts/TikTok

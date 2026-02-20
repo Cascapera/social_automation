@@ -1,0 +1,165 @@
+.intro-outro h1 {
+  margin-bottom: 0.5rem;
+}
+
+.page-desc {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.intro-outro .form-group {
+  margin-bottom: 1rem;
+}
+
+.intro-outro .form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.intro-outro select,
+.intro-outro input[type="text"] {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.add-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  max-width: 560px;
+}
+
+.add-form h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.add-form button {
+  margin-top: 1rem;
+  padding: 0.6rem 1.25rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.add-form button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.assets-list h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.empty-msg {
+  color: var(--text-muted);
+}
+
+.assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.asset-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.asset-type {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+
+.asset-label {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  word-break: break-all;
+}
+
+.asset-link {
+  font-size: 0.85rem;
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.btn-delete {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+}
+
+.btn-delete:hover {
+  background: rgba(244, 33, 46, 0.15);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+  margin-top: 0.5rem;
+  display: inline-block;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.new-brand-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.new-brand-form input {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.new-brand-form button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.new-brand-form button[type="submit"] {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+
+.new-brand-form button[type="button"] {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}

@@ -1,0 +1,243 @@
+.gerar-cortes h1 {
+  margin-bottom: 0.5rem;
+}
+
+.page-desc {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.section {
+  margin-bottom: 2rem;
+}
+
+.section h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.section-hint {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.form-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.form-inline select,
+.form-inline input[type="text"] {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.form-inline button[type="submit"] {
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.form-source {
+  margin-bottom: 1rem;
+}
+
+.cuts-definition h3 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.progress-bar {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.progress-label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.cuts-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 720px;
+}
+
+.cut-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 120px auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cut-row input,
+.cut-row select {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.btn-remove {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.btn-remove:hover {
+  color: var(--error);
+}
+
+.btn-add {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+}
+
+.cuts-form > button[type="submit"] {
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.cuts-table {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.cuts-header,
+.cuts-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 180px 80px 140px 90px;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.cuts-header {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.cuts-row {
+  border-top: 1px solid var(--border);
+}
+
+.cuts-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.btn-preview,
+.btn-delete-cut {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.btn-preview:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.btn-delete-cut:hover:not(:disabled) {
+  background: rgba(244, 33, 46, 0.2);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-delete-cut:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal de preview */
+.preview-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.preview-modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 90vw;
+  max-height: 90vh;
+  position: relative;
+}
+
+.preview-modal-content h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+}
+
+.preview-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.preview-close:hover {
+  color: var(--text);
+}
+
+.preview-modal-content video {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  background: #000;
+}

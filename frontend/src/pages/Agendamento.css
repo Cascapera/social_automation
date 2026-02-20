@@ -1,0 +1,252 @@
+.agendamento h1 {
+  margin-bottom: 0.5rem;
+}
+
+.page-desc {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.schedule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 480px;
+}
+
+.schedule-form .form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.schedule-form input,
+.schedule-form select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+  width: 100%;
+}
+
+.schedule-form .platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.schedule-form button {
+  padding: 0.75rem 1.25rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.agenda-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.view-tabs button {
+  padding: 0.4rem 0.8rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-left: 0.25rem;
+}
+
+.view-tabs button.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.agenda-table {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.agenda-row {
+  display: grid;
+  grid-template-columns: 100px 70px 1fr 180px 100px;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.agenda-row.header {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.agenda-row:not(.header) {
+  border-top: 1px solid var(--border);
+}
+
+.agenda-row[data-status="DONE"] .status {
+  color: var(--success);
+}
+
+.agenda-row[data-status="FAILED"] .status {
+  color: var(--error);
+}
+
+.calendario-mensal {
+  width: 100%;
+}
+
+.calendario-meses {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 900px) {
+  .calendario-meses {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mes-calendario {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.mes-titulo {
+  font-size: 1.1rem;
+  margin: 0 0 1rem 0;
+  color: var(--accent);
+  text-align: center;
+}
+
+.calendario-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.calendario-dia-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0.4rem;
+  text-align: center;
+}
+
+.calendario-celula {
+  min-height: 80px;
+  padding: 0.4rem;
+  background: var(--bg-dark);
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.calendario-celula.outro-mes {
+  opacity: 0.35;
+}
+
+.calendario-celula.hoje {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.calendario-celula.tem-agendamentos {
+  border-color: var(--accent);
+  background: rgba(29, 155, 240, 0.08);
+}
+
+.dia-numero {
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.celula-icones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.celula-icone-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  border-radius: 4px;
+  cursor: help;
+  color: var(--text-muted);
+  transition: color 0.15s, background 0.15s;
+}
+
+.celula-icone-wrapper:hover {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.platform-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.platform-icon-IG { color: #E4405F; }
+.platform-icon-IG svg { color: inherit; }
+.platform-icon-TT { color: #25F4EE; }
+.platform-icon-TT svg { color: inherit; }
+.platform-icon-YT,
+.platform-icon-YTB { color: #FF0000; }
+.platform-icon-YT svg,
+.platform-icon-YTB svg { color: inherit; }
+
+.celula-icone-wrapper:hover .platform-icon-IG { color: #E4405F; }
+.celula-icone-wrapper:hover .platform-icon-TT { color: #25F4EE; }
+.celula-icone-wrapper:hover .platform-icon-YT,
+.celula-icone-wrapper:hover .platform-icon-YTB { color: #FF0000; }
+
+/* Legado - lista por data (se ainda usado) */
+.calendario-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.calendario-day h3 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+  color: var(--accent);
+}
+
+.calendario-item {
+  display: grid;
+  grid-template-columns: 60px 1fr 180px 100px;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+
+.calendario-item .time {
+  font-weight: 600;
+}
+
+.calendario-item[data-status="DONE"] .status {
+  color: var(--success);
+}
+
+.hint {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}

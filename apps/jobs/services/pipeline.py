@@ -4,7 +4,7 @@ import shutil
 from django.conf import settings
 from django.utils import timezone
 
-from apps.jobs.models import Job, RenderOutput
+from apps.jobs.models import Job, JobCut, RenderOutput
 from .paths import get_job_paths
 from .ffmpeg import (
     cut_clip,
@@ -22,6 +22,7 @@ def _append_log(job: Job, msg: str) -> None:
 def _set_progress(job: Job, value: int) -> None:
     job.progress = max(0, min(100, value))
     job.save(update_fields=["progress"])
+
 
 def run_job(job_id: int) -> None:
     job = Job.objects.select_related(
@@ -49,12 +50,24 @@ def run_job(job_id: int) -> None:
         total_cuts = len(job_cuts)
         for idx, jc in enumerate(job_cuts):
             cut = jc.cut
-            source_file = Path(cut.source.file.path)
-            _append_log(job, f"[1/4] Cutting {idx+1}/{total_cuts}: {cut.start_tc} -> {cut.end_tc}")
-            _set_progress(job, 10 + int(25 * idx / max(1, total_cuts)))
-            cut_path = paths.workspace / f"cut_{cut.id}_{idx}.mp4"
-            cut_clip(source_file, cut.start_tc, cut.end_tc, cut_path, use_gpu=use_gpu)
-            cut_paths.append(cut_path)
+            if cut.file and Path(cut.file.path).exists():
+                cut_paths.append(Path(cut.file.path))
+                _append_log(job, f"[1/4] Using pre-extracted cut {idx+1}/{total_cuts}")
+            elif cut.source and cut.source.file:
+                source_file = Path(cut.source.file.path)
+                if not source_file.exists():
+                    raise FileNotFoundError(
+                        f"Arquivo de vídeo não encontrado: {source_file}\n"
+                        f"O vídeo '{cut.source.title or cut.source.file.name}' pode ter sido removido. "
+                        "Faça upload novamente ou crie um novo job com um vídeo válido."
+                    )
+                _append_log(job, f"[1/4] Cutting {idx+1}/{total_cuts}: {cut.start_tc} -> {cut.end_tc}")
+                _set_progress(job, 10 + int(25 * idx / max(1, total_cuts)))
+                cut_path = paths.workspace / f"cut_{cut.id}_{idx}.mp4"
+                cut_clip(source_file, cut.start_tc, cut.end_tc, cut_path, use_gpu=use_gpu)
+                cut_paths.append(cut_path)
+            else:
+                raise ValueError(f"Cut {cut.id} sem arquivo nem source")
         _set_progress(job, 35)
 
         main_paths = []
