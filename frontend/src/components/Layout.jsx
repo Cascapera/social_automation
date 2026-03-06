@@ -46,8 +46,14 @@ export default function Layout() {
           <NavLink to="/agendamento" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Agendamento
           </NavLink>
-          <NavLink to="/intro-outro" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            Intro / Outro
+          <NavLink to="/midias-marca" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Mídias da marca
+          </NavLink>
+          <NavLink to="/cortes-automaticos" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Cortes Automáticos
+          </NavLink>
+          <NavLink to="/contas" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Contas
           </NavLink>
         </nav>
         <div className="sidebar-footer">

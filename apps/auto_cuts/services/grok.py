@@ -1,0 +1,574 @@
+"""Cliente Grok API (xAI) para análise de cortes virais."""
+
+import json
+import logging
+import re
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
+
+Sua tarefa é identificar, ranquear e selecionar os melhores momentos para Shorts e para cortes longos.
+
+Priorize momentos com:
+- reação emocional forte
+- humor
+- revelação surpreendente
+- opinião controversa
+- história pessoal
+- conselho poderoso
+- fala chocante
+- discussão/conflito
+- trechos que geram comentário/compartilhamento
+
+Evite:
+- trechos técnicos demais
+- partes dependentes de contexto externo
+- explicações lentas
+- abertura, cumprimentos e enrolação
+
+REGRAS DE DURAÇÃO:
+- Shorts: 30–60 segundos
+- Longos: 8–15 minutos
+
+FORMATO DE SCORE:
+- virality_score em percentual de 0 a 100 (sem símbolo %, valor inteiro)
+
+REGRAS DE TÍTULO E THUMBNAIL:
+- suggested_title deve ser chamativo para clique e conter 1–3 emojis relevantes.
+- suggested_title deve ter entre 45 e 100 caracteres (evite títulos curtos/genéricos).
+- thumbnail_text deve ser curto (2–4 palavras), forte, direto, sem frase longa.
+- Use o texto curto em thumbnail_text, não em suggested_title.
+
+IMPORTANTE:
+- Use APENAS timestamps que aparecem na transcrição.
+- Não invente timestamps.
+- Não retorne texto fora do JSON."""
+
+SYSTEM_PROMPT_EDUCATIONAL = """Você é um editor especialista em conteúdo educacional e financeiro para Reels, TikTok, Shorts e YouTube. Analise transcrições com timestamps e identifique trechos com alto valor didático e explicativo. Priorize blocos completos que ensinam um conceito do início ao fim.
+
+CRITÉRIOS EDUCACIONAIS – SHORTS 2–3 MIN (120–180 seg):
+- PRIORIDADE: cortes de 2 a 3 minutos que explicam um tema completo
+- Explicação clara e didática: conceito → desenvolvimento → conclusão
+- Gancho inicial: pergunta ou promessa de aprendizado nos primeiros 5s
+- Sem cortes no meio de ideias: sempre concluir o raciocínio
+- Temas: finanças, carreira, tecnologia, produtividade, investimentos
+- Títulos informativos e profissionais (pode usar emojis moderados)
+- Evite polêmica gratuita; foque em valor educativo
+
+CRITÉRIOS EDUCACIONAIS – CORTES LONGOS (20–40 min):
+- Blocos narrativos completos com explicações aprofundadas
+- Múltiplos conceitos conectados com fluxo natural
+- Título que comunique o valor do conteúdo
+
+FORMATO DE SAÍDA – SOMENTE JSON VÁLIDO, SEM TEXTO EXTRA:
+
+Para shorts (2–3 min):
+- start, end: string MM:SS ou HH:MM:SS
+- duration: número (segundos) – ideal 120–180
+- hook: frase inicial que prende (primeiros 5s)
+- title: título informativo (máx 60 chars)
+- reason: por que é educativo
+- virality_score: 1–10 (10 = máximo valor didático)
+
+Para cortes longos:
+- start, end, duration_min, title_suggestion, reason
+
+IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime."""
+
+CHUNKS_PROMPT_TEMPLATE = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
+
+{chunks_block}
+
+---
+
+Tarefas (responda em UMA ÚNICA resposta JSON):
+
+REGRA CRÍTICA DE FORMATO:
+- A RAIZ da resposta DEVE ser um OBJETO JSON (dict), nunca uma lista.
+- Use exatamente as chaves de nível raiz: "candidate_shorts", "ranked_shorts", "final_long_cuts".
+- NUNCA retorne array na raiz.
+
+1. Gere entre 30 e 50 candidatos de shorts virais (30–60 segundos), todos com virality_score (0–100).
+2. Gere 10 candidatos de cortes longos (8–15 min), todos com virality_score (0–100).
+3. Não é obrigatório ordenar a saída. Apenas preencha corretamente as notas.
+4. O backend fará a seleção final dos melhores scores conforme a quantidade configurada no job.
+
+Para cada clipe (short ou longo), inclua:
+- clip_number
+- start_timestamp
+- end_timestamp
+- duration_seconds
+- virality_score (0..100)
+- theme_category (guardar metadado)
+- emotion_type (funny/shocking/inspiring/controversial/story)
+- main_topic
+- suggested_title
+- hook_sentence
+- thumbnail_moment_timestamp
+- thumbnail_text (2–4 palavras fortes)
+
+Regras adicionais:
+- suggested_title: 45–100 caracteres com 1–3 emojis.
+- thumbnail_text: 2–4 palavras (máx. 28 caracteres), caixa alta preferencial.
+
+Responda SOMENTE com JSON válido:
+{{
+  "candidate_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "MM:SS",
+      "end_timestamp": "MM:SS",
+      "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "comedy",
+      "emotion_type": "funny",
+      "main_topic": "história constrangedora no trabalho",
+      "hook_sentence": "frase mais impactante",
+      "suggested_title": "Título forte",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "PALAVRA FORTE"
+    }}
+  ],
+  "ranked_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "MM:SS",
+      "end_timestamp": "MM:SS",
+      "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "comedy",
+      "emotion_type": "funny",
+      "main_topic": "história constrangedora no trabalho",
+      "hook_sentence": "frase mais impactante",
+      "suggested_title": "Título forte",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "PALAVRA FORTE"
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "MM:SS",
+      "end_timestamp": "MM:SS",
+      "duration_seconds": 720,
+      "virality_score": 88,
+      "theme_category": "advice",
+      "emotion_type": "inspiring",
+      "main_topic": "estratégia de crescimento",
+      "hook_sentence": "frase mais impactante",
+      "suggested_title": "Título forte",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "GANHO RÁPIDO",
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 12,
+      "title_suggestion": "Título forte",
+      "reason": "por que viraliza"
+    }}
+  ]
+}}
+
+Regras finais:
+- candidate_shorts deve ter entre 30 e 50 itens.
+- final_long_cuts deve ter exatamente 10 itens.
+- ranked_shorts pode vir vazio ([])."""
+
+CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
+
+{chunks_block}
+
+---
+
+Tarefas (responda em UMA ÚNICA resposta JSON):
+
+1. RANKED_SHORTS: Identifique 10–15 trechos curtos EDUCACIONAIS (2–3 min cada, 120–180 seg). Priorize blocos que explicam um conceito completo. Ranqueie por valor didático. IMPORTANTE: Cada corte deve ter início, meio e fim. Nunca corte no meio de uma explicação.
+
+2. FINAL_LONG_CUTS: Monte 1–3 cortes longos (20–40 min) combinando blocos narrativos com fluxo natural. Sugira título informativo para cada um.
+
+Títulos devem ser informativos e profissionais. Evite sensacionalismo.
+Inclua obrigatoriamente para cada corte:
+- thumbnail_moment_timestamp (timestamp real dentro do próprio corte)
+- thumbnail_text (2–4 palavras curtas para a capa)
+
+Responda SOMENTE com JSON válido:
+{{
+  "ranked_shorts": [
+    {{
+      "rank": 1,
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration": 150,
+      "hook": "frase inicial",
+      "title": "Título informativo",
+      "reason": "valor didático",
+      "virality_score": 9,
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "IDEIA CENTRAL"
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 18,
+      "title_suggestion": "Título informativo",
+      "reason": "valor didático",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "RESUMO FORTE"
+    }}
+  ]
+}}
+
+Máximo: 10–15 cortes curtos (2–3 min), 3 cortes longos."""
+
+# English versions (transcription, subtitles, titles, LLM output all in English)
+SYSTEM_PROMPT_VIRAL_EN = """You are an expert social media editor specialized in identifying viral moments in long-form podcasts and interviews.
+
+Your goal is to identify, rank, and select the strongest clips for Shorts and longer cuts.
+
+Prioritize moments with:
+- strong emotional reactions
+- funny moments
+- surprising revelations
+- controversial opinions
+- personal stories
+- powerful advice
+- shocking statements
+- arguments/disagreements
+- moments that drive shares/comments
+
+Avoid moments that are:
+- too technical
+- context-dependent
+- slow explanations
+- introductions/greetings/filler
+
+DURATION RULES:
+- Shorts: 30–60 seconds
+- Long cuts: 8–15 minutes
+
+SCORING FORMAT:
+- virality_score must be an integer from 0 to 100 (no % symbol)
+
+TITLE + THUMBNAIL RULES:
+- suggested_title must be clickworthy and include 1–3 relevant emojis.
+- suggested_title must be 45–100 characters (avoid short/generic titles).
+- thumbnail_text must be short (2–4 words), punchy, and not a full sentence.
+- Keep short text in thumbnail_text, not in suggested_title.
+
+IMPORTANT:
+- Use ONLY timestamps present in the transcript.
+- Do not invent timestamps.
+- Return valid JSON only."""
+
+CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
+
+{chunks_block}
+
+---
+
+Tasks (respond in ONE JSON response):
+
+CRITICAL FORMAT RULE:
+- The response root MUST be a JSON OBJECT (dict), never a list.
+- Use exactly these top-level keys: "candidate_shorts", "ranked_shorts", "final_long_cuts".
+- NEVER return a root-level array.
+
+1) Generate 30–50 candidate viral short clips (30–60 seconds), all with virality_score (0–100).
+2) Generate 10 candidate long clips (8–15 minutes), all with virality_score (0–100).
+3) Ordering is optional. Focus on correct scoring and valid timestamps.
+4) Backend will pick final best scores using the job configured limits.
+
+For each clip (short or long), include:
+- clip_number
+- start_timestamp
+- end_timestamp
+- duration_seconds
+- virality_score (0..100)
+- theme_category (store as metadata)
+- emotion_type (funny / shocking / inspiring / controversial / story)
+- main_topic
+- suggested_title
+- hook_sentence
+- thumbnail_moment_timestamp
+- thumbnail_text (2–4 powerful words)
+
+Additional rules:
+- suggested_title: 45–100 characters with 1–3 emojis.
+- thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
+
+Respond ONLY with valid JSON:
+{{
+  "candidate_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:15:22",
+      "end_timestamp": "00:16:05",
+      "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "comedy",
+      "emotion_type": "funny",
+      "main_topic": "embarrassing story at work",
+      "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "thumbnail_moment_timestamp": "00:15:34",
+      "thumbnail_text": "FIRED LIVE"
+    }}
+  ],
+  "ranked_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:15:22",
+      "end_timestamp": "00:16:05",
+      "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "comedy",
+      "emotion_type": "funny",
+      "main_topic": "embarrassing story at work",
+      "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "thumbnail_moment_timestamp": "00:15:34",
+      "thumbnail_text": "FIRED LIVE"
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:42:10",
+      "end_timestamp": "00:53:40",
+      "duration_seconds": 690,
+      "virality_score": 88,
+      "theme_category": "story",
+      "emotion_type": "inspiring",
+      "main_topic": "career turning point",
+      "hook_sentence": "One decision changed everything in my career.",
+      "suggested_title": "The Decision That Changed His Career",
+      "thumbnail_moment_timestamp": "00:47:02",
+      "thumbnail_text": "ONE DECISION",
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 11.5,
+      "title_suggestion": "The Decision That Changed His Career",
+      "reason": "why it goes viral"
+    }}
+  ]
+}}
+
+Final constraints:
+- candidate_shorts must contain between 30 and 50 items.
+- final_long_cuts must contain exactly 10 items.
+- ranked_shorts may be empty ([])."""
+
+SYSTEM_PROMPT_EDUCATIONAL_EN = """You are an editor specializing in educational and financial content for Reels, TikTok, Shorts and YouTube. Analyze transcriptions with timestamps and identify clips with high didactic and explanatory value. Prioritize complete blocks that teach a concept from start to finish.
+
+EDUCATIONAL CRITERIA – SHORTS 2–3 MIN (120–180 sec):
+- PRIORITY: 2–3 minute cuts that explain a complete topic
+- Clear, didactic explanation: concept → development → conclusion
+- Initial hook: question or learning promise in first 5s
+- No cuts in the middle of ideas: always complete the reasoning
+- Topics: finance, career, technology, productivity, investments
+- Informative, professional titles (moderate emojis OK)
+- Avoid gratuitous controversy; focus on educational value
+
+EDUCATIONAL LONG CUTS (20–40 min):
+- Complete narrative blocks with in-depth explanations
+- Multiple concepts connected with natural flow
+- Title that communicates content value
+
+OUTPUT FORMAT – VALID JSON ONLY:
+
+For shorts (2–3 min):
+- start, end: string MM:SS or HH:MM:SS
+- duration: number (seconds) – ideal 120–180
+- hook: opening phrase that grabs (first 5s)
+- title: informative title (max 60 chars)
+- reason: why it's educational
+- virality_score: 1–10 (10 = max didactic value)
+
+For long cuts:
+- start, end, duration_min, title_suggestion, reason
+
+IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate."""
+
+CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
+
+{chunks_block}
+
+---
+
+Tasks (respond in ONE JSON response):
+
+1. RANKED_SHORTS: Identify 10–15 EDUCATIONAL short clips (2–3 min each, 120–180 sec). Prioritize blocks that explain a complete concept. Rank by didactic value. IMPORTANT: Each cut must have beginning, middle and end. Never cut in the middle of an explanation.
+
+2. FINAL_LONG_CUTS: Assemble 1–3 long cuts (20–40 min) combining narrative blocks with natural flow. Suggest informative title for each.
+
+Titles must be informative and professional. Avoid sensationalism.
+For every cut, include:
+- thumbnail_moment_timestamp (real timestamp inside the cut)
+- thumbnail_text (2–4 short words for cover text)
+
+Respond ONLY with valid JSON:
+{{
+  "ranked_shorts": [
+    {{
+      "rank": 1,
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration": 150,
+      "hook": "opening phrase",
+      "title": "Informative title",
+      "reason": "didactic value",
+      "virality_score": 9,
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "CORE IDEA"
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 18,
+      "title_suggestion": "Informative title",
+      "reason": "didactic value",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "KEY LESSON"
+    }}
+  ]
+}}
+
+Max: 10–15 short cuts (2–3 min), 3 long cuts."""
+
+
+def _build_chunks_block(chunks: list[dict], lang: str = "pt") -> str:
+    """Monta bloco com chunks separados para o prompt."""
+    label = "BLOCK" if lang == "en" else "BLOCO"
+    parts = []
+    for i, chunk in enumerate(chunks, 1):
+        text = chunk.get("text", "").strip()
+        if not text:
+            continue
+        parts.append(f"--- {label} {i} ---\n{text}\n")
+    return "\n".join(parts)
+
+
+def _extract_json(text: str) -> dict | list:
+    """Extrai JSON do texto (pode vir dentro de markdown code block)."""
+    text = text.strip()
+    # Tenta encontrar ```json ... ``` ou ``` ... ```
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if match:
+        text = match.group(1).strip()
+    # Tenta parsear diretamente
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Tenta encontrar primeiro { ou [
+    for start in ("{", "["):
+        idx = text.find(start)
+        if idx >= 0:
+            depth = 0
+            for i, c in enumerate(text[idx:], idx):
+                if c in "{[":
+                    depth += 1
+                elif c in "}]":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[idx : i + 1])
+                        except json.JSONDecodeError:
+                            break
+    raise ValueError("Não foi possível extrair JSON da resposta")
+
+
+def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
+    """Chama Grok API e retorna o conteúdo da resposta."""
+    import os
+    from openai import OpenAI
+
+    key = api_key or os.getenv("XAI_API_KEY")
+    if not key:
+        raise ValueError("XAI_API_KEY não configurada")
+
+    client = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    model_name = os.getenv("GROK_MODEL", "grok-4-1-fast-reasoning")
+
+    # Força JSON object na resposta quando suportado pela API.
+    try:
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
+    except Exception as e:
+        logger.warning(
+            "[FLUXO/Grok] response_format=json_object não suportado (%s). Tentando sem response_format.",
+            e,
+        )
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+        )
+    return resp.choices[0].message.content or ""
+
+
+def _build_context_block(assunto: str = "", convidados: str = "", lang: str = "pt") -> str:
+    """Monta bloco de contexto para o prompt (assunto + convidados)."""
+    if not assunto and not convidados:
+        return ""
+    parts = []
+    if assunto:
+        parts.append(f"Topic: {assunto.strip()}" if lang == "en" else f"Assunto do vídeo: {assunto.strip()}")
+    if convidados:
+        names = [n.strip() for n in convidados.split(",") if n.strip()]
+        if names:
+            parts.append(f"Guest(s): {', '.join(names)}" if lang == "en" else f"Convidado(s): {', '.join(names)}")
+    if not parts:
+        return ""
+    header = "VIDEO CONTEXT (use to prioritize moments relevant to topic and participants):\n" if lang == "en" else "CONTEXTO DO VÍDEO (use para priorizar momentos relevantes ao tema e aos participantes):\n"
+    return header + "\n".join(parts) + "\n\n"
+
+
+def analyze_chunks_in_one_request(
+    chunks: list[dict],
+    assunto: str = "",
+    convidados: str = "",
+    prompt_version: str = "viral",
+    api_key: str | None = None,
+) -> dict:
+    """
+    Analisa todos os chunks em uma única requisição.
+    chunks: [{text, start_sec, end_sec, segments}, ...]
+    prompt_version: viral, educational, viral_en, educational_en
+    Retorna JSON com ranked_shorts e final_long_cuts (economia de tokens).
+    """
+    if not chunks:
+        raise ValueError("Nenhum chunk para analisar")
+    pv = (prompt_version or "viral").strip().lower()
+    is_en = pv in ("viral_en", "educational_en")
+    is_educational = pv in ("educational", "educational_en")
+    lang = "en" if is_en else "pt"
+    if is_en:
+        system_prompt = SYSTEM_PROMPT_EDUCATIONAL_EN if is_educational else SYSTEM_PROMPT_VIRAL_EN
+        template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN if is_educational else CHUNKS_PROMPT_TEMPLATE_VIRAL_EN
+    else:
+        system_prompt = SYSTEM_PROMPT_EDUCATIONAL if is_educational else SYSTEM_PROMPT
+        template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL if is_educational else CHUNKS_PROMPT_TEMPLATE
+    logger.info("[FLUXO/Grok] Montando prompt (%s, %s) com %d chunks (~%d chars)...",
+        "educational" if is_educational else "viral", lang,
+        len(chunks), sum(len(c.get("text", "")) for c in chunks))
+    context_block = _build_context_block(assunto, convidados, lang=lang)
+    chunks_block = _build_chunks_block(chunks, lang=lang)
+    user = template.format(
+        context_block=context_block, chunks_block=chunks_block
+    )
+    logger.info("[FLUXO/Grok] Enviando requisição para Grok API...")
+    content = call_grok_chat(system_prompt, user, api_key)
+    logger.info("[FLUXO/Grok] Resposta recebida (%d chars). Extraindo JSON...", len(content or ""))
+    return _extract_json(content)

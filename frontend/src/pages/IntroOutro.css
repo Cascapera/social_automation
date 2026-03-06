@@ -17,12 +17,19 @@
 }
 
 .intro-outro select,
-.intro-outro input[type="text"] {
+.intro-outro input[type="text"],
+.intro-outro textarea {
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-dark);
   color: var(--text);
+}
+
+.intro-outro textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
 }
 
 .add-form {

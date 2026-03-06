@@ -1,0 +1,16 @@
+.env
+.venv
+venv
+__pycache__
+*.pyc
+.git
+.gitignore
+db.sqlite3
+storage
+*.log
+node_modules
+frontend
+.dockerignore
+Dockerfile
+docker-compose*.yml
+*.md

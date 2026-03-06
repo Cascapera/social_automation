@@ -1,12 +1,21 @@
 import { useState, useEffect } from 'react'
 import { useBrand } from '../context/BrandContext'
-import { getBrands, getBrandAssets, createBrandAsset, deleteBrandAsset, createBrand } from '../api'
+import {
+  getBrands,
+  getBrandAssets,
+  createBrandAsset,
+  deleteBrandAsset,
+  createBrand,
+  updateBrandYoutubeDescription,
+} from '../api'
 import './IntroOutro.css'
 
 const ASSET_TYPES = [
+  { id: 'LOGO', label: 'Logo' },
   { id: 'INTRO', label: 'Intro' },
   { id: 'OUTRO', label: 'Outro' },
   { id: 'CTA', label: 'CTA' },
+  { id: 'ANIMATION', label: 'Animação overlay (PNG/GIF)' },
 ]
 
 export default function IntroOutro() {
@@ -23,6 +32,9 @@ export default function IntroOutro() {
   const [newBrandName, setNewBrandName] = useState('')
   const [creatingBrand, setCreatingBrand] = useState(false)
   const [showNewBrand, setShowNewBrand] = useState(false)
+  const [youtubeDescriptionExtra, setYoutubeDescriptionExtra] = useState('')
+  const [youtubeMadeForKids, setYoutubeMadeForKids] = useState(false)
+  const [savingYoutubeDescription, setSavingYoutubeDescription] = useState(false)
 
   useEffect(() => {
     refreshBrands(getBrands)
@@ -40,6 +52,12 @@ export default function IntroOutro() {
       setLoading(false)
     }
   }, [brandId])
+
+  useEffect(() => {
+    const selected = brands.find((b) => String(b.id) === String(brandId))
+    setYoutubeDescriptionExtra(selected?.youtube_description_extra || '')
+    setYoutubeMadeForKids(!!selected?.youtube_made_for_kids)
+  }, [brandId, brands])
 
   async function handleAdd(e) {
     e.preventDefault()
@@ -92,12 +110,30 @@ export default function IntroOutro() {
     }
   }
 
+  async function handleSaveYoutubeDescription(e) {
+    e.preventDefault()
+    if (!brandId) return
+    setSavingYoutubeDescription(true)
+    setError('')
+    try {
+      await updateBrandYoutubeDescription(brandId, youtubeDescriptionExtra, youtubeMadeForKids)
+      await refreshBrands(getBrands)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingYoutubeDescription(false)
+    }
+  }
+
   const typeLabel = (id) => ASSET_TYPES.find((t) => t.id === id)?.label || id
 
   return (
     <div className="intro-outro">
-      <h1>Intro / Outro / CTA</h1>
-      <p className="page-desc">Adicione vídeos de intro, outro e CTA para usar nos seus jobs.</p>
+      <h1>Mídias da marca</h1>
+      <p className="page-desc">
+        Adicione logo, vídeos de intro, outro e CTA. O logo é usado automaticamente nos cortes automáticos
+        quando a opção &quot;Enquadrar e centralizar&quot; for selecionada (se não houver logo, apenas o fundo colorido).
+      </p>
 
       {!brandId ? (
         <p className="form-hint">
@@ -122,7 +158,38 @@ export default function IntroOutro() {
       {brandId && (
         <>
           <div className="add-form">
-            <h2>Adicionar vídeo</h2>
+            <h2>Descrição YouTube da marca</h2>
+            <p className="form-hint">
+              Este texto é anexado automaticamente no final da descrição dos cortes automáticos no YouTube.
+            </p>
+            <form onSubmit={handleSaveYoutubeDescription}>
+              <div className="form-group">
+                <label>Conteúdo para crianças (selfDeclaredMadeForKids)</label>
+                <select
+                  value={youtubeMadeForKids ? 'yes' : 'no'}
+                  onChange={(e) => setYoutubeMadeForKids(e.target.value === 'yes')}
+                >
+                  <option value="no">Não</option>
+                  <option value="yes">Sim</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Texto adicional padrão (editável por marca)</label>
+                <textarea
+                  rows={6}
+                  value={youtubeDescriptionExtra}
+                  onChange={(e) => setYoutubeDescriptionExtra(e.target.value)}
+                  placeholder="Ex: Siga nossas redes, links, CTA da marca..."
+                />
+              </div>
+              <button type="submit" disabled={savingYoutubeDescription}>
+                {savingYoutubeDescription ? 'Salvando...' : 'Salvar texto da descrição'}
+              </button>
+            </form>
+          </div>
+
+          <div className="add-form">
+            <h2>Adicionar mídia</h2>
             <form onSubmit={handleAdd}>
               <div className="form-row">
                 <div className="form-group">
@@ -144,10 +211,10 @@ export default function IntroOutro() {
                 </div>
               </div>
               <div className="form-group">
-                <label>Arquivo (vídeo ou imagem)</label>
+                <label>Arquivo {assetType === 'LOGO' ? '(imagem PNG/JPG)' : '(vídeo ou imagem)'}</label>
                 <input
                   type="file"
-                  accept="video/*,image/*"
+                  accept={assetType === 'LOGO' ? 'image/*' : 'video/*,image/*'}
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                   required
                 />
@@ -159,11 +226,11 @@ export default function IntroOutro() {
           </div>
 
           <div className="assets-list">
-            <h2>Vídeos cadastrados</h2>
+            <h2>Mídias cadastradas</h2>
             {loading ? (
               <p>Carregando...</p>
             ) : assets.length === 0 ? (
-              <p className="empty-msg">Nenhum vídeo cadastrado para esta marca.</p>
+              <p className="empty-msg">Nenhuma mídia cadastrada para esta marca.</p>
             ) : (
               <div className="assets-grid">
                 {assets.map((asset) => (

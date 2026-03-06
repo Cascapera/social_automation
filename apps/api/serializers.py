@@ -1,17 +1,18 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from apps.brands.models import Brand, BrandAsset
+from apps.brands.models import Brand, BrandAsset, BrandSocialAccount
 
 User = get_user_model()
 from apps.mediahub.models import SourceVideo
 from apps.cuts.models import Cut
 from apps.jobs.models import Job, JobCut, RenderOutput, ScheduledPost
+from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte
 
 
 class BrandSerializer(serializers.ModelSerializer):
     class Meta:
         model = Brand
-        fields = ["id", "name", "slug"]
+        fields = ["id", "name", "slug", "youtube_made_for_kids", "youtube_description_extra"]
         extra_kwargs = {"slug": {"required": False}}
 
     def create(self, validated_data):
@@ -25,6 +26,15 @@ class BrandAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = BrandAsset
         fields = ["id", "brand", "asset_type", "label", "file"]
+
+
+class BrandSocialAccountSerializer(serializers.ModelSerializer):
+    """Conta social conectada (sem tokens sensíveis)."""
+
+    class Meta:
+        model = BrandSocialAccount
+        fields = ["id", "brand", "platform", "channel_id", "account_name", "created_at"]
+        read_only_fields = ["id", "brand", "platform", "channel_id", "account_name", "created_at"]
 
 
 class SourceVideoSerializer(serializers.ModelSerializer):
@@ -201,7 +211,7 @@ class UserRegisterSerializer(serializers.ModelSerializer):
 
 
 class ScheduledPostSerializer(serializers.ModelSerializer):
-    job = serializers.PrimaryKeyRelatedField(queryset=Job.objects.all())
+    job = serializers.PrimaryKeyRelatedField(queryset=Job.objects.all(), required=False, allow_null=True)
     job_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -210,8 +220,14 @@ class ScheduledPostSerializer(serializers.ModelSerializer):
             "id",
             "job",
             "job_name",
+            "auto_cut_corte",
             "platforms",
+            "social_account",
             "scheduled_at",
+            "title",
+            "description",
+            "tags",
+            "privacy_status",
             "status",
             "error",
             "created_at",
@@ -220,4 +236,115 @@ class ScheduledPostSerializer(serializers.ModelSerializer):
         read_only_fields = ["status", "error", "created_at", "posted_at"]
 
     def get_job_name(self, obj):
-        return obj.job.name or f"Job #{obj.job.id}"
+        if obj.job_id:
+            return obj.job.name or f"Job #{obj.job.id}"
+        if obj.auto_cut_corte_id:
+            suggestion = getattr(obj.auto_cut_corte, "suggestion", None)
+            if suggestion and suggestion.title:
+                return suggestion.title
+            return f"Corte #{obj.auto_cut_corte_id}"
+        return "-"
+
+
+class AutoCutSuggestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AutoCutSuggestion
+        fields = [
+            "id",
+            "cut_type",
+            "start_tc",
+            "end_tc",
+            "title",
+            "reason",
+            "hook",
+            "virality_score",
+            "rank",
+            "duration_seconds",
+            "duration_minutes",
+        ]
+
+
+class AutoCutCorteSerializer(serializers.ModelSerializer):
+    suggestion = AutoCutSuggestionSerializer(read_only=True)
+    file_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+    thumbnail = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    analysis_id = serializers.IntegerField(read_only=True)
+    analysis_name = serializers.CharField(source="analysis.name", read_only=True)
+
+    class Meta:
+        model = AutoCutCorte
+        fields = [
+            "id",
+            "analysis_id",
+            "analysis_name",
+            "suggestion",
+            "file_url",
+            "thumbnail",
+            "thumbnail_url",
+            "format",
+            "needs_subtitle",
+            "user_wants_finalize",
+            "is_finalized",
+            "subtitle_segments",
+            "created_at",
+        ]
+
+    def get_file_url(self, obj):
+        if obj.file:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
+
+    def get_thumbnail_url(self, obj):
+        if obj.thumbnail:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.thumbnail.url)
+            return obj.thumbnail.url
+        return None
+
+    def validate_thumbnail(self, value):
+        if not value:
+            return value
+        max_size = 2 * 1024 * 1024  # 2MB (limite do YouTube)
+        if getattr(value, "size", 0) > max_size:
+            raise serializers.ValidationError("Thumbnail deve ter no máximo 2MB.")
+        content_type = (getattr(value, "content_type", "") or "").lower()
+        allowed = {"image/jpeg", "image/jpg", "image/png", "image/gif"}
+        if content_type and content_type not in allowed:
+            raise serializers.ValidationError("Formato inválido. Use JPG, PNG ou GIF.")
+        return value
+
+
+class AutoCutAnalysisSerializer(serializers.ModelSerializer):
+    suggestions = AutoCutSuggestionSerializer(many=True, read_only=True)
+    cortes = AutoCutCorteSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = AutoCutAnalysis
+        fields = [
+            "id",
+            "name",
+            "assunto",
+            "convidados",
+            "prompt_version",
+            "thumbnail_font",
+            "thumbnail_band_color",
+            "thumbnail_text_color",
+            "thumbnail_stroke_color",
+            "shorts_target",
+            "longs_target",
+            "youtube_url",
+            "status",
+            "progress",
+            "progress_message",
+            "transcript",
+            "error",
+            "created_at",
+            "suggestions",
+            "cortes",
+        ]
+        read_only_fields = ["status", "progress", "progress_message", "transcript", "error", "created_at"]

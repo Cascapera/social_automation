@@ -1,11 +1,19 @@
 """Geração e queima de legendas com Whisper e FFmpeg."""
 
-from pathlib import Path
+import logging
+import os
 import tempfile
+import traceback
+from pathlib import Path
 
 from django.conf import settings
 
+logger = logging.getLogger(__name__)
+
 from apps.jobs.services.ffmpeg import run_cmd
+
+# Fonte com suporte a emojis (Windows). Linux: Noto Color Emoji. macOS: Apple Color Emoji
+DEFAULT_FONT_EMOJI = "Segoe UI Emoji"
 
 
 def align_edited_to_original_words(edited_text: str, original_words: list[dict]) -> list[dict] | None:
@@ -60,37 +68,138 @@ def align_edited_to_original_words(edited_text: str, original_words: list[dict])
     return result
 
 
-def generate_subtitles(video_path: Path, language: str = "pt") -> list[dict]:
+def _transcribe_with_model(model, path: str, lang: str) -> list[dict]:
+    """Transcreve arquivo com modelo Whisper já carregado."""
+    segments, _ = model.transcribe(
+        path, language=lang, word_timestamps=True, without_timestamps=False
+    )
+    result = []
+    for s in segments:
+        seg = {"start": s.start, "end": s.end, "text": s.text.strip()}
+        if s.words:
+            seg["words"] = [
+                {"start": w.start, "end": w.end, "word": w.word}
+                for w in s.words
+            ]
+        result.append(seg)
+    return result
+
+
+def load_whisper_model(
+    model_size: str | None = None,
+    device: str | None = None,
+):
+    """
+    Carrega modelo Whisper uma vez. Reutilize para múltiplos arquivos (evita travamento na GPU).
+    Retorna (model, model_size). model_size: None = WHISPER_MODEL do .env.
+    """
+    if model_size is None:
+        model_size = os.getenv("WHISPER_MODEL", "large-v3").strip() or "large-v3"
+    logger.info("Whisper: importando faster_whisper...")
+    from faster_whisper import WhisperModel
+
+    env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    force_cpu = device == "cpu" or env_device == "cpu"
+    debug_gpu = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
+    target_device = "cpu" if force_cpu else "cuda"
+
+    def _load(dev: str, compute: str):
+        return WhisperModel(model_size, device=dev, compute_type=compute)
+
+    logger.info(
+        "Whisper: device=%s (param=%s, env=%r), modelo=%s",
+        target_device, device, env_device or "(auto)", model_size,
+    )
+    try:
+        if force_cpu:
+            logger.info("Whisper: carregando modelo %s em CPU...", model_size)
+            return _load("cpu", "int8"), model_size
+        logger.info("Whisper: carregando modelo %s em CUDA (float16)...", model_size)
+        return _load("cuda", "float16"), model_size
+    except (RuntimeError, OSError) as e:
+        err_str = str(e).lower()
+        is_cuda_error = any(
+            x in err_str for x in
+            ("cublas", "cuda", "dll", "cudnn", "out of memory", "cuda error")
+        )
+        logger.exception("Whisper: ERRO ao carregar em %s - %s: %s", target_device, type(e).__name__, e)
+        logger.info("Whisper: traceback:\n%s", traceback.format_exc())
+        if debug_gpu:
+            raise
+        if is_cuda_error and not force_cpu:
+            logger.warning("Whisper: fallback para CPU (int8)")
+            return _load("cpu", "int8"), model_size
+        raise
+
+
+def generate_subtitles(
+    video_path: Path,
+    language: str = "pt",
+    *,
+    model_size: str | None = None,
+    device: str | None = None,
+    model=None,
+) -> list[dict]:
     """
     Transcreve o vídeo com faster-whisper e retorna segmentos.
     Retorna: [{ "start": float, "end": float, "text": str, "words"?: [{ "start", "end", "word" }] }, ...]
-    Usa word_timestamps para permitir legendas animadas (palavra por palavra).
-    """
-    from faster_whisper import WhisperModel
 
-    def _transcribe(model, path: str, lang: str) -> list[dict]:
-        segments, _ = model.transcribe(
-            path, language=lang, word_timestamps=True, without_timestamps=False
-        )
-        result = []
-        for s in segments:
-            seg = {"start": s.start, "end": s.end, "text": s.text.strip()}
-            if s.words:
-                seg["words"] = [
-                    {"start": w.start, "end": w.end, "word": w.word}
-                    for w in s.words
-                ]
-            result.append(seg)
+    model: se fornecido, reutiliza (evita recarregar entre chunks na GPU).
+    model_size/device: ignorados se model for fornecido.
+    """
+    if model is not None:
+        logger.info("Whisper: reutilizando modelo. Transcrevendo %s...", video_path)
+        result = _transcribe_with_model(model, str(video_path), language)
+        logger.info("Whisper: transcrição concluída (%d segmentos)", len(result))
         return result
 
+    if model_size is None:
+        model_size = os.getenv("WHISPER_MODEL", "large-v3").strip() or "large-v3"
+    logger.info("Whisper: importando faster_whisper...")
+    from faster_whisper import WhisperModel
+
+    env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    force_cpu = device == "cpu" or env_device == "cpu"
+    debug_gpu = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
+    target_device = "cpu" if force_cpu else "cuda"
+
+    def _load(dev: str, compute: str):
+        return WhisperModel(model_size, device=dev, compute_type=compute)
+
+    logger.info(
+        "Whisper: device=%s (param=%s, env=%r), modelo=%s",
+        target_device, device, env_device or "(auto)", model_size,
+    )
     try:
-        model = WhisperModel("large-v3", device="cuda", compute_type="float16")
-        return _transcribe(model, str(video_path), language)
-    except RuntimeError as e:
-        err = str(e).lower()
-        if any(x in err for x in ("cublas", "cuda", "dll", "cudnn")):
-            model = WhisperModel("large-v3", device="cpu", compute_type="int8")
-            return _transcribe(model, str(video_path), language)
+        if force_cpu:
+            logger.info("Whisper: carregando modelo %s em CPU...", model_size)
+            model = _load("cpu", "int8")
+        else:
+            logger.info("Whisper: carregando modelo %s em CUDA (float16)...", model_size)
+            model = _load("cuda", "float16")
+        logger.info("Whisper: modelo carregado. Iniciando transcrição de %s...", video_path)
+        result = _transcribe_with_model(model, str(video_path), language)
+        logger.info("Whisper: transcrição concluída (%d segmentos)", len(result))
+        return result
+    except (RuntimeError, OSError) as e:
+        err_str = str(e).lower()
+        is_cuda_error = any(
+            x in err_str for x in
+            ("cublas", "cuda", "dll", "cudnn", "out of memory", "cuda error")
+        )
+        logger.exception(
+            "Whisper: ERRO ao usar %s - %s: %s",
+            target_device, type(e).__name__, e,
+        )
+        logger.info("Whisper: traceback completo:\n%s", traceback.format_exc())
+        if debug_gpu:
+            raise
+        if is_cuda_error and not force_cpu:
+            logger.warning("Whisper: fallback para CPU (int8)")
+            model = _load("cpu", "int8")
+            result = _transcribe_with_model(model, str(video_path), language)
+            logger.info("Whisper: transcrição em CPU concluída (%d segmentos)", len(result))
+            return result
         raise
 
 
@@ -132,8 +241,8 @@ def segments_to_ass_animated(segments: list[dict]) -> str:
         "[Script Info]\n"
         "ScriptType: v4.00+\n\n"
         "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, Shadow, Alignment, MarginV\n"
-        "Style: Default,Arial,24,&H00FFFFFF,&H00000000,1,2,1,2,20\n\n"
+        f"Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, Shadow, Alignment, MarginV\n"
+        f"Style: Default,{DEFAULT_FONT_EMOJI},24,&H00FFFFFF,&H00000000,1,2,1,2,20\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -183,7 +292,7 @@ def build_ffmpeg_force_style(style: dict | None) -> str:
     """Constrói string force_style para FFmpeg."""
     if not style:
         style = {}
-    font = style.get("font", "Arial")
+    font = style.get("font", DEFAULT_FONT_EMOJI)
     size = style.get("size", 24)
     color = _hex_to_ass_color(style.get("color", "#FFFFFF"))
     outline_color = _hex_to_ass_color(style.get("outline_color", "#000000"))

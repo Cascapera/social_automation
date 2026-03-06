@@ -1,7 +1,8 @@
 from django.db import models
 from django.conf import settings
 from apps.cuts.models import Cut
-from apps.brands.models import Brand, BrandAsset
+from apps.brands.models import Brand, BrandAsset, BrandSocialAccount
+from apps.auto_cuts.models import AutoCutCorte
 
 
 class JobCut(models.Model):
@@ -147,16 +148,63 @@ class ScheduledPost(models.Model):
         ("FAILED", "Falhou"),
     ]
 
-    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="scheduled_posts")
+    job = models.ForeignKey(
+        Job,
+        on_delete=models.CASCADE,
+        related_name="scheduled_posts",
+        null=True,
+        blank=True,
+    )
+    auto_cut_corte = models.ForeignKey(
+        AutoCutCorte,
+        on_delete=models.CASCADE,
+        related_name="scheduled_posts",
+        null=True,
+        blank=True,
+        help_text="Corte finalizado do Auto Cuts (opcional).",
+    )
     platforms = models.JSONField(
         default=list,
         help_text="Lista de códigos: IG, TT, YT, YTB",
     )
+    social_account = models.ForeignKey(
+        BrandSocialAccount,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scheduled_posts",
+        help_text="Conta a usar (opcional; se vazio, usa primeira conta da marca para a plataforma)",
+    )
     scheduled_at = models.DateTimeField(help_text="Data/hora para publicar")
+    title = models.CharField(max_length=200, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    tags = models.JSONField(default=list, help_text="Lista de tags/keywords")
+    privacy_status = models.CharField(
+        max_length=12,
+        choices=[("public", "Público"), ("private", "Privado"), ("unlisted", "Não listado")],
+        default="private",
+    )
+    upload_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="SHA-256 do arquivo enviado para deduplicação por canal/plataforma.",
+    )
+    external_ids = models.JSONField(
+        default=dict,
+        help_text="IDs externos por plataforma (ex.: {'YT': 'abc123'}).",
+    )
+    retry_count = models.PositiveSmallIntegerField(default=0)
     status = models.CharField(max_length=10, choices=STATUS, default="PENDING")
     error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     posted_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self) -> str:
-        return f"Job {self.job_id} → {self.scheduled_at} ({self.status})"
+        if self.job_id:
+            label = f"Job {self.job_id}"
+        elif self.auto_cut_corte_id:
+            label = f"AutoCutCorte {self.auto_cut_corte_id}"
+        else:
+            label = "Sem origem"
+        return f"{label} → {self.scheduled_at} ({self.status})"

@@ -1,0 +1,154 @@
+.contas {
+  padding: 1.5rem;
+  background: var(--bg-dark);
+  min-height: 100%;
+}
+
+.contas h1 {
+  margin-bottom: 0.5rem;
+}
+
+.page-desc {
+  color: var(--text-muted, #666);
+  margin-bottom: 1.5rem;
+}
+
+.section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.section-desc {
+  color: var(--text-muted, #666);
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.btn-connect {
+  background: #ff0000;
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-connect:hover:not(:disabled) {
+  background: #cc0000;
+}
+
+.btn-connect:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.accounts-list {
+  margin-top: 1.5rem;
+}
+
+.accounts-list h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
+}
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.account-name {
+  font-weight: 500;
+}
+
+.account-platform {
+  color: var(--text-muted, #666);
+  font-size: 0.9rem;
+}
+
+.btn-disconnect {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border, #ccc);
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.btn-disconnect:hover {
+  background: #fee;
+  border-color: #c00;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--bg-card);
+  padding: 1.5rem;
+  border-radius: 8px;
+  max-width: 400px;
+}
+
+.modal h3 {
+  margin: 0 0 0.5rem;
+}
+
+.modal-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted, #666);
+  margin: 0.5rem 0 1rem;
+}
+
+.channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.channel-btn {
+  padding: 0.75rem;
+  text-align: left;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.channel-btn:hover:not(:disabled) {
+  background: rgba(29, 155, 240, 0.15);
+  border-color: var(--accent);
+}
+
+.modal-close {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+}

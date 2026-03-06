@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     "apps.cuts",
     "apps.jobs",
     "apps.api",
+    "apps.auto_cuts",
+    "apps.social",
 ]
 
 MIDDLEWARE = [
@@ -146,12 +148,23 @@ MEDIA_URL = "/media/"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+# Cache (OAuth pendente, etc.)
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "OPTIONS": {"MAX_ENTRIES": 100},
+    }
+}
+# Se tiver Redis: pip install django-redis e use "django_redis.cache.RedisCache"
+
 # Celery
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "django-db")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+# CELERY_EAGER=1: executa tasks no mesmo processo (sem Redis). Útil para dev sem Docker.
+CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "").lower() in ("1", "true", "yes")
 
 
 # FFmpeg

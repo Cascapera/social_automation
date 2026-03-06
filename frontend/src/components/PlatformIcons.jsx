@@ -27,12 +27,15 @@ export function IconYouTube({ className = '' }) {
   )
 }
 
-/** YouTube Shorts - retângulo vertical com play (formato 9:16) */
+/** YouTube Shorts - estilo logo Shorts (vermelho + play branco) */
 export function IconYouTubeShorts({ className = '' }) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M7 4h10c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H7c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-      <path d="M10.5 9v6l5-3-5-3z"/>
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <g fill="#ff0000">
+        <rect x="4.2" y="3.1" width="12.2" height="7.6" rx="3.8" transform="rotate(-28 10.3 6.9)" />
+        <rect x="7.7" y="13.2" width="12.2" height="7.6" rx="3.8" transform="rotate(-28 13.8 17)" />
+      </g>
+      <path d="M10 8.9l5.4 3.1-5.4 3.1z" fill="#ffffff" />
     </svg>
   )
 }

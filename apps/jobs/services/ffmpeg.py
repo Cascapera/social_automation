@@ -50,6 +50,83 @@ def audio_encode_args(input_file: Path) -> list[str]:
 def common_mp4_flags() -> list[str]:
     return ["-movflags", "+faststart"]
 
+
+def overlay_logo(
+    input_path: Path,
+    output_path: Path,
+    logo_path: Path,
+    x: int,
+    y: int,
+    logo_height: int = 80,
+    use_gpu: bool = False,
+) -> None:
+    """Sobrepoe logo no vídeo em posição x,y (px do topo-esquerda)."""
+    cmd = [
+        settings.FFMPEG_BIN, "-y",
+        "-i", str(input_path),
+        "-i", str(logo_path),
+        "-filter_complex",
+        f"[1:v]scale=-1:{logo_height},format=rgba[logo];"
+        f"[0:v][logo]overlay={x}:{y}:format=auto",
+        *video_encode_args(use_gpu),
+        *audio_encode_args(input_path),
+        *common_mp4_flags(),
+        str(output_path),
+    ]
+    res = run_cmd(cmd)
+    if not res.ok:
+        raise RuntimeError(f"overlay logo failed: {res.stderr}")
+
+
+def overlay_animation(
+    input_path: Path,
+    output_path: Path,
+    animation_path: Path,
+    position: str = "bottom_right",
+    margin: int = 24,
+    height: int = 120,
+    use_gpu: bool = False,
+) -> None:
+    """
+    Sobrepõe animação (PNG/GIF com fundo transparente) em um canto do vídeo.
+    position: top_left, top_right, bottom_left, bottom_right
+    margin: margem em px
+    height: altura da animação (largura proporcional)
+    """
+    # Loop infinito para GIF/vídeo curto (animação se repete durante o vídeo)
+    ext = str(animation_path).lower().split(".")[-1] if "." in str(animation_path) else ""
+    needs_loop = ext in ("gif", "webm", "mov", "mp4")
+    anim_input = ["-stream_loop", "-1", "-i", str(animation_path)] if needs_loop else ["-i", str(animation_path)]
+
+    # Posição: FFmpeg overlay usa expressões
+    # top_left: margin:margin
+    # top_right: W-w-margin:margin
+    # bottom_left: margin:H-h-margin
+    # bottom_right: W-w-margin:H-h-margin
+    pos_map = {
+        "top_left": f"{margin}:{margin}",
+        "top_right": f"W-w-{margin}:{margin}",
+        "bottom_left": f"{margin}:H-h-{margin}",
+        "bottom_right": f"W-w-{margin}:H-h-{margin}",
+    }
+    overlay_pos = pos_map.get(position, pos_map["bottom_right"])
+
+    cmd = [
+        settings.FFMPEG_BIN, "-y",
+        "-i", str(input_path),
+        *anim_input,
+        "-filter_complex",
+        f"[1:v]scale=-1:{height},format=rgba[anim];"
+        f"[0:v][anim]overlay={overlay_pos}:format=auto",
+        *video_encode_args(use_gpu),
+        *audio_encode_args(input_path),
+        *common_mp4_flags(),
+        str(output_path),
+    ]
+    res = run_cmd(cmd)
+    if not res.ok:
+        raise RuntimeError(f"overlay animation failed: {res.stderr}")
+
 def cut_clip(input_file: Path, start_tc: str, end_tc: str, output_file: Path, use_gpu: bool) -> None:
     cmd = [
         settings.FFMPEG_BIN, "-y",
@@ -245,11 +322,14 @@ def ffprobe_duration(input_file: Path) -> float:
 
 
 def ffprobe_video_info(input_file: Path) -> dict:
-    """Retorna duração (segundos), width, height. Usado para analisar uploads."""
+    """Retorna duração (segundos), width, height (dimensões de exibição).
+    Considera rotação via tags.rotate (ffprobe <5) ou side_data.rotation (ffprobe 5+)."""
     cmd = [
         settings.FFPROBE_BIN, "-v", "error",
         "-select_streams", "v:0",
         "-show_entries", "stream=width,height",
+        "-show_entries", "stream_tags=rotate",
+        "-show_entries", "stream_side_data=rotation",
         "-show_entries", "format=duration",
         "-of", "json",
         str(input_file),
@@ -264,6 +344,32 @@ def ffprobe_video_info(input_file: Path) -> dict:
     fmt = data.get("format", {})
     width = int(stream.get("width", 0))
     height = int(stream.get("height", 0))
+
+    # Vídeos com rotation 90/270: exibição é height x width
+    # stream_tags.rotate (ffprobe <5) ou stream_side_data (ffprobe 5+)
+    rotated = False
+    tags = stream.get("tags") or {}
+    rotate = str(tags.get("rotate", "")).strip()
+    if rotate in ("90", "270"):
+        rotated = True
+    else:
+        side_data = stream.get("side_data") or stream.get("side_data_list") or []
+        if isinstance(side_data, list):
+            for sd in side_data:
+                if not isinstance(sd, dict):
+                    continue
+                rot = sd.get("rotation")
+                if rot is not None:
+                    try:
+                        if abs(int(rot)) in (90, 270):
+                            rotated = True
+                            break
+                    except (ValueError, TypeError):
+                        pass
+
+    if rotated:
+        width, height = height, width
+
     dur_val = fmt.get("duration", 0)
     duration = float(dur_val) if dur_val else 0.0
     return {"duration": duration, "width": width, "height": height}

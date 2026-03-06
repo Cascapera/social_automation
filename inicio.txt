@@ -1,0 +1,7 @@
+python manage.py runserver
+python -m celery -A config worker -l INFO -P solo
+python -m celery -A config beat -l INFO
+
+cd front end
+inicia o front end
+npm run dev   

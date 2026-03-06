@@ -6,6 +6,8 @@
 
 :root {
   --bg-dark: #0f1419;
+  --bg: #15202b;
+  --bg-soft: #192734;
   --bg-card: #1a2332;
   --accent: #1d9bf0;
   --accent-hover: #1a8cd8;
