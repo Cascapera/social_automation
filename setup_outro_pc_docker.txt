@@ -1,0 +1,112 @@
+SETUP DO OUTRO PC (WINDOWS + DOCKER + WSL2) - COMANDOS EXATOS
+
+Premissas:
+- Docker Desktop instalado e aberto
+- WSL2 ativo
+- Git instalado
+
+==================================================
+1) CLONAR O PROJETO
+==================================================
+
+PowerShell (Admin ou normal):
+
+cd C:\
+mkdir apps -ErrorAction SilentlyContinue
+cd C:\apps
+git clone https://github.com/Cascapera/social_automation.git
+cd C:\apps\social_automation
+
+==================================================
+2) CRIAR O .ENV
+==================================================
+
+# Opção A (copiar manualmente o .env que você já usa)
+# Cole o conteúdo em:
+# C:\apps\social_automation\.env
+#
+# IMPORTANTE (fuso):
+# TIME_ZONE=America/Sao_Paulo
+
+# Opção B (se existir .env.example):
+# copy .env.example .env
+
+==================================================
+3) BUILD E SUBIR BACKEND + REDIS + CELERY WORKER + BEAT
+==================================================
+
+cd C:\apps\social_automation
+docker compose build
+docker compose up -d redis web celery beat
+
+# Conferir status:
+docker compose ps
+# (o serviço beat deve aparecer como healthy após alguns segundos)
+
+==================================================
+4) LOGS E VERIFICAÇÃO
+==================================================
+
+# Logs do beat:
+docker compose logs -f beat
+
+==================================================
+5) COMANDOS DE VERIFICAÇÃO
+==================================================
+
+# Logs da API:
+docker compose logs -f web
+
+# Logs do worker:
+docker compose logs -f celery
+
+# Migrações manuais (se precisar):
+docker compose exec web python manage.py migrate --noinput
+
+# Criar superuser (opcional):
+docker compose exec web python manage.py createsuperuser
+
+==================================================
+6) FRONTEND (SEM INSTALAR NODE NO HOST)
+==================================================
+
+# Este comando sobe o Vite em container Node:
+docker run --rm -it `
+  -v "C:\apps\social_automation\frontend:/app" `
+  -w /app `
+  -p 5173:5173 `
+  node:20-alpine sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+
+# Acessar no navegador:
+# http://IP_DO_SERVIDOR:5173
+
+==================================================
+7) PARAR / SUBIR TUDO RÁPIDO
+==================================================
+
+# Parar tudo:
+docker compose down
+
+# Subir novamente:
+docker compose up -d redis web celery beat
+
+==================================================
+8) ACESSO REMOTO NA REDE
+==================================================
+
+- Liberar firewall nas portas:
+  - 8000 (API Django)
+  - 5173 (frontend Vite, se usar)
+- Ajustar .env com URLs corretas (ex.: FRONTEND_URL, YOUTUBE_REDIRECT_URI)
+- Confirmar ALLOWED_HOSTS/CORS no Django para o IP/host usado
+
+==================================================
+9) CHECKLIST FINAL
+==================================================
+
+1. docker compose ps mostra redis/web/celery "Up"
+2. docker compose ps mostra serviço beat rodando
+3. API responde em http://IP_DO_SERVIDOR:8000
+4. Frontend abre em http://IP_DO_SERVIDOR:5173 (se subir Vite)
+5. Agendamento cria post com status PENDING e beat dispara no horário
+
