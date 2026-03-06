@@ -9,6 +9,7 @@ from django.utils import timezone
 from apps.jobs.models import ScheduledPost
 
 logger = logging.getLogger(__name__)
+YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
 
 
 def _cleanup_local_media_if_possible(post: ScheduledPost) -> None:
@@ -53,17 +54,39 @@ def _cleanup_local_media_if_possible(post: ScheduledPost) -> None:
         logger.exception("Falha ao limpar mídias locais do ScheduledPost=%s", post.id)
 
 
+def _platforms_are_youtube_only(platforms) -> bool:
+    codes = {str(code).strip().upper() for code in (platforms or []) if str(code).strip()}
+    return bool(codes) and codes.issubset(YOUTUBE_PLATFORM_CODES)
+
+
 @shared_task
 def check_scheduled_posts_task():
-    """Roda a cada minuto via Beat. Busca agendamentos PENDING com scheduled_at <= now."""
+    """
+    Roda a cada minuto via Beat.
+    - Fluxo padrão: publica PENDING quando scheduled_at <= now.
+    - YouTube-only (YT/YTB): antecipa upload mesmo com data futura para usar publishAt.
+    """
     now = timezone.now()
-    posts = ScheduledPost.objects.filter(
+    due_posts = ScheduledPost.objects.filter(
         status="PENDING",
         scheduled_at__lte=now,
     ).select_related("job", "job__brand", "social_account")
-    for post in posts:
-        post_to_platforms_task.delay(post.id)
-    return {"checked": posts.count()}
+    # Antecipação para YouTube: sobe privado e deixa publishAt no YouTube.
+    future_candidates = ScheduledPost.objects.filter(
+        status="PENDING",
+        scheduled_at__gt=now + timedelta(seconds=30),
+    ).select_related("job", "job__brand", "social_account")
+    post_ids = {post.id for post in due_posts}
+    for post in future_candidates:
+        if _platforms_are_youtube_only(post.platforms):
+            post_ids.add(post.id)
+    for post_id in post_ids:
+        post_to_platforms_task.delay(post_id)
+    return {
+        "checked_due": due_posts.count(),
+        "queued": len(post_ids),
+        "queued_future_youtube": max(0, len(post_ids) - due_posts.count()),
+    }
 
 
 @shared_task(bind=True)

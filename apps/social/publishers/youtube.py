@@ -58,7 +58,10 @@ class YouTubePublisher(BasePublisher):
         if privacy not in ("public", "private", "unlisted"):
             privacy = "private"
         made_for_kids = bool(getattr(account.brand, "youtube_made_for_kids", False))
-        publish_at = self._get_publish_at(post, privacy)
+        publish_at = self._get_publish_at(post)
+        # Padrão para agendamento futuro no YouTube: privado + publishAt.
+        if publish_at:
+            privacy = "private"
         snippet = {
             "title": title[:200],
             "description": description[:5000],
@@ -189,11 +192,11 @@ class YouTubePublisher(BasePublisher):
             "defaultAudioLanguage": lang,
         }
 
-    def _get_publish_at(self, post: ScheduledPost | None, privacy: str) -> str | None:
+    def _get_publish_at(self, post: ScheduledPost | None) -> str | None:
         """
-        Fallback nativo YouTube: usa publishAt quando o vídeo é privado e o horário ainda está no futuro.
+        Agendamento nativo YouTube: usa publishAt quando o horário ainda está no futuro.
         """
-        if not post or privacy != "private" or not getattr(post, "scheduled_at", None):
+        if not post or not getattr(post, "scheduled_at", None):
             return None
         scheduled_at = post.scheduled_at
         if timezone.is_naive(scheduled_at):

@@ -40,22 +40,82 @@ def _safe_font(preferred_font: str, size: int) -> ImageFont.FreeTypeFont | Image
     return ImageFont.load_default()
 
 
+def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return max(0, bbox[2] - bbox[0])
+
+
+def _split_word_to_width(draw: ImageDraw.ImageDraw, word: str, font, max_width: int) -> list[str]:
+    if not word:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for ch in word:
+        candidate = f"{current}{ch}"
+        if current and _text_width(draw, candidate, font) > max_width:
+            chunks.append(current)
+            current = ch
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list[str]:
     words = (text or "").strip().split()
     if not words:
         return []
     lines: list[str] = []
-    current = words[0]
-    for word in words[1:]:
-        candidate = f"{current} {word}"
-        width = draw.textbbox((0, 0), candidate, font=font)[2]
-        if width <= max_width:
-            current = candidate
+    current = ""
+    for word in words:
+        if _text_width(draw, word, font) > max_width:
+            pieces = _split_word_to_width(draw, word, font, max_width)
         else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return lines[:2]
+            pieces = [word]
+        for piece in pieces:
+            if not current:
+                current = piece
+                continue
+            candidate = f"{current} {piece}"
+            if _text_width(draw, candidate, font) <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = piece
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _fit_text_into_box(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    preferred_font: str,
+    max_width: int,
+    max_height: int,
+    initial_font_size: int,
+    min_font_size: int,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int]:
+    font_size = max(min_font_size, initial_font_size)
+    while font_size >= min_font_size:
+        font = _safe_font(preferred_font, font_size)
+        lines = _wrap_text(draw, text, font, max_width)
+        if not lines:
+            lines = [text]
+        line_spacing = max(4, int(font_size * 0.2))
+        line_heights = []
+        for ln in lines:
+            bbox = draw.textbbox((0, 0), ln, font=font)
+            line_heights.append(max(1, bbox[3] - bbox[1]))
+        text_h = sum(line_heights) + (len(lines) - 1) * line_spacing
+        if text_h <= max_height:
+            return font, lines, line_spacing
+        font_size -= 2
+    font = _safe_font(preferred_font, min_font_size)
+    lines = _wrap_text(draw, text, font, max_width) or [text]
+    line_spacing = max(4, int(min_font_size * 0.2))
+    return font, lines, line_spacing
 
 
 def _extract_frame_at(video_path: Path, output_image_path: Path, sec: float) -> None:
@@ -153,31 +213,42 @@ def generate_auto_thumbnail(corte) -> bool:
                 except Exception:
                     pass
 
-            # Texto inferior em faixa contínua (full width) com quebra automática.
-            font_size = max(34, int(w * 0.06))
-            font = _safe_font(selected_font, font_size)
-            text_padding_x = max(20, int(w * 0.02))
-            text_padding_y = max(14, int(h * 0.015))
-            text_max_width = max(120, w - (2 * text_padding_x))
-            lines = _wrap_text(draw, thumb_text, font, text_max_width)
-            if not lines:
-                lines = [thumb_text]
-
-            line_heights = [draw.textbbox((0, 0), ln, font=font)[3] for ln in lines]
-            text_block_h = sum(line_heights) + (len(lines) - 1) * int(font_size * 0.2)
-            rect_h = text_block_h + (2 * text_padding_y)
+            # Faixa inferior fixa em 20% da altura da thumbnail.
+            rect_h = max(1, int(h * 0.20))
             rect_w = w
             rect_x1 = 0
-            rect_y1 = h - rect_h - margin
+            rect_y1 = h - rect_h
             rect_x2 = rect_x1 + rect_w
-            rect_y2 = rect_y1 + rect_h
+            rect_y2 = h
+
+            # Texto totalmente contido na faixa (quebra + redução de fonte).
+            text_padding_x = max(20, int(w * 0.03))
+            text_padding_y = max(12, int(rect_h * 0.12))
+            text_max_width = max(120, w - (2 * text_padding_x))
+            text_max_height = max(24, rect_h - (2 * text_padding_y))
+            initial_font_size = max(26, int(w * 0.065))
+            min_font_size = max(14, int(w * 0.022))
+            font, lines, line_spacing = _fit_text_into_box(
+                draw=draw,
+                text=thumb_text,
+                preferred_font=selected_font,
+                max_width=text_max_width,
+                max_height=text_max_height,
+                initial_font_size=initial_font_size,
+                min_font_size=min_font_size,
+            )
 
             draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], fill=band_color)
 
-            cursor_y = rect_y1 + text_padding_y
-            stroke_width = max(2, int(font_size * 0.08))
+            line_heights = []
+            for ln in lines:
+                bbox = draw.textbbox((0, 0), ln, font=font)
+                line_heights.append(max(1, bbox[3] - bbox[1]))
+            text_block_h = sum(line_heights) + (len(lines) - 1) * line_spacing
+            cursor_y = rect_y1 + max(0, (rect_h - text_block_h) // 2)
+            stroke_width = max(1, int(getattr(font, "size", min_font_size) * 0.08))
             for ln, ln_h in zip(lines, line_heights):
-                ln_w = draw.textbbox((0, 0), ln, font=font)[2]
+                ln_w = _text_width(draw, ln, font)
                 tx = (w - ln_w) // 2
                 draw.text(
                     (tx, cursor_y),
@@ -187,7 +258,7 @@ def generate_auto_thumbnail(corte) -> bool:
                     stroke_width=stroke_width,
                     stroke_fill=stroke_color,
                 )
-                cursor_y += ln_h + int(font_size * 0.2)
+                cursor_y += ln_h + line_spacing
 
             img.save(out_path, format="JPEG", quality=92, optimize=True)
 
