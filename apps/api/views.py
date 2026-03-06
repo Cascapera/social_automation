@@ -849,6 +849,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
 
         start_raw = (request.data or {}).get("start_at")
         end_raw = (request.data or {}).get("end_at")
+        social_account_raw = (request.data or {}).get("social_account")
         privacy_status = (request.data or {}).get("privacy_status") or "private"
         if privacy_status not in ("public", "private", "unlisted"):
             privacy_status = "private"
@@ -869,6 +870,26 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 {"error": "end_at deve ser maior ou igual a start_at."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        selected_social_account = None
+        if social_account_raw not in (None, "", "null"):
+            try:
+                social_account_id = int(social_account_raw)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "social_account inválido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            selected_social_account = BrandSocialAccount.objects.filter(
+                id=social_account_id,
+                brand_id=analysis.brand_id,
+                platform__in=["YT", "YTB"],
+            ).first()
+            if not selected_social_account:
+                return Response(
+                    {"error": "Conta social inválida para esta marca."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         finalized_qs = analysis.cortes.filter(is_finalized=True).select_related("suggestion")
         short_cortes = [c for c in finalized_qs if (getattr(c.suggestion, "cut_type", "") == "short")]
@@ -901,6 +922,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                     job=None,
                     auto_cut_corte=corte,
                     platforms=[platform],
+                    social_account=selected_social_account,
                     scheduled_at=schedule_dt,
                     title=(corte.suggestion.title or "")[:200] if corte.suggestion_id else "",
                     privacy_status=privacy_status,

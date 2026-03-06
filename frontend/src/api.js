@@ -539,13 +539,17 @@ export async function deleteAutoCutAnalysis(analysisId) {
   throw new Error(data.error || data.detail || `Erro ${res.status}`)
 }
 
-export async function bulkScheduleAutoCutAnalysis(analysisId, { startAt, endAt, privacyStatus = 'private' }) {
+export async function bulkScheduleAutoCutAnalysis(
+  analysisId,
+  { startAt, endAt, privacyStatus = 'private', socialAccountId = null },
+) {
   return apiRequest(`/auto-cuts/${analysisId}/bulk-schedule/`, {
     method: 'POST',
     body: JSON.stringify({
       start_at: startAt,
       end_at: endAt,
       privacy_status: privacyStatus,
+      social_account: socialAccountId,
     }),
   })
 }

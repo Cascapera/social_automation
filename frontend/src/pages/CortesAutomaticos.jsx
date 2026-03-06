@@ -6,6 +6,7 @@ import {
   createAutoCutAnalysis,
   getSources,
   getBrandAssets,
+  getBrandSocialAccounts,
   resetStuckAutoCuts,
   deleteStuckAutoCuts,
   updateAutoCutCorte,
@@ -41,6 +42,7 @@ export default function CortesAutomaticos() {
   const { brandId, brands } = useBrand()
   const [analyses, setAnalyses] = useState([])
   const [sources, setSources] = useState([])
+  const [socialAccounts, setSocialAccounts] = useState([])
   const [expandedId, setExpandedId] = useState(null)
   const [file, setFile] = useState(null)
   const [sourceId, setSourceId] = useState('')
@@ -135,10 +137,12 @@ export default function CortesAutomaticos() {
     if (brandId) {
       getAutoCutAnalyses(brandId, { excludeFinalized: true }).then(setAnalyses).catch(() => setAnalyses([]))
       getSources(brandId).then(setSources).catch(() => setSources([]))
+      getBrandSocialAccounts(brandId).then(setSocialAccounts).catch(() => setSocialAccounts([]))
       getAutoCutCortes(brandId, { finalized: true, ...filters }).then(setFinalizedCortes).catch(() => setFinalizedCortes([]))
       getBrandAssets(brandId, 'ANIMATION').then(setAnimationAssets).catch(() => setAnimationAssets([]))
     } else {
       setAnalyses([])
+      setSocialAccounts([])
       setFinalizedCortes([])
     }
   }, [brandId, filters])
@@ -382,6 +386,7 @@ export default function CortesAutomaticos() {
       startAt: toLocalInput(now),
       endAt: toLocalInput(plusOneHour),
       privacyStatus: 'private',
+      socialAccountId: '',
       descriptionPreview: preview,
     })
   }
@@ -393,6 +398,11 @@ export default function CortesAutomaticos() {
       setError('Informe início e fim da janela')
       return
     }
+    const youtubeAccounts = socialAccounts.filter((a) => a.platform === 'YTB' || a.platform === 'YT')
+    if (youtubeAccounts.length > 1 && !bulkPublishModal.socialAccountId) {
+      setError('Selecione o canal YouTube para o agendamento em massa.')
+      return
+    }
     setBulkPublishing(true)
     setError('')
     try {
@@ -400,6 +410,7 @@ export default function CortesAutomaticos() {
         startAt: bulkPublishModal.startAt,
         endAt: bulkPublishModal.endAt,
         privacyStatus: bulkPublishModal.privacyStatus,
+        socialAccountId: bulkPublishModal.socialAccountId ? Number(bulkPublishModal.socialAccountId) : null,
       })
       setBulkPublishModal(null)
       setError(
@@ -1247,6 +1258,24 @@ export default function CortesAutomaticos() {
                   <option value="public">Público</option>
                 </select>
               </label>
+              {socialAccounts.some((a) => a.platform === 'YTB' || a.platform === 'YT') && (
+                <label>
+                  Canal YouTube
+                  <select
+                    value={bulkPublishModal.socialAccountId || ''}
+                    onChange={(e) => setBulkPublishModal((m) => ({ ...m, socialAccountId: e.target.value }))}
+                  >
+                    <option value="">Usar primeira conta da marca</option>
+                    {socialAccounts
+                      .filter((a) => a.platform === 'YTB' || a.platform === 'YT')
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.account_name || a.channel_id || `Canal ${a.id}`}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
               <label>
                 Preview (massa)
                 <textarea
