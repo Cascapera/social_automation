@@ -18,6 +18,9 @@
 
 .intro-outro select,
 .intro-outro input[type="text"],
+.intro-outro input[type="number"],
+.intro-outro input[type="time"],
+.intro-outro input[type="file"],
 .intro-outro textarea {
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
@@ -38,7 +41,7 @@
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 2rem;
-  max-width: 560px;
+  max-width: 1200px;
 }
 
 .add-form h2 {
@@ -48,8 +51,76 @@
 
 .form-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 1rem;
+}
+
+.form-row-inline {
+  grid-template-columns: 1fr 1fr;
+}
+
+.brand-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.form-section h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.brand-description-preview {
+  min-height: 180px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.color-field .color-input-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.color-picker {
+  width: 42px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.2rem;
+  background: var(--bg-dark);
+}
+
+.color-preview-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.form-actions-row {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-start;
+}
+
+.danger-btn {
+  background: transparent !important;
+  color: #ef4444 !important;
+  border: 1px solid rgba(239, 68, 68, 0.55) !important;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12) !important;
 }
 
 .add-form button {
@@ -60,6 +131,12 @@
   border: none;
   border-radius: 8px;
   font-weight: 600;
+}
+
+.add-form button[type="button"] {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .add-form button:hover:not(:disabled) {
@@ -169,4 +246,13 @@
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border);
+}
+
+@media (max-width: 900px) {
+  .add-form {
+    max-width: 100%;
+  }
+  .form-actions-row {
+    flex-direction: column;
+  }
 }

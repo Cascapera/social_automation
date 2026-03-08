@@ -3,43 +3,70 @@ import { useSearchParams } from 'react-router-dom'
 import { useBrand } from '../context/BrandContext'
 import {
   getBrandSocialAccounts,
-  getYoutubeConnectUrl,
+  getYoutubeConnectUrlForCredential,
+  getBrandYoutubeCredentials,
   getYoutubePendingChannels,
   youtubeSelectChannel,
   deleteSocialAccount,
 } from '../api'
 import './Contas.css'
 
-const PLATFORM_LABELS = {
-  IG: 'Instagram',
-  TT: 'TikTok',
-  YT: 'YouTube Shorts',
-  YTB: 'YouTube',
-}
-
 export default function Contas() {
   const { brandId } = useBrand()
   const [searchParams] = useSearchParams()
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(false)
+  const [loadingCredentialId, setLoadingCredentialId] = useState('')
   const [error, setError] = useState('')
-  const [oauthPending, setOauthPending] = useState(null)
   const [chooseChannel, setChooseChannel] = useState(null)
   const [pendingKey, setPendingKey] = useState('')
   const [pendingChannels, setPendingChannels] = useState([])
+  const [youtubeCredentials, setYoutubeCredentials] = useState([])
 
   const urlError = searchParams.get('error')
   const urlDetail = searchParams.get('detail')
   const youtubeConnected = searchParams.get('youtube_connected')
   const youtubeChooseChannel = searchParams.get('youtube_choose_channel')
 
+  function loadAccounts() {
+    if (!brandId) {
+      setAccounts([])
+      return Promise.resolve([])
+    }
+    return getBrandSocialAccounts(brandId)
+      .then((items) => {
+        setAccounts(items || [])
+        return items || []
+      })
+      .catch(() => {
+        setAccounts([])
+        return []
+      })
+  }
+
+  function loadYoutubeCredentials() {
+    if (!brandId) {
+      setYoutubeCredentials([])
+      return Promise.resolve([])
+    }
+    return getBrandYoutubeCredentials(brandId)
+      .then((items) => {
+        setYoutubeCredentials(items || [])
+        return items || []
+      })
+      .catch(() => {
+        setYoutubeCredentials([])
+        return []
+      })
+  }
+
   useEffect(() => {
     if (brandId) {
-      getBrandSocialAccounts(brandId)
-        .then(setAccounts)
-        .catch(() => setAccounts([]))
+      loadAccounts()
+      loadYoutubeCredentials()
     } else {
       setAccounts([])
+      setYoutubeCredentials([])
     }
   }, [brandId])
 
@@ -50,7 +77,10 @@ export default function Contas() {
     }
     if (youtubeConnected) {
       setError('')
-      if (brandId) getBrandSocialAccounts(brandId).then(setAccounts)
+      if (brandId) {
+        loadAccounts()
+        loadYoutubeCredentials()
+      }
     }
     if (youtubeChooseChannel) {
       setPendingKey(searchParams.get('key') || '')
@@ -68,19 +98,24 @@ export default function Contas() {
     }
   }, [chooseChannel, pendingKey])
 
-  async function handleConnectYouTube() {
+  async function handleConnectYouTube(youtubeCredentialId = null) {
     if (!brandId) {
       setError('Selecione uma marca')
       return
     }
     setError('')
     setLoading(true)
+    setLoadingCredentialId(youtubeCredentialId ? String(youtubeCredentialId) : '')
     try {
-      const url = await getYoutubeConnectUrl(brandId)
+      const url = await getYoutubeConnectUrlForCredential(
+        brandId,
+        youtubeCredentialId || null,
+      )
       window.location.href = url
     } catch (e) {
       setError(e.message)
       setLoading(false)
+      setLoadingCredentialId('')
     }
   }
 
@@ -91,7 +126,10 @@ export default function Contas() {
       await youtubeSelectChannel(channelId, channelTitle, pendingKey)
       setChooseChannel(false)
       setPendingKey('')
-      if (brandId) getBrandSocialAccounts(brandId).then(setAccounts)
+      if (brandId) {
+        loadAccounts()
+        loadYoutubeCredentials()
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -99,11 +137,23 @@ export default function Contas() {
     }
   }
 
-  async function handleDisconnect(id) {
+  async function handleDisconnectByCredential(cred) {
+    const target = accounts.find(
+      (acc) =>
+        (acc.platform === 'YT' || acc.platform === 'YTB') &&
+        String(acc.channel_id || '') === String(cred?.channel_id || ''),
+    )
+    if (!target?.id) {
+      setError('Não foi possível localizar a conta conectada desta API para desconectar.')
+      return
+    }
     if (!confirm('Desconectar esta conta?')) return
     try {
-      await deleteSocialAccount(id)
-      if (brandId) getBrandSocialAccounts(brandId).then(setAccounts)
+      await deleteSocialAccount(target.id)
+      if (brandId) {
+        loadAccounts()
+        loadYoutubeCredentials()
+      }
     } catch (e) {
       setError(e.message)
     }
@@ -117,8 +167,6 @@ export default function Contas() {
       </div>
     )
   }
-
-  const youtubeAccounts = accounts.filter((a) => a.platform === 'YTB' || a.platform === 'YT')
 
   return (
     <div className="contas">
@@ -134,33 +182,50 @@ export default function Contas() {
         <p className="section-desc">
           Conecte seu canal do YouTube para publicar vídeos longos e Shorts.
         </p>
-        <button
-          type="button"
-          className="btn-connect"
-          onClick={handleConnectYouTube}
-          disabled={loading}
-        >
-          {loading ? 'Conectando...' : 'Conectar YouTube'}
-        </button>
-
-        {youtubeAccounts.length > 0 && (
-          <div className="accounts-list">
-            <h3>Canais conectados</h3>
-            {youtubeAccounts.map((acc) => (
-              <div key={acc.id} className="account-card">
-                <span className="account-name">{acc.account_name || acc.channel_id || 'Canal'}</span>
-                <span className="account-platform">{PLATFORM_LABELS[acc.platform] || acc.platform}</span>
-                <button
-                  type="button"
-                  className="btn-disconnect"
-                  onClick={() => handleDisconnect(acc.id)}
-                >
-                  Desconectar
-                </button>
+        {youtubeCredentials.length > 0 ? (
+          <div className="youtube-credentials-list">
+            {youtubeCredentials.map((cred, index) => (
+              <div key={cred.id} className="youtube-credential-card">
+                <div className="youtube-credential-head">
+                  <strong>{cred.label || `API ${index + 1}`}</strong>
+                  <span className={`youtube-credential-badge ${cred.is_connected ? 'ok' : 'warn'}`}>
+                    {cred.is_connected ? 'Conectada' : 'Sem OAuth'}
+                  </span>
+                </div>
+                <div className="youtube-credential-meta">
+                  <span>Ordem: {cred.order_index}</span>
+                  <span>Canal: {cred.account_name || cred.channel_id || '-'}</span>
+                </div>
+                <div className="youtube-credential-actions">
+                  <button
+                    type="button"
+                    className="btn-connect"
+                    onClick={() => handleConnectYouTube(cred.id)}
+                    disabled={loading}
+                  >
+                    {loading && loadingCredentialId === String(cred.id)
+                      ? 'Conectando...'
+                      : `Conectar ${cred.label || `API ${index + 1}`}`}
+                  </button>
+                  {cred.is_connected && (
+                    <button
+                      type="button"
+                      className="btn-disconnect"
+                      onClick={() => handleDisconnectByCredential(cred)}
+                    >
+                      Desconectar desta API
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
+        ) : (
+          <p className="form-hint">
+            Nenhuma API cadastrada em `Brands` &gt; `YouTube credentials`.
+          </p>
         )}
+
       </section>
 
       {chooseChannel && (

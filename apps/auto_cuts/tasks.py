@@ -12,6 +12,7 @@ from django.conf import settings
 from django.core.files import File
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.utils import DatabaseError
+from django.utils import timezone
 
 from apps.jobs.services.ffmpeg import ffprobe_duration
 from apps.jobs.services.subtitles import generate_subtitles, segments_to_srt, burn_subtitles
@@ -34,6 +35,41 @@ VIRAL_SHORT_MAX_SEC = 60
 VIRAL_LONG_MIN_SEC = 8 * 60
 VIRAL_LONG_MAX_SEC = 15 * 60
 EDUCATIONAL_SHORT_MAX_SEC = 180
+THEME_CATEGORY_NORMALIZATION = {
+    "business_money": "BUSINESS_MONEY",
+    "business": "BUSINESS_MONEY",
+    "money": "BUSINESS_MONEY",
+    "negocios_dinheiro": "BUSINESS_MONEY",
+    "negocios": "BUSINESS_MONEY",
+    "dinheiro": "BUSINESS_MONEY",
+    "psychology_relationships": "PSYCHOLOGY_RELATIONSHIPS",
+    "psychology": "PSYCHOLOGY_RELATIONSHIPS",
+    "relationships": "PSYCHOLOGY_RELATIONSHIPS",
+    "psicologia_relacionamentos": "PSYCHOLOGY_RELATIONSHIPS",
+    "psicologia": "PSYCHOLOGY_RELATIONSHIPS",
+    "relacionamentos": "PSYCHOLOGY_RELATIONSHIPS",
+    "stories_curiosities": "STORIES_CURIOSITIES",
+    "stories": "STORIES_CURIOSITIES",
+    "curiosities": "STORIES_CURIOSITIES",
+    "historias_curiosidades": "STORIES_CURIOSITIES",
+    "historias": "STORIES_CURIOSITIES",
+    "curiosidades": "STORIES_CURIOSITIES",
+    "controversies_debate": "CONTROVERSIES_DEBATE",
+    "controversies": "CONTROVERSIES_DEBATE",
+    "debate": "CONTROVERSIES_DEBATE",
+    "polemicas_debate": "CONTROVERSIES_DEBATE",
+    "polemicas": "CONTROVERSIES_DEBATE",
+    "comedy_humor": "COMEDY_HUMOR",
+    "comedy": "COMEDY_HUMOR",
+    "humor": "COMEDY_HUMOR",
+}
+ALL_THEME_CATEGORIES = [
+    "BUSINESS_MONEY",
+    "PSYCHOLOGY_RELATIONSHIPS",
+    "STORIES_CURIOSITIES",
+    "CONTROVERSIES_DEBATE",
+    "COMEDY_HUMOR",
+]
 
 
 def _pick_timestamp(item: dict, start: bool = True) -> str:
@@ -65,6 +101,28 @@ def _sort_by_virality(items: list[dict]) -> list[dict]:
     )
 
 
+def _normalize_theme_category(value: str, fallback: str = "") -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return fallback
+    if raw in (
+        "BUSINESS_MONEY",
+        "PSYCHOLOGY_RELATIONSHIPS",
+        "STORIES_CURIOSITIES",
+        "CONTROVERSIES_DEBATE",
+        "COMEDY_HUMOR",
+    ):
+        return raw
+    key = (
+        raw.lower()
+        .replace(" ", "_")
+        .replace("-", "_")
+        .replace("/", "_")
+    )
+    key = "_".join([p for p in key.split("_") if p])
+    return THEME_CATEGORY_NORMALIZATION.get(key, fallback)
+
+
 def _safe_save_analysis(analysis, update_fields):
     """
     Salva analysis; retorna False se o registro foi deletado (caller deve retornar).
@@ -77,6 +135,139 @@ def _safe_save_analysis(analysis, update_fields):
         if "did not affect any rows" in str(e):
             return False
         raise
+
+
+def _resolve_target_brand_for_suggestion(analysis, suggestion):
+    """
+    Resolve a brand de destino via categoria (Factory 1:1).
+    Em contexto de Factory, só retorna brand quando categoria estiver válida e mapeada.
+    Sem fallback silencioso para outra brand.
+    """
+    base_brand = getattr(analysis, "brand", None)
+    if not base_brand:
+        return None
+    category = (getattr(suggestion, "theme_category", "") or "").strip()
+    factory_id = getattr(base_brand, "factory_id", None)
+    if not factory_id:
+        # Fluxo fora de factory mantém a brand da análise.
+        return base_brand
+    if not category:
+        return None
+    from apps.brands.models import Brand
+
+    mapped = Brand.objects.filter(
+        factory_id=factory_id,
+        theme_category=category,
+    ).first()
+    return mapped
+
+
+def _sync_inventory_item_from_corte(corte):
+    """
+    Cria/atualiza item no banco de vídeos da factory ao finalizar corte.
+    """
+    if not corte or not getattr(corte, "analysis_id", None):
+        return
+    analysis = corte.analysis
+    suggestion = corte.suggestion
+    target_brand = _resolve_target_brand_for_suggestion(analysis, suggestion)
+    if not target_brand or not getattr(target_brand, "factory_id", None):
+        logger.warning(
+            "[FLUXO] Corte %s ignorado no inventário: sem roteamento válido (theme=%s).",
+            getattr(corte, "id", None),
+            getattr(suggestion, "theme_category", "") if suggestion else "",
+        )
+        return
+    from apps.jobs.models import VideoInventoryItem
+
+    cut_type = (getattr(suggestion, "cut_type", "") or "").strip().lower()
+    video_type = "SHORT" if cut_type == "short" else "LONG"
+    defaults = {
+        "factory_id": target_brand.factory_id,
+        "brand_id": target_brand.id,
+        "video_type": video_type,
+        "title": (getattr(suggestion, "title", "") or "")[:220],
+        "description": "",
+        "virality_score": getattr(suggestion, "virality_score", None),
+        "source_asset_id": getattr(suggestion, "source_asset_id", "") or "",
+        "source_metadata": {
+            "analysis_id": analysis.id,
+            "suggestion_id": suggestion.id,
+            "theme_category": getattr(suggestion, "theme_category", "") or "",
+        },
+        "status": "AVAILABLE" if corte.is_finalized and corte.file else "FAILED",
+        "last_error": "" if (corte.is_finalized and corte.file) else "Corte sem mídia finalizada",
+    }
+    VideoInventoryItem.objects.update_or_create(
+        auto_cut_corte=corte,
+        defaults=defaults,
+    )
+
+
+def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[dict], int, int]:
+    """
+    Em contexto de factory:
+    - remove itens sem categoria válida;
+    - remove itens cuja categoria não possui brand mapeada;
+    - retorna (itens_validos, ignorados_sem_categoria, ignorados_sem_mapeamento).
+    """
+    base_brand = getattr(analysis, "brand", None)
+    factory_id = getattr(base_brand, "factory_id", None) if base_brand else None
+    if not factory_id:
+        return list(items or []), 0, 0
+
+    from apps.brands.models import Brand
+
+    category_set = {
+        b.theme_category
+        for b in Brand.objects.filter(factory_id=factory_id).exclude(theme_category="")
+    }
+    missing_category = 0
+    unmapped_count = 0
+    valid_items: list[dict] = []
+
+    for item in (items or []):
+        normalized = _normalize_theme_category(item.get("theme_category"), fallback="")
+        if not normalized:
+            missing_category += 1
+            continue
+        if normalized not in category_set:
+            unmapped_count += 1
+            continue
+        item_copy = dict(item)
+        item_copy["theme_category"] = normalized
+        valid_items.append(item_copy)
+
+    return valid_items, missing_category, unmapped_count
+
+
+def _allowed_theme_categories_for_analysis(analysis) -> list[str]:
+    """
+    Em contexto de factory, retorna apenas categorias mapeadas nas brands da factory.
+    Fora de factory, retorna o conjunto completo padrão.
+    """
+    base_brand = getattr(analysis, "brand", None)
+    factory_id = getattr(base_brand, "factory_id", None) if base_brand else None
+    if not factory_id:
+        return list(ALL_THEME_CATEGORIES)
+    from apps.brands.models import Brand
+
+    mapped = sorted(
+        {
+            str(b.theme_category or "").strip()
+            for b in Brand.objects.filter(factory_id=factory_id).exclude(theme_category="")
+            if str(b.theme_category or "").strip()
+        }
+    )
+    return mapped or list(ALL_THEME_CATEGORIES)
+
+
+def _is_factory_processing_paused(analysis) -> bool:
+    brand = getattr(analysis, "brand", None)
+    if not brand:
+        return False
+    factory = getattr(brand, "factory", None)
+    return bool(factory and getattr(factory, "processing_paused", False))
 
 
 @shared_task(bind=True)
@@ -93,6 +284,18 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
     # trava ao liberar GPU e a task é reentregue após reinício)
     if analysis.status == "done":
         logger.info("[FLUXO] Analysis %s já concluída; ignorando reexecução.", analysis_id)
+        return
+
+    # Pausa cooperativa da fila: não interrompe job em execução, apenas evita
+    # iniciar novos jobs enquanto a factory estiver pausada.
+    if _is_factory_processing_paused(analysis):
+        analysis.status = "pending"
+        analysis.progress_message = "Fila de jobs pausada para esta factory. Aguardando retomada..."
+        analysis.progress = 0
+        analysis.error = ""
+        if _safe_save_analysis(analysis, ["status", "progress_message", "progress", "error"]):
+            self.apply_async(args=[analysis_id], countdown=60)
+        logger.info("[FLUXO] Analysis %s adiada: factory com processing_paused.", analysis_id)
         return
 
     youtube_url = (analysis.youtube_url or "").strip()
@@ -237,6 +440,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
         logger.info("[FLUXO] Chamando Grok API (analyze_chunks_in_one_request)... %d blocos", len(chunks))
         MAX_RETRIES = 3
+        allowed_theme_categories = _allowed_theme_categories_for_analysis(analysis)
+        logger.info(
+            "[FLUXO] Categorias permitidas para roteamento neste job: %s",
+            ", ".join(allowed_theme_categories),
+        )
         final = None
         for attempt in range(MAX_RETRIES):
             try:
@@ -245,6 +453,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     assunto=analysis.assunto or "",
                     convidados=analysis.convidados or "",
                     prompt_version=analysis.prompt_version or "viral",
+                    enforce_minimum=(attempt < MAX_RETRIES - 1),
+                    allowed_theme_categories=allowed_theme_categories,
                 )
                 logger.info(
                     "[FLUXO] Grok API respondeu OK. candidates=%d, ranked_shorts=%d, final_long_cuts=%d",
@@ -293,8 +503,49 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         longs_limit = max(1, min(10, int(getattr(analysis, "longs_target", 3) or 3)))
         from apps.jobs.services.ffmpeg import tc_to_seconds, seconds_to_tc
 
-        ranked_shorts_source = final.get("ranked_shorts") or final.get("candidate_shorts") or []
-        ranked_shorts = _sort_by_virality(ranked_shorts_source)[:shorts_limit]
+        candidate_shorts_source = final.get("candidate_shorts") or []
+        ranked_shorts_source = final.get("ranked_shorts") or []
+        if is_viral_prompt:
+            # Para viral, prioriza o pool maior (candidate_shorts), pois o ranked_shorts
+            # pode vir parcial mesmo quando há muitos candidatos válidos.
+            shorts_source = candidate_shorts_source or ranked_shorts_source
+        else:
+            shorts_source = ranked_shorts_source or candidate_shorts_source
+        ranked_shorts = _sort_by_virality(shorts_source)[:shorts_limit]
+        ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])[:longs_limit]
+        source_asset_id = ""
+        if getattr(analysis, "source_id", None):
+            source_asset_id = str(analysis.source_id)
+        elif (analysis.youtube_url or "").strip():
+            source_asset_id = (analysis.youtube_url or "").strip()
+        elif getattr(analysis, "id", None):
+            source_asset_id = f"analysis:{analysis.id}"
+
+        # Em contexto factory, ignora itens sem categoria válida/mapeamento.
+        ranked_shorts, shorts_ignored_missing_theme, shorts_ignored_unmapped = _filter_factory_routable_items(
+            analysis, ranked_shorts
+        )
+        ranked_longs, longs_ignored_missing_theme, longs_ignored_unmapped = _filter_factory_routable_items(
+            analysis, ranked_longs
+        )
+        ignored_total = (
+            shorts_ignored_missing_theme
+            + shorts_ignored_unmapped
+            + longs_ignored_missing_theme
+            + longs_ignored_unmapped
+        )
+        if ignored_total:
+            logger.warning(
+                "[FLUXO] Analysis %s: %s corte(s) ignorado(s) por theme_category inválida/sem mapeamento "
+                "(shorts sem tema=%s, shorts sem map=%s, longs sem tema=%s, longs sem map=%s).",
+                analysis.id,
+                ignored_total,
+                shorts_ignored_missing_theme,
+                shorts_ignored_unmapped,
+                longs_ignored_missing_theme,
+                longs_ignored_unmapped,
+            )
+
         for item in ranked_shorts:
             start_tc = _pick_timestamp(item, start=True)
             end_tc = _pick_timestamp(item, start=False)
@@ -344,13 +595,14 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 reason=item.get("reason") or item.get("main_topic", ""),
                 hook=item.get("hook") or item.get("hook_sentence", ""),
                 virality_score=_normalize_virality_score(item.get("virality_score")),
+                theme_category=item.get("theme_category", ""),
+                source_asset_id=source_asset_id,
                 rank=rank,
                 duration_seconds=duration_seconds,
                 raw_data=item,
             )
             suggestions_created.append((sug, "vertical"))
 
-        ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])[:longs_limit]
         for item in ranked_longs:
             start_tc = _pick_timestamp(item, start=True)
             end_tc = _pick_timestamp(item, start=False)
@@ -390,6 +642,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 title=item.get("title_suggestion") or item.get("suggested_title") or item.get("title", ""),
                 reason=item.get("reason") or item.get("main_topic", ""),
                 virality_score=_normalize_virality_score(item.get("virality_score")),
+                theme_category=item.get("theme_category", ""),
+                source_asset_id=source_asset_id,
                 duration_minutes=duration_minutes,
                 raw_data=item,
             )
@@ -437,7 +691,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 suggestion=sug,
                 format=fmt,
                 needs_subtitle=(fmt == "vertical"),
-                user_wants_finalize=False,
+                # Fluxo factory-first: cortes já entram para finalização automática.
+                user_wants_finalize=True,
                 is_finalized=False,
                 subtitle_segments=subtitle_segments,
             )
@@ -455,6 +710,15 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         analysis.progress = 100
         if not _safe_save_analysis(analysis, ["status", "progress_message", "progress"]):
             logger.info("[FLUXO] Analysis %s deletada antes do save final; ignorando.", analysis_id)
+            return
+        # Finaliza no mesmo fluxo para garantir que o job seja concluído
+        # (cortes finalizados + inventário) antes do próximo job pesado.
+        finalizar_auto_cut_task.run(
+            analysis.id,
+            horizontal_insert_logo=True,
+            horizontal_logo_x=20,
+            horizontal_logo_y=20,
+        )
         logger.info("[FLUXO] Task concluída com sucesso.")
 
     except Exception as e:
@@ -468,7 +732,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 # Estilo padrão para legendas (fonte com emojis)
 DEFAULT_SUBTITLE_STYLE = {
     "font": "Segoe UI Emoji",
-    "size": 24,
+    "size": 12,
     "color": "#FFFFFF",
     "outline_color": "#000000",
     "outline": 2,
@@ -510,7 +774,7 @@ def finalizar_auto_cut_task(
         return
 
     style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
-    vert_mode = vertical_mode or "frame_center"
+    vert_mode = vertical_mode or "zoom_crop"
     bg_color = (background_color or "#000000").strip()
     link_text = (custom_text or "").strip()
     title_font = 36 if font_size_title is None else max(12, min(96, int(font_size_title)))
@@ -724,3 +988,28 @@ def finalizar_auto_cut_task(
             logger.exception("Erro ao finalizar corte %s: %s", corte.id, e)
         corte.is_finalized = True
         corte.save(update_fields=["is_finalized"])
+        try:
+            _sync_inventory_item_from_corte(corte)
+        except Exception as e:
+            logger.exception("Erro ao sincronizar inventário do corte %s: %s", corte.id, e)
+
+    # Recalcula agenda no mesmo dia e já enfileira tentativa de publicação.
+    try:
+        brand = getattr(analysis, "brand", None)
+        factory = getattr(brand, "factory", None) if brand else None
+        if factory and not factory.scheduling_paused:
+            from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
+            from apps.social.tasks import check_scheduled_posts_task
+
+            generate_daily_schedule_for_factory(
+                factory,
+                now_utc=timezone.now(),
+                allow_rerun=True,
+            )
+            check_scheduled_posts_task.delay()
+    except Exception as e:
+        logger.exception(
+            "Erro ao recalcular agenda automática após finalização da análise %s: %s",
+            analysis.id,
+            e,
+        )

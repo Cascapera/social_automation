@@ -142,6 +142,13 @@ class AutoCutSuggestion(models.Model):
         ("short", "Curto (Reels/TikTok/Shorts)"),
         ("long", "Longo (YouTube)"),
     ]
+    THEME_CATEGORY_CHOICES = [
+        ("BUSINESS_MONEY", "Negócios / Dinheiro"),
+        ("PSYCHOLOGY_RELATIONSHIPS", "Psicologia / Relacionamentos"),
+        ("STORIES_CURIOSITIES", "Histórias e Curiosidades"),
+        ("CONTROVERSIES_DEBATE", "Polêmicas / Debate"),
+        ("COMEDY_HUMOR", "Comédia / Humor"),
+    ]
 
     analysis = models.ForeignKey(
         AutoCutAnalysis,
@@ -155,6 +162,19 @@ class AutoCutSuggestion(models.Model):
     reason = models.TextField(blank=True, default="")
     hook = models.CharField(max_length=500, blank=True, default="")
     virality_score = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-10
+    theme_category = models.CharField(
+        max_length=40,
+        choices=THEME_CATEGORY_CHOICES,
+        blank=True,
+        default="",
+        help_text="Categoria temática retornada pela LLM (metadado obrigatório no novo fluxo).",
+    )
+    source_asset_id = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="ID do vídeo original de origem (usado para diversidade de publicação).",
+    )
     rank = models.PositiveSmallIntegerField(null=True, blank=True)
     duration_seconds = models.FloatField(null=True, blank=True)
     duration_minutes = models.FloatField(null=True, blank=True)

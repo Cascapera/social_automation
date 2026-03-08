@@ -11,6 +11,7 @@ import Agendamento from './pages/Agendamento'
 import IntroOutro from './pages/IntroOutro'
 import CortesAutomaticos from './pages/CortesAutomaticos'
 import Contas from './pages/Contas'
+import BancoVideos from './pages/BancoVideos'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="gerar-cortes" element={<GerarCortes />} />
         <Route path="editar-videos" element={<EditarVideos />} />
         <Route path="agendamento" element={<Agendamento />} />
+        <Route path="banco-videos" element={<BancoVideos />} />
         <Route path="midias-marca" element={<IntroOutro />} />
         <Route path="cortes-automaticos" element={<CortesAutomaticos />} />
         <Route path="contas" element={<Contas />} />

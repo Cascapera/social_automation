@@ -51,15 +51,87 @@ export async function register(username, password, email = '') {
   return data
 }
 
-export async function getBrands() {
-  return apiRequest('/brands/')
+export async function getBrands(factoryId = null) {
+  const params = new URLSearchParams()
+  if (factoryId) params.append('factory', factoryId)
+  const qs = params.toString()
+  return apiRequest(qs ? `/brands/?${qs}` : '/brands/')
 }
 
-export async function createBrand(name) {
+export async function getFactories() {
+  return apiRequest('/factories/')
+}
+
+export async function getBrand(brandId) {
+  return apiRequest(`/brands/${brandId}/`)
+}
+
+export async function getFactory(factoryId) {
+  return apiRequest(`/factories/${factoryId}/`)
+}
+
+export async function updateFactory(factoryId, payload) {
+  return apiRequest(`/factories/${factoryId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload || {}),
+  })
+}
+
+export async function getFactorySchedules(factoryId, status = null, brandId = null) {
+  if (!factoryId) return []
+  const params = new URLSearchParams()
+  params.append('factory', factoryId)
+  if (status) params.append('status', status)
+  if (brandId) params.append('brand', brandId)
+  return apiRequest(`/factory-schedules/?${params.toString()}`)
+}
+
+export async function getVideoInventory({
+  factoryId = null,
+  brandId = null,
+  status = null,
+  videoType = null,
+} = {}) {
+  const params = new URLSearchParams()
+  if (factoryId) params.append('factory', factoryId)
+  if (brandId) params.append('brand', brandId)
+  if (status) params.append('status', status)
+  if (videoType) params.append('video_type', videoType)
+  const qs = params.toString()
+  return apiRequest(qs ? `/video-inventory/?${qs}` : '/video-inventory/')
+}
+
+export async function removeAwaitingInventoryItem(id) {
+  return apiRequest(`/video-inventory/${id}/remove-awaiting/`, {
+    method: 'POST',
+  })
+}
+
+export async function retryAwaitingInventoryItem(id) {
+  return apiRequest(`/video-inventory/${id}/retry-posting/`, {
+    method: 'POST',
+  })
+}
+
+export async function createBrand(nameOrPayload) {
+  const payload = typeof nameOrPayload === 'string'
+    ? { name: nameOrPayload.trim() }
+    : { ...(nameOrPayload || {}) }
   return apiRequest('/brands/', {
     method: 'POST',
-    body: JSON.stringify({ name: name.trim() }),
+    body: JSON.stringify(payload),
   })
+}
+
+export async function deleteBrand(id) {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/brands/${id}/`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (res.status === 204) return
+  const data = await res.json().catch(() => ({}))
+  throw new Error(data.detail || data.error || `Erro ${res.status}`)
 }
 
 export async function updateBrandYoutubeDescription(brandId, youtubeDescriptionExtra, youtubeMadeForKids) {
@@ -68,6 +140,13 @@ export async function updateBrandYoutubeDescription(brandId, youtubeDescriptionE
   return apiRequest(`/brands/${brandId}/youtube-description/`, {
     method: 'PATCH',
     body: JSON.stringify(body),
+  })
+}
+
+export async function updateBrand(brandId, payload) {
+  return apiRequest(`/brands/${brandId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload || {}),
   })
 }
 
@@ -317,8 +396,12 @@ export async function downloadJobVideo(jobId, jobName) {
   URL.revokeObjectURL(url)
 }
 
-export async function getScheduledPosts(brandId = null) {
-  const url = brandId ? `/scheduled-posts/?brand=${brandId}` : '/scheduled-posts/'
+export async function getScheduledPosts({ brandId = null, factoryId = null } = {}) {
+  const params = new URLSearchParams()
+  if (brandId) params.append('brand', brandId)
+  if (factoryId) params.append('factory', factoryId)
+  const qs = params.toString()
+  const url = qs ? `/scheduled-posts/?${qs}` : '/scheduled-posts/'
   return apiRequest(url)
 }
 
@@ -361,6 +444,12 @@ export async function deleteScheduledPost(id) {
   throw new Error(data.detail || data.error || `Erro ${res.status}`)
 }
 
+export async function removeAwaitingScheduledPost(id) {
+  return apiRequest(`/scheduled-posts/${id}/remove-awaiting/`, {
+    method: 'POST',
+  })
+}
+
 // Contas sociais
 export async function getSocialAccounts(brandId) {
   const url = brandId ? `/social-accounts/?brand=${brandId}` : '/social-accounts/'
@@ -374,6 +463,45 @@ export async function getBrandSocialAccounts(brandId) {
 export async function getYoutubeConnectUrl(brandId) {
   const data = await apiRequest(`/brands/${brandId}/youtube_connect_url/`)
   return data.url
+}
+
+export async function getYoutubeConnectUrlForCredential(brandId, youtubeCredentialId = null) {
+  const params = new URLSearchParams()
+  if (youtubeCredentialId) params.append('youtube_credential_id', String(youtubeCredentialId))
+  const qs = params.toString()
+  const data = await apiRequest(`/brands/${brandId}/youtube_connect_url/${qs ? `?${qs}` : ''}`)
+  return data.url
+}
+
+export async function getBrandYoutubeCredentials(brandId) {
+  const params = new URLSearchParams()
+  if (brandId) params.append('brand', String(brandId))
+  const qs = params.toString()
+  return apiRequest(`/brand-youtube-credentials/${qs ? `?${qs}` : ''}`)
+}
+
+export async function createBrandYoutubeCredential(payload) {
+  return apiRequest('/brand-youtube-credentials/', {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  })
+}
+
+export async function updateBrandYoutubeCredential(id, payload) {
+  return apiRequest(`/brand-youtube-credentials/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload || {}),
+  })
+}
+
+export async function deleteBrandYoutubeCredential(id) {
+  const res = await fetch(`${API_BASE}/brand-youtube-credentials/${id}/`, {
+    method: 'DELETE',
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+  })
+  if (res.status === 204) return
+  const data = await res.json().catch(() => ({}))
+  throw new Error(data.detail || data.error || `Erro ${res.status}`)
 }
 
 export async function getYoutubePendingChannels(key) {

@@ -1,7 +1,7 @@
 from django.db import models
 from django.conf import settings
 from apps.cuts.models import Cut
-from apps.brands.models import Brand, BrandAsset, BrandSocialAccount
+from apps.brands.models import Brand, BrandAsset, BrandSocialAccount, Factory
 from apps.auto_cuts.models import AutoCutCorte
 
 
@@ -208,3 +208,181 @@ class ScheduledPost(models.Model):
         else:
             label = "Sem origem"
         return f"{label} → {self.scheduled_at} ({self.status})"
+
+
+class VideoInventoryItem(models.Model):
+    STATUS = [
+        ("AVAILABLE", "Disponível"),
+        ("SCHEDULED", "Agendado"),
+        ("POSTING", "Postando"),
+        ("POSTED", "Postado"),
+        ("FAILED", "Falhou"),
+    ]
+    VIDEO_TYPE = [
+        ("SHORT", "Short"),
+        ("LONG", "Long"),
+    ]
+
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="video_inventory_items",
+    )
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="video_inventory_items",
+    )
+    auto_cut_corte = models.OneToOneField(
+        AutoCutCorte,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="inventory_item",
+    )
+    video_type = models.CharField(max_length=8, choices=VIDEO_TYPE)
+    title = models.CharField(max_length=220, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    virality_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    source_asset_id = models.CharField(max_length=120, blank=True, default="")
+    source_metadata = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=12, choices=STATUS, default="AVAILABLE")
+    scheduled_for = models.DateTimeField(null=True, blank=True)
+    posted_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["status", "-virality_score", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.brand} {self.video_type} ({self.status})"
+
+
+class FactoryScheduleRun(models.Model):
+    """Controle idempotente da geração diária de agenda por factory."""
+
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="schedule_runs",
+    )
+    run_date = models.DateField(help_text="Data local da factory em que a geração ocorreu.")
+    timezone = models.CharField(max_length=64, default="America/Sao_Paulo")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("factory", "run_date")
+        ordering = ["-run_date", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.factory} {self.run_date}"
+
+
+class FactoryPostingSchedule(models.Model):
+    STATUS = [
+        ("PLANNED", "Planejado"),
+        ("POSTING", "Postando"),
+        ("DONE", "Concluído"),
+        ("FAILED", "Falhou"),
+        ("SKIPPED", "Ignorado"),
+    ]
+    VIDEO_TYPE = [
+        ("SHORT", "Short"),
+        ("LONG", "Long"),
+    ]
+
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="posting_schedules",
+    )
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="posting_schedules",
+    )
+    inventory_item = models.ForeignKey(
+        VideoInventoryItem,
+        on_delete=models.CASCADE,
+        related_name="posting_schedules",
+    )
+    video_type = models.CharField(max_length=8, choices=VIDEO_TYPE)
+    scheduled_at = models.DateTimeField()
+    status = models.CharField(max_length=12, choices=STATUS, default="PLANNED")
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+    scheduled_post = models.OneToOneField(
+        ScheduledPost,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="factory_schedule",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["scheduled_at", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.brand} {self.video_type} {self.scheduled_at}"
+
+
+class FactoryPostingAttemptLog(models.Model):
+    RESULT = [
+        ("SUCCESS", "Sucesso"),
+        ("ERROR", "Erro"),
+    ]
+
+    posting_schedule = models.ForeignKey(
+        FactoryPostingSchedule,
+        on_delete=models.CASCADE,
+        related_name="attempt_logs",
+    )
+    attempt_number = models.PositiveSmallIntegerField(default=1)
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField()
+    result = models.CharField(max_length=10, choices=RESULT)
+    error_code = models.CharField(max_length=120, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    provider_response = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-id"]
+
+    def __str__(self) -> str:
+        return f"Attempt {self.attempt_number} ({self.result})"
+
+
+class PostedVideoLog(models.Model):
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="posted_video_logs",
+    )
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="posted_video_logs",
+    )
+    inventory_item = models.ForeignKey(
+        VideoInventoryItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="posted_logs",
+    )
+    external_platform = models.CharField(max_length=8, default="YT")
+    external_video_id = models.CharField(max_length=120, blank=True, default="")
+    posted_at = models.DateTimeField()
+    metadata_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-posted_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.brand} {self.external_platform} {self.posted_at}"

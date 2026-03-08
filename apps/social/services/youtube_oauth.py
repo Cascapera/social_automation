@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from apps.social.services.secret_crypto import decrypt_secret
 
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -13,13 +14,41 @@ YOUTUBE_SCOPES = [
 ]
 
 
-def get_client_config():
-    """Retorna client_config a partir de variáveis de ambiente."""
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+def get_client_config(brand=None, youtube_credential=None):
+    """Retorna client_config da credencial, brand, ou fallback no .env."""
+    secret_source = youtube_credential if youtube_credential is not None else brand
+    source_client_id = ""
+    source_redirect_uri = ""
+    source_secret = ""
+    if secret_source is not None:
+        try:
+            source_secret = decrypt_secret(
+                getattr(secret_source, "client_secret", "")
+                or getattr(secret_source, "youtube_client_secret", "")
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "Não foi possível ler client_secret do YouTube. "
+                "Verifique SOCIAL_ENCRYPTION_KEY no backend."
+            ) from exc
+        source_client_id = str(
+            getattr(secret_source, "client_id", "")
+            or getattr(secret_source, "youtube_client_id", "")
+            or ""
+        ).strip()
+        source_redirect_uri = str(
+            getattr(secret_source, "redirect_uri", "")
+            or getattr(secret_source, "youtube_redirect_uri", "")
+            or ""
+        ).strip()
+    client_id = source_client_id or os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = source_secret or os.getenv("GOOGLE_CLIENT_SECRET")
     if not client_id or not client_secret:
         return None
-    redirect_uri = os.getenv("YOUTUBE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback/")
+    redirect_uri = source_redirect_uri or os.getenv(
+        "YOUTUBE_REDIRECT_URI",
+        "http://localhost:8000/api/youtube/callback/",
+    )
     return {
         "web": {
             "client_id": client_id,
@@ -31,42 +60,88 @@ def get_client_config():
     }
 
 
-def get_redirect_uri():
-    return os.getenv("YOUTUBE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback/")
+def get_redirect_uri(brand=None, youtube_credential=None):
+    source = youtube_credential if youtube_credential is not None else brand
+    return (
+        str(
+            getattr(source, "redirect_uri", "")
+            or getattr(source, "youtube_redirect_uri", "")
+            or ""
+        ).strip()
+        if source is not None else ""
+    ) or os.getenv("YOUTUBE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback/")
 
 
-def get_authorization_url(brand_id: int) -> str:
+def build_state_value(brand_id: int, youtube_credential_id: int | None = None) -> str:
+    if youtube_credential_id:
+        return f"{int(brand_id)}:{int(youtube_credential_id)}"
+    return str(int(brand_id))
+
+
+def parse_state_value(state: str) -> tuple[int, int | None]:
+    raw = str(state or "").strip()
+    if not raw:
+        raise ValueError("state vazio")
+    if ":" not in raw:
+        return int(raw), None
+    brand_part, cred_part = raw.split(":", 1)
+    brand_id = int(brand_part)
+    cred_id = int(cred_part) if cred_part.strip() else None
+    return brand_id, cred_id
+
+
+def get_authorization_url(brand_id: int, youtube_credential_id: int | None = None) -> str:
     """Retorna URL para o usuário autorizar no Google. state=brand_id.
 
     Montamos a URL manualmente para evitar fluxo PKCE no backend
     (que exigiria code_verifier no callback).
     """
-    config = get_client_config()
+    from apps.brands.models import Brand, BrandYouTubeCredential
+
+    brand = Brand.objects.filter(id=int(brand_id)).first()
+    youtube_credential = None
+    if youtube_credential_id:
+        youtube_credential = BrandYouTubeCredential.objects.filter(
+            id=int(youtube_credential_id),
+            brand_id=int(brand_id),
+        ).first()
+    config = get_client_config(brand=brand, youtube_credential=youtube_credential)
     if not config:
         raise ValueError("GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET devem estar configurados no .env")
     web = config["web"]
     params = {
         "client_id": web["client_id"],
-        "redirect_uri": get_redirect_uri(),
+        "redirect_uri": get_redirect_uri(brand=brand, youtube_credential=youtube_credential),
         "response_type": "code",
         "scope": " ".join(YOUTUBE_SCOPES),
         "access_type": "offline",
         "include_granted_scopes": "true",
         "prompt": "consent",
-        "state": str(brand_id),
+        "state": build_state_value(brand_id, youtube_credential_id),
     }
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
 
 
-def fetch_tokens_and_channels(code: str, brand_id: int) -> dict:
+def fetch_tokens_and_channels(code: str, brand_id: int, youtube_credential_id: int | None = None) -> dict:
     """
     Troca code por tokens e lista canais do usuário.
     Retorna: {access_token, refresh_token, expires_at, channels: [{id, title}]}
     """
-    del brand_id  # state já foi validado na view de callback
-    config = get_client_config()
+    from apps.brands.models import Brand, BrandYouTubeCredential
+
+    brand = Brand.objects.filter(id=int(brand_id)).first()
+    youtube_credential = None
+    if youtube_credential_id:
+        youtube_credential = BrandYouTubeCredential.objects.filter(
+            id=int(youtube_credential_id),
+            brand_id=int(brand_id),
+        ).first()
+    config = get_client_config(brand=brand, youtube_credential=youtube_credential)
     if not config:
-        raise ValueError("OAuth não configurado (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)")
+        raise ValueError(
+            "OAuth não configurado para a brand e sem fallback global "
+            "(youtube_client_id/youtube_client_secret ou GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)."
+        )
     web = config["web"]
     token_resp = requests.post(
         web["token_uri"],
@@ -74,7 +149,7 @@ def fetch_tokens_and_channels(code: str, brand_id: int) -> dict:
             "code": code,
             "client_id": web["client_id"],
             "client_secret": web["client_secret"],
-            "redirect_uri": get_redirect_uri(),
+            "redirect_uri": get_redirect_uri(brand=brand, youtube_credential=youtube_credential),
             "grant_type": "authorization_code",
         },
         timeout=30,

@@ -7,11 +7,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
-from apps.brands.models import Brand, BrandSocialAccount
+from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential
 from apps.social.services.youtube_oauth import (
     get_authorization_url,
     fetch_tokens_and_channels,
     get_client_config,
+    parse_state_value,
 )
 
 CACHE_PREFIX = "youtube_oauth:"
@@ -23,24 +24,43 @@ CACHE_TIMEOUT = 900  # 15 min
 def youtube_connect(request):
     """Inicia fluxo OAuth. Query: ?brand_id=X"""
     brand_id = request.query_params.get("brand_id")
+    youtube_credential_id = request.query_params.get("youtube_credential_id")
     if not brand_id:
         return Response(
             {"error": "brand_id é obrigatório"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    cred = None
     try:
         brand = Brand.objects.get(id=int(brand_id))
+        if youtube_credential_id:
+            cred = BrandYouTubeCredential.objects.get(
+                id=int(youtube_credential_id),
+                brand=brand,
+            )
     except (ValueError, Brand.DoesNotExist):
         return Response(
             {"error": "Marca não encontrada"},
             status=status.HTTP_404_NOT_FOUND,
         )
-    if not get_client_config():
+    except BrandYouTubeCredential.DoesNotExist:
+        return Response(
+            {"error": "Credencial YouTube não encontrada para a marca"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    try:
+        config = get_client_config(brand=brand, youtube_credential=cred)
+    except ValueError as exc:
+        return Response(
+            {"error": str(exc)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if not config:
         return Response(
             {"error": "OAuth não configurado (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)"},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-    url = get_authorization_url(brand.id)
+    url = get_authorization_url(brand.id, cred.id if cred else None)
     return redirect(url)
 
 
@@ -55,13 +75,25 @@ def youtube_callback(request):
         return redirect(_frontend_url(f"/contas?error={error_param}"))
     if not code or not state:
         return redirect(_frontend_url("/contas?error=missing_code_or_state"))
+    youtube_credential = None
     try:
-        brand_id = int(state)
+        brand_id, youtube_credential_id = parse_state_value(state)
         brand = Brand.objects.get(id=brand_id)
+        if youtube_credential_id:
+            youtube_credential = BrandYouTubeCredential.objects.get(
+                id=youtube_credential_id,
+                brand=brand,
+            )
     except (ValueError, Brand.DoesNotExist):
         return redirect(_frontend_url("/contas?error=invalid_brand"))
+    except BrandYouTubeCredential.DoesNotExist:
+        return redirect(_frontend_url("/contas?error=invalid_youtube_credential"))
     try:
-        data = fetch_tokens_and_channels(code, brand_id)
+        data = fetch_tokens_and_channels(
+            code,
+            brand_id,
+            youtube_credential.id if youtube_credential else None,
+        )
     except Exception as e:
         return redirect(_frontend_url(f"/contas?error=oauth_failed&detail={str(e)[:50]}"))
     channels = data["channels"]
@@ -69,7 +101,7 @@ def youtube_callback(request):
         return redirect(_frontend_url("/contas?error=no_channels"))
     # Se só um canal, salva direto. Se vários, redireciona para frontend escolher
     if len(channels) == 1:
-        _save_youtube_account(brand, channels[0], data)
+        _save_youtube_account(brand, channels[0], data, youtube_credential=youtube_credential)
         return redirect(_frontend_url("/contas?youtube_connected=1"))
     # Múltiplos canais: salva em cache e redireciona para escolher
     key = str(uuid.uuid4())
@@ -77,6 +109,7 @@ def youtube_callback(request):
         CACHE_PREFIX + key,
         {
             "brand_id": brand_id,
+            "youtube_credential_id": youtube_credential.id if youtube_credential else None,
             "channels": channels,
             "access_token": data["access_token"],
             "refresh_token": data["refresh_token"],
@@ -146,12 +179,20 @@ def youtube_select_channel(request):
             "refresh_token": data["refresh_token"],
             "expires_at": expires_at,
         },
+        youtube_credential=(
+            BrandYouTubeCredential.objects.filter(
+                id=data.get("youtube_credential_id"),
+                brand=brand,
+            ).first()
+            if data.get("youtube_credential_id")
+            else None
+        ),
     )
     cache.delete(CACHE_PREFIX + key)
     return Response({"status": "ok", "channel_id": channel_id})
 
 
-def _save_youtube_account(brand, channel, token_data):
+def _save_youtube_account(brand, channel, token_data, youtube_credential=None):
     """Cria ou atualiza BrandSocialAccount para YouTube."""
     from datetime import datetime
 
@@ -173,6 +214,24 @@ def _save_youtube_account(brand, channel, token_data):
             "expires_at": expires_at,
         },
     )
+    if youtube_credential is not None:
+        youtube_credential.channel_id = channel.get("id", "")
+        youtube_credential.account_name = channel.get("title", "")
+        youtube_credential.access_token = token_data.get("access_token", "")
+        youtube_credential.refresh_token = token_data.get("refresh_token", "")
+        youtube_credential.expires_at = expires_at
+        youtube_credential.last_error = ""
+        youtube_credential.save(
+            update_fields=[
+                "channel_id",
+                "account_name",
+                "access_token",
+                "refresh_token",
+                "expires_at",
+                "last_error",
+                "updated_at",
+            ]
+        )
     return obj
 
 

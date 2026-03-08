@@ -6,6 +6,14 @@ import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+THEME_CATEGORY_RETRY_THRESHOLD = 5
+ALL_THEME_CATEGORIES = [
+    "BUSINESS_MONEY",
+    "PSYCHOLOGY_RELATIONSHIPS",
+    "STORIES_CURIOSITIES",
+    "CONTROVERSIES_DEBATE",
+    "COMEDY_HUMOR",
+]
 
 SYSTEM_PROMPT = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
 
@@ -30,7 +38,7 @@ Evite:
 
 REGRAS DE DURAÇÃO:
 - Shorts: 30–60 segundos
-- Longos: 8–15 minutos
+- Longos: 8–30 minutos
 
 FORMATO DE SCORE:
 - virality_score em percentual de 0 a 100 (sem símbolo %, valor inteiro)
@@ -71,9 +79,11 @@ Para shorts (2–3 min):
 - title: título informativo (máx 60 chars)
 - reason: por que é educativo
 - virality_score: 1–10 (10 = máximo valor didático)
+- theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
 
 Para cortes longos:
 - start, end, duration_min, title_suggestion, reason
+- theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
 
 IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime."""
 
@@ -101,7 +111,7 @@ Para cada clipe (short ou longo), inclua:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (guardar metadado)
+- theme_category (OBRIGATÓRIO: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE ou COMEDY_HUMOR)
 - emotion_type (funny/shocking/inspiring/controversial/story)
 - main_topic
 - suggested_title
@@ -122,7 +132,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "comedy",
+      "theme_category": "COMEDY_HUMOR",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -138,7 +148,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "comedy",
+      "theme_category": "COMEDY_HUMOR",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -154,7 +164,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 720,
       "virality_score": 88,
-      "theme_category": "advice",
+      "theme_category": "BUSINESS_MONEY",
       "emotion_type": "inspiring",
       "main_topic": "estratégia de crescimento",
       "hook_sentence": "frase mais impactante",
@@ -204,6 +214,7 @@ Responda SOMENTE com JSON válido:
       "title": "Título informativo",
       "reason": "valor didático",
       "virality_score": 9,
+      "theme_category": "BUSINESS_MONEY",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "IDEIA CENTRAL"
     }}
@@ -215,6 +226,7 @@ Responda SOMENTE com JSON válido:
       "duration_min": 18,
       "title_suggestion": "Título informativo",
       "reason": "valor didático",
+      "theme_category": "STORIES_CURIOSITIES",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "RESUMO FORTE"
     }}
@@ -287,7 +299,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (store as metadata)
+- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -308,7 +320,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "comedy",
+      "theme_category": "COMEDY_HUMOR",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -324,7 +336,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "comedy",
+      "theme_category": "COMEDY_HUMOR",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -340,7 +352,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "story",
+      "theme_category": "STORIES_CURIOSITIES",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -386,9 +398,11 @@ For shorts (2–3 min):
 - title: informative title (max 60 chars)
 - reason: why it's educational
 - virality_score: 1–10 (10 = max didactic value)
+- theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
 
 For long cuts:
 - start, end, duration_min, title_suggestion, reason
+- theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
 
 IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate."""
 
@@ -421,6 +435,7 @@ Respond ONLY with valid JSON:
       "title": "Informative title",
       "reason": "didactic value",
       "virality_score": 9,
+      "theme_category": "BUSINESS_MONEY",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "CORE IDEA"
     }}
@@ -432,6 +447,7 @@ Respond ONLY with valid JSON:
       "duration_min": 18,
       "title_suggestion": "Informative title",
       "reason": "didactic value",
+      "theme_category": "STORIES_CURIOSITIES",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "KEY LESSON"
     }}
@@ -483,6 +499,81 @@ def _extract_json(text: str) -> dict | list:
     raise ValueError("Não foi possível extrair JSON da resposta")
 
 
+def _validate_minimum_items(
+    payload: dict,
+    prompt_version: str,
+    enforce_minimum: bool = True,
+    allowed_theme_categories: list[str] | None = None,
+) -> None:
+    """
+    Garante mínimos para prompts virais.
+    Se não cumprir, levanta erro para o caller retentar.
+    """
+    pv = (prompt_version or "viral").strip().lower()
+    candidate_shorts = payload.get("candidate_shorts")
+    final_long_cuts = payload.get("final_long_cuts")
+    if not isinstance(final_long_cuts, list):
+        raise ValueError("Resposta inválida: final_long_cuts ausente ou não é lista.")
+    ranked_shorts = payload.get("ranked_shorts")
+    if ranked_shorts is None:
+        ranked_shorts = []
+    if not isinstance(ranked_shorts, list):
+        raise ValueError("Resposta inválida: ranked_shorts não é lista.")
+
+    if pv in ("viral", "viral_en"):
+        if not isinstance(candidate_shorts, list):
+            raise ValueError("Resposta inválida: candidate_shorts ausente ou não é lista.")
+
+        min_candidates = 30
+        min_longs = 10
+        if len(candidate_shorts) < min_candidates:
+            msg = (
+                f"Resposta abaixo do mínimo para viral: "
+                f"candidate_shorts={len(candidate_shorts)} < {min_candidates}."
+            )
+            if enforce_minimum:
+                raise ValueError(msg)
+            logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
+        if len(final_long_cuts) < min_longs:
+            msg = (
+                f"Resposta abaixo do mínimo para viral: "
+                f"final_long_cuts={len(final_long_cuts)} < {min_longs}."
+            )
+            if enforce_minimum:
+                raise ValueError(msg)
+            logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
+
+    allowed_categories = {
+        str(x).strip().upper()
+        for x in (allowed_theme_categories or ALL_THEME_CATEGORIES)
+        if str(x).strip()
+    }
+    if not allowed_categories:
+        allowed_categories = set(ALL_THEME_CATEGORIES)
+    candidate_items = candidate_shorts if isinstance(candidate_shorts, list) else []
+    items_to_check = list(candidate_items) + list(ranked_shorts) + list(final_long_cuts)
+    invalid_count = 0
+    for item in items_to_check:
+        value = str((item or {}).get("theme_category") or "").strip().upper()
+        if value not in allowed_categories:
+            invalid_count += 1
+    if invalid_count > THEME_CATEGORY_RETRY_THRESHOLD:
+        msg = (
+            f"Resposta inválida: {invalid_count} itens sem theme_category válido "
+            f"(limite para retry={THEME_CATEGORY_RETRY_THRESHOLD})."
+        )
+        if enforce_minimum:
+            raise ValueError(msg)
+        logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
+    elif invalid_count > 0:
+        logger.warning(
+            "[FLUXO/Grok] Resposta parcial: %d item(ns) sem theme_category válido. "
+            "Não haverá nova chamada por estar dentro da margem (%d).",
+            invalid_count,
+            THEME_CATEGORY_RETRY_THRESHOLD,
+        )
+
+
 def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
     """Chama Grok API e retorna o conteúdo da resposta."""
     import os
@@ -518,10 +609,21 @@ def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
     return resp.choices[0].message.content or ""
 
 
-def _build_context_block(assunto: str = "", convidados: str = "", lang: str = "pt") -> str:
+def _build_context_block(
+    assunto: str = "",
+    convidados: str = "",
+    lang: str = "pt",
+    allowed_theme_categories: list[str] | None = None,
+) -> str:
     """Monta bloco de contexto para o prompt (assunto + convidados)."""
-    if not assunto and not convidados:
-        return ""
+    allowed = [
+        str(x).strip().upper()
+        for x in (allowed_theme_categories or ALL_THEME_CATEGORIES)
+        if str(x).strip()
+    ]
+    if not allowed:
+        allowed = list(ALL_THEME_CATEGORIES)
+
     parts = []
     if assunto:
         parts.append(f"Topic: {assunto.strip()}" if lang == "en" else f"Assunto do vídeo: {assunto.strip()}")
@@ -529,10 +631,20 @@ def _build_context_block(assunto: str = "", convidados: str = "", lang: str = "p
         names = [n.strip() for n in convidados.split(",") if n.strip()]
         if names:
             parts.append(f"Guest(s): {', '.join(names)}" if lang == "en" else f"Convidado(s): {', '.join(names)}")
+    category_header = (
+        "ALLOWED THEME CATEGORIES FOR THIS JOB (use ONLY one of these exact values in theme_category):"
+        if lang == "en"
+        else "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB (use SOMENTE um destes valores exatos em theme_category):"
+    )
+    categories_block = category_header + "\n- " + "\n- ".join(allowed)
     if not parts:
-        return ""
-    header = "VIDEO CONTEXT (use to prioritize moments relevant to topic and participants):\n" if lang == "en" else "CONTEXTO DO VÍDEO (use para priorizar momentos relevantes ao tema e aos participantes):\n"
-    return header + "\n".join(parts) + "\n\n"
+        return categories_block + "\n\n"
+    header = (
+        "VIDEO CONTEXT (use to prioritize moments relevant to topic and participants):\n"
+        if lang == "en"
+        else "CONTEXTO DO VÍDEO (use para priorizar momentos relevantes ao tema e aos participantes):\n"
+    )
+    return header + "\n".join(parts) + "\n\n" + categories_block + "\n\n"
 
 
 def analyze_chunks_in_one_request(
@@ -541,6 +653,8 @@ def analyze_chunks_in_one_request(
     convidados: str = "",
     prompt_version: str = "viral",
     api_key: str | None = None,
+    enforce_minimum: bool = True,
+    allowed_theme_categories: list[str] | None = None,
 ) -> dict:
     """
     Analisa todos os chunks em uma única requisição.
@@ -563,7 +677,12 @@ def analyze_chunks_in_one_request(
     logger.info("[FLUXO/Grok] Montando prompt (%s, %s) com %d chunks (~%d chars)...",
         "educational" if is_educational else "viral", lang,
         len(chunks), sum(len(c.get("text", "")) for c in chunks))
-    context_block = _build_context_block(assunto, convidados, lang=lang)
+    context_block = _build_context_block(
+        assunto,
+        convidados,
+        lang=lang,
+        allowed_theme_categories=allowed_theme_categories,
+    )
     chunks_block = _build_chunks_block(chunks, lang=lang)
     user = template.format(
         context_block=context_block, chunks_block=chunks_block
@@ -571,4 +690,13 @@ def analyze_chunks_in_one_request(
     logger.info("[FLUXO/Grok] Enviando requisição para Grok API...")
     content = call_grok_chat(system_prompt, user, api_key)
     logger.info("[FLUXO/Grok] Resposta recebida (%d chars). Extraindo JSON...", len(content or ""))
-    return _extract_json(content)
+    parsed = _extract_json(content)
+    if not isinstance(parsed, dict):
+        raise ValueError("Resposta inválida do Grok: raiz do JSON deve ser objeto.")
+    _validate_minimum_items(
+        parsed,
+        prompt_version=pv,
+        enforce_minimum=enforce_minimum,
+        allowed_theme_categories=allowed_theme_categories,
+    )
+    return parsed

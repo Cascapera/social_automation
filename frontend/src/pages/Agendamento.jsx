@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import { useBrand } from '../context/BrandContext'
 import {
   getJobs,
@@ -7,6 +7,11 @@ import {
   getBrandSocialAccounts,
   rescheduleScheduledPost,
   deleteScheduledPost,
+  removeAwaitingScheduledPost,
+  getBrand,
+  getFactory,
+  updateFactory,
+  getFactorySchedules,
 } from '../api'
 import { PlatformIcon } from '../components/PlatformIcons'
 import './Agendamento.css'
@@ -20,6 +25,7 @@ const PLATFORMS = [
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+const WEEKDAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
 function CalendarioMensal({ scheduled, statusLabel }) {
   const now = new Date()
@@ -126,7 +132,7 @@ function CalendarioMensal({ scheduled, statusLabel }) {
 }
 
 export default function Agendamento() {
-  const { brandId } = useBrand()
+  const { brandId, brands, viewMode, factoryId } = useBrand()
   const [jobs, setJobs] = useState([])
   const [scheduled, setScheduled] = useState([])
   const [jobId, setJobId] = useState('')
@@ -146,6 +152,10 @@ export default function Agendamento() {
   const [rescheduleId, setRescheduleId] = useState(null)
   const [rescheduleAt, setRescheduleAt] = useState('')
   const [rescheduling, setRescheduling] = useState(false)
+  const [removingAwaitingId, setRemovingAwaitingId] = useState(null)
+  const [factoryInfo, setFactoryInfo] = useState(null)
+  const [togglingFactorySchedule, setTogglingFactorySchedule] = useState(false)
+  const [factoryWeekSchedules, setFactoryWeekSchedules] = useState([])
 
   useEffect(() => {
     if (brandId) {
@@ -157,14 +167,82 @@ export default function Agendamento() {
       setScheduled([])
       setSocialAccounts([])
     }
-  }, [brandId])
+
+    if (viewMode === 'factory' && factoryId) {
+      loadFactoryInfo()
+    } else if (brandId) {
+      loadFactoryInfo()
+    } else {
+      setFactoryInfo(null)
+    }
+  }, [brandId, viewMode, factoryId])
+
+  useEffect(() => {
+    if (factoryInfo?.id) {
+      loadFactoryWeekSchedules(factoryInfo.id)
+    } else {
+      setFactoryWeekSchedules([])
+    }
+  }, [factoryInfo?.id, viewMode, brandId])
+
+  async function loadFactoryInfo() {
+    if (viewMode === 'factory' && factoryId) {
+      try {
+        const f = await getFactory(factoryId)
+        setFactoryInfo(f)
+      } catch {
+        setFactoryInfo(null)
+      }
+      return
+    }
+    if (!brandId) {
+      setFactoryInfo(null)
+      return
+    }
+    try {
+      const selected = (brands || []).find((b) => String(b.id) === String(brandId))
+      let factoryId = selected?.factory
+      if (!factoryId) {
+        const brand = await getBrand(brandId)
+        factoryId = brand?.factory
+      }
+      if (!factoryId) {
+        setFactoryInfo(null)
+        return
+      }
+      const f = await getFactory(factoryId)
+      setFactoryInfo(f)
+    } catch {
+      setFactoryInfo(null)
+    }
+  }
+
+  async function loadFactoryWeekSchedules(factoryId) {
+    try {
+      const rows = await getFactorySchedules(
+        factoryId,
+        null,
+        viewMode === 'factory' && brandId ? brandId : null,
+      )
+      setFactoryWeekSchedules(Array.isArray(rows) ? rows : [])
+    } catch {
+      setFactoryWeekSchedules([])
+    }
+  }
 
   function reloadScheduledPosts() {
+    if (viewMode === 'factory' && factoryId) {
+      getScheduledPosts({
+        factoryId,
+        brandId: brandId || null,
+      }).then(setScheduled).catch(() => setScheduled([]))
+      return
+    }
     if (!brandId) {
       setScheduled([])
       return
     }
-    getScheduledPosts(brandId).then(setScheduled).catch(() => setScheduled([]))
+    getScheduledPosts({ brandId }).then(setScheduled).catch(() => setScheduled([]))
   }
 
   const finishedJobs = jobs.filter((j) => j.status === 'DONE' && j.output_url)
@@ -258,6 +336,40 @@ export default function Agendamento() {
     }
   }
 
+  async function handleRemoveAwaiting(item) {
+    if (!item?.id) return
+    if (!confirm('Excluir este vídeo do banco e remover o agendamento?')) return
+    setError('')
+    setRemovingAwaitingId(item.id)
+    try {
+      await removeAwaitingScheduledPost(item.id)
+      reloadScheduledPosts()
+      if (factoryInfo?.id) {
+        await loadFactoryWeekSchedules(factoryInfo.id)
+      }
+    } catch (e) {
+      setError(e.message || 'Falha ao remover vídeo aguardando postagem.')
+    } finally {
+      setRemovingAwaitingId(null)
+    }
+  }
+
+  async function handleToggleFactorySchedule() {
+    if (!factoryInfo?.id || togglingFactorySchedule) return
+    setError('')
+    setTogglingFactorySchedule(true)
+    try {
+      const updated = await updateFactory(factoryInfo.id, {
+        scheduling_paused: !factoryInfo.scheduling_paused,
+      })
+      setFactoryInfo(updated)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setTogglingFactorySchedule(false)
+    }
+  }
+
   const statusLabel = { PENDING: 'Pendente', POSTING: 'Postando', DONE: 'Postado', FAILED: 'Falhou' }
   const platformLabels = (arr) => (arr || []).map((p) => PLATFORMS.find((x) => x.id === p)?.label || p).join(', ')
 
@@ -287,6 +399,89 @@ export default function Agendamento() {
     setExpandedPostedDates((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
+  function getCurrentWeekRange() {
+    const now = new Date()
+    const start = new Date(now)
+    const day = start.getDay()
+    start.setDate(start.getDate() - day)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 7)
+    return { start, end }
+  }
+
+  function buildFactoryWeeklyMatrix(items) {
+    const { start, end } = getCurrentWeekRange()
+    const filtered = (items || []).filter((item) => {
+      const dt = new Date(item.scheduled_at)
+      return dt >= start && dt < end
+    })
+    const hours = Array.from({ length: 24 }, (_, h) => h)
+    const weekDays = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(start.getDate() + i)
+      return d
+    })
+    const brandNameById = (brands || []).reduce((acc, b) => {
+      acc[String(b.id)] = b.name
+      return acc
+    }, {})
+    const matrix = {}
+    for (const h of hours) {
+      matrix[h] = {}
+      for (let d = 0; d < 7; d++) matrix[h][d] = []
+    }
+
+    const summaryByBrand = {}
+    filtered.forEach((item) => {
+      const dt = new Date(item.scheduled_at)
+      const dayIndex = dt.getDay()
+      const hour = dt.getHours()
+      const brandName = brandNameById[String(item.brand)] || `Canal #${item.brand}`
+      const status = item.status || 'PLANNED'
+      const isPosted = status === 'DONE'
+      const isPostedOnChannel = Boolean(item.posted_on_channel)
+      const postedAt = item.posted_at ? new Date(item.posted_at) : null
+      const postedTimeLabel = postedAt
+        ? postedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        : ''
+      const tag = {
+        id: item.id,
+        brandId: item.brand,
+        brandName,
+        status,
+        isPosted,
+        isPostedOnChannel,
+        postedTimeLabel,
+        externalVideoId: item.external_video_id || '',
+        timeLabel: dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      }
+      matrix[hour][dayIndex].push(tag)
+      if (!summaryByBrand[item.brand]) {
+        summaryByBrand[item.brand] = {
+          brandId: item.brand,
+          brandName,
+          posted: 0,
+          scheduled: 0,
+          total: 0,
+        }
+      }
+      summaryByBrand[item.brand].total += 1
+      if (isPosted) summaryByBrand[item.brand].posted += 1
+      else summaryByBrand[item.brand].scheduled += 1
+    })
+
+    const channelSummary = Object.values(summaryByBrand).sort((a, b) => {
+      if (a.total !== b.total) return a.total - b.total
+      if (a.posted !== b.posted) return a.posted - b.posted
+      return a.brandName.localeCompare(b.brandName)
+    })
+
+    return { start, weekDays, hours, matrix, channelSummary }
+  }
+
+  const factoryWeek = buildFactoryWeeklyMatrix(factoryWeekSchedules)
+
   return (
     <div className="agendamento">
       <h1>Agendamento</h1>
@@ -296,8 +491,120 @@ export default function Agendamento() {
 
       {error && <div className="form-error">{error}</div>}
 
-      {!brandId && (
+      {!brandId && viewMode !== 'factory' && (
         <p className="form-hint">Selecione uma marca no menu à esquerda para agendar postagens.</p>
+      )}
+      {!brandId && viewMode === 'factory' && (
+        <p className="form-hint">Selecione uma brand da factory para criar/agendar jobs individuais. A visão semanal abaixo continua disponível sem selecionar brand.</p>
+      )}
+
+      {factoryInfo && (
+        <section className="section factory-schedule-control">
+          <div className="factory-control-info">
+            <strong>Factory: {factoryInfo.name}</strong>
+            <span className={`factory-schedule-badge ${factoryInfo.scheduling_paused ? 'paused' : 'running'}`}>
+              {factoryInfo.scheduling_paused ? 'Agendamento pausado' : 'Agendamento ativo'}
+            </span>
+            {factoryInfo.scheduling_paused && (
+              <div className="factory-paused-warning">
+                Factory pausada: geração de cortes continua normal, mas o agendamento/publicação ficam em espera.
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className={`factory-toggle-btn ${factoryInfo.scheduling_paused ? 'resume' : 'pause'}`}
+            onClick={handleToggleFactorySchedule}
+            disabled={togglingFactorySchedule}
+          >
+            {togglingFactorySchedule
+              ? 'Salvando...'
+              : factoryInfo.scheduling_paused
+                ? 'Continuar agendamento'
+                : 'Pausar agendamento'}
+          </button>
+        </section>
+      )}
+
+      {factoryInfo && (
+        <section className="section weekly-factory-section">
+          <div className="section-header">
+            <h2>Agenda semanal da Factory</h2>
+            <span className="section-hint">
+              Semana atual: {factoryWeek.start.toLocaleDateString('pt-BR')} -{' '}
+              {factoryWeek.weekDays[6]?.toLocaleDateString('pt-BR')}
+            </span>
+          </div>
+
+          <div className="weekly-summary">
+            <h3>Resumo por canal (menor volume primeiro)</h3>
+            {factoryWeek.channelSummary.length === 0 ? (
+              <p className="empty-msg">Nenhum agendamento da semana atual para esta factory.</p>
+            ) : (
+              <div className="weekly-summary-list">
+                {factoryWeek.channelSummary.map((s) => (
+                  <div key={s.brandId} className="weekly-summary-item">
+                    <strong>{s.brandName}</strong>
+                    <span>Total: {s.total}</span>
+                    <span>Agendados: {s.scheduled}</span>
+                    <span>Postados: {s.posted}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="weekly-grid-wrapper">
+            <div className="weekly-grid">
+              <div className="weekly-head hour">Hora</div>
+              {factoryWeek.weekDays.map((d, idx) => (
+                <div key={idx} className="weekly-head day">
+                  <div>{WEEKDAY_NAMES[d.getDay()]}</div>
+                  <small>{d.toLocaleDateString('pt-BR')}</small>
+                </div>
+              ))}
+
+              {factoryWeek.hours.map((hour) => (
+                <Fragment key={hour}>
+                  <div className="weekly-hour">{String(hour).padStart(2, '0')}:00</div>
+                  {factoryWeek.weekDays.map((d, idx) => {
+                    const tags = factoryWeek.matrix[hour]?.[idx] || []
+                    return (
+                      <div key={`${hour}-${idx}`} className="weekly-cell">
+                        {tags.map((tag) => (
+                          <span
+                            key={tag.id}
+                            className={`weekly-tag ${
+                              tag.isPostedOnChannel
+                                ? 'posted-channel'
+                                : tag.isPosted
+                                  ? 'posted'
+                                  : 'scheduled'
+                            }`}
+                            title={`${tag.brandName} - ${tag.timeLabel} - ${
+                              tag.isPostedOnChannel
+                                ? `Postado no canal${tag.postedTimeLabel ? ` às ${tag.postedTimeLabel}` : ''}`
+                                : tag.isPosted
+                                  ? 'Postado (interno)'
+                                  : 'Agendado'
+                            }${tag.externalVideoId ? ` - ID: ${tag.externalVideoId}` : ''}`}
+                          >
+                            {tag.brandName} {tag.timeLabel}{' '}
+                            {tag.isPostedOnChannel
+                              ? `Postado no canal${tag.postedTimeLabel ? ` ${tag.postedTimeLabel}` : ''}`
+                              : tag.isPosted
+                                ? 'Postado'
+                                : 'Agendado'}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                  })}
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        </section>
       )}
 
       <section className="section">
@@ -444,6 +751,17 @@ export default function Agendamento() {
                       onClick={() => handleCancelSchedule(s)}
                     >
                       Cancelar
+                    </button>
+                  )}
+                  {(s.status === 'PENDING' || s.status === 'FAILED') && (
+                    <button
+                      type="button"
+                      className="btn-action btn-cancel"
+                      onClick={() => handleRemoveAwaiting(s)}
+                      disabled={removingAwaitingId === s.id}
+                      title="Remove do agendamento e do banco de vídeos aguardando"
+                    >
+                      {removingAwaitingId === s.id ? 'Removendo...' : 'Excluir do banco'}
                     </button>
                   )}
                 </span>

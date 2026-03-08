@@ -1,0 +1,78 @@
+.banco-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.banco-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.banco-filter-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.banco-filter-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 180px;
+  font-size: 0.85rem;
+}
+
+.banco-filter-row select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.banco-table-wrap {
+  overflow-x: auto;
+}
+
+.banco-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.banco-block h2 {
+  margin: 0 0 0.6rem;
+}
+
+.banco-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1100px;
+}
+
+.banco-table th,
+.banco-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem;
+  font-size: 0.82rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.banco-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.banco-title {
+  min-width: 220px;
+}
+
+.banco-error {
+  color: #fca5a5;
+  min-width: 180px;
+}

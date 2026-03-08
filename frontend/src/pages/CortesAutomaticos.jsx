@@ -4,6 +4,8 @@ import {
   getAutoCutAnalyses,
   getAutoCutAnalysis,
   createAutoCutAnalysis,
+  getFactory,
+  updateFactory,
   getSources,
   getBrandAssets,
   getBrandSocialAccounts,
@@ -39,8 +41,9 @@ function isShortCorte(corte) {
 }
 
 export default function CortesAutomaticos() {
-  const { brandId, brands } = useBrand()
+  const { brandId, brands, viewMode, factoryId } = useBrand()
   const [analyses, setAnalyses] = useState([])
+  const [factoryRunningAnalyses, setFactoryRunningAnalyses] = useState([])
   const [sources, setSources] = useState([])
   const [socialAccounts, setSocialAccounts] = useState([])
   const [expandedId, setExpandedId] = useState(null)
@@ -67,12 +70,12 @@ export default function CortesAutomaticos() {
   const [filters, setFilters] = useState({ date_from: '', date_to: '', format: '' })
   const [subtitleStyle, setSubtitleStyle] = useState({
     font: 'Helvetica',
-    size: 24,
+    size: 12,
     color: '#FFFFFF',
     outline_color: '#000000',
   })
   const [verticalOptions, setVerticalOptions] = useState({
-    mode: 'frame_center',
+    mode: 'zoom_crop',
     background_color: '#000000',
     custom_text: '',
     font_size_title: 36,
@@ -103,8 +106,25 @@ export default function CortesAutomaticos() {
   const [unitScheduling, setUnitScheduling] = useState(false)
   const [uploadingThumbnailId, setUploadingThumbnailId] = useState(null)
   const [thumbnailModal, setThumbnailModal] = useState(null)
+  const [factoryInfo, setFactoryInfo] = useState(null)
+  const [togglingFactoryProcessing, setTogglingFactoryProcessing] = useState(false)
 
   const selectedAnalysis = analyses.find((a) => a.id === expandedId)
+  const fallbackFactoryBrandId = viewMode === 'factory' ? (brands[0]?.id || null) : null
+  const activeBrandId = brandId || fallbackFactoryBrandId
+  const factoryBrandIds = viewMode === 'factory'
+    ? (brands || []).map((b) => b?.id).filter(Boolean)
+    : []
+  const selectedBrand = brands.find((b) => String(b.id) === String(activeBrandId))
+  const hasRunningAnalyses = analyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
+    || factoryRunningAnalyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
+  const displayAnalyses = (() => {
+    const byId = new Map()
+    ;[...factoryRunningAnalyses, ...analyses].forEach((a) => {
+      byId.set(a.id, a)
+    })
+    return Array.from(byId.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  })()
 
   function buildDescriptionBody(analysis, brandExtra = '') {
     if (!analysis) return ''
@@ -133,39 +153,178 @@ export default function CortesAutomaticos() {
     return `${safeTitle}\n\n${buildDescriptionBody(analysis, brandExtra)}`
   }
 
+  async function loadFactoryRunningAnalyses() {
+    if (viewMode !== 'factory') {
+      setFactoryRunningAnalyses([])
+      return
+    }
+    const factoryBrandIds = (brands || []).map((b) => b?.id).filter(Boolean)
+    if (factoryBrandIds.length === 0) {
+      setFactoryRunningAnalyses([])
+      return
+    }
+    try {
+      const settled = await Promise.allSettled(
+        factoryBrandIds.map((id) => getAutoCutAnalyses(id, { excludeFinalized: true })),
+      )
+      const rows = settled
+        .filter((r) => r.status === 'fulfilled')
+        .map((r) => r.value)
+      const merged = rows
+        .flat()
+        .filter((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
+      const dedup = Array.from(new Map(merged.map((a) => [a.id, a])).values())
+      setFactoryRunningAnalyses(dedup)
+    } catch {
+      setFactoryRunningAnalyses([])
+    }
+  }
+
+  async function loadAnalysesForView() {
+    if (viewMode === 'factory') {
+      if (factoryBrandIds.length === 0) {
+        setAnalyses([])
+        return []
+      }
+      const settled = await Promise.allSettled(
+        factoryBrandIds.map((id) => getAutoCutAnalyses(id, { excludeFinalized: true })),
+      )
+      const rows = settled
+        .filter((r) => r.status === 'fulfilled')
+        .map((r) => r.value)
+      const merged = rows.flat()
+      const dedup = Array.from(new Map(merged.map((a) => [a.id, a])).values())
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      setAnalyses(dedup)
+      return dedup
+    }
+    if (!activeBrandId) {
+      setAnalyses([])
+      return []
+    }
+    if (viewMode !== 'factory') {
+      const list = await getAutoCutAnalyses(activeBrandId, { excludeFinalized: true })
+      setAnalyses(list)
+      return list
+    }
+    return []
+  }
+
+  async function loadFinalizedCortes() {
+    if (viewMode === 'factory') {
+      if (factoryBrandIds.length === 0) {
+        setFinalizedCortes([])
+        return
+      }
+      try {
+        const settled = await Promise.allSettled(
+          factoryBrandIds.map((id) => getAutoCutCortes(id, { finalized: true, ...filters })),
+        )
+        const rows = settled
+          .filter((r) => r.status === 'fulfilled')
+          .map((r) => r.value)
+        const merged = rows.flat()
+        const dedup = Array.from(new Map(merged.map((c) => [c.id, c])).values())
+        setFinalizedCortes(dedup)
+      } catch {
+        setFinalizedCortes([])
+      }
+      return
+    }
+    if (!activeBrandId) {
+      setFinalizedCortes([])
+      return
+    }
+    getAutoCutCortes(activeBrandId, { finalized: true, ...filters }).then(setFinalizedCortes).catch(() => setFinalizedCortes([]))
+  }
+
+  async function loadFactoryInfo() {
+    if (viewMode !== 'factory' || !factoryId) {
+      setFactoryInfo(null)
+      return
+    }
+    try {
+      const info = await getFactory(factoryId)
+      setFactoryInfo(info)
+    } catch {
+      setFactoryInfo(null)
+    }
+  }
+
+  async function handleToggleFactoryProcessing() {
+    if (!factoryInfo?.id || togglingFactoryProcessing) return
+    setError('')
+    setTogglingFactoryProcessing(true)
+    try {
+      const updated = await updateFactory(factoryInfo.id, {
+        processing_paused: !factoryInfo.processing_paused,
+      })
+      setFactoryInfo(updated)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setTogglingFactoryProcessing(false)
+    }
+  }
+
   useEffect(() => {
-    if (brandId) {
-      getAutoCutAnalyses(brandId, { excludeFinalized: true }).then(setAnalyses).catch(() => setAnalyses([]))
-      getSources(brandId).then(setSources).catch(() => setSources([]))
-      getBrandSocialAccounts(brandId).then(setSocialAccounts).catch(() => setSocialAccounts([]))
-      getAutoCutCortes(brandId, { finalized: true, ...filters }).then(setFinalizedCortes).catch(() => setFinalizedCortes([]))
-      getBrandAssets(brandId, 'ANIMATION').then(setAnimationAssets).catch(() => setAnimationAssets([]))
+    loadFactoryInfo()
+  }, [viewMode, factoryId])
+
+  useEffect(() => {
+    const shouldLoadFactoryAggregated = viewMode === 'factory' && factoryBrandIds.length > 0
+    if (shouldLoadFactoryAggregated || activeBrandId) {
+      loadAnalysesForView().catch(() => setAnalyses([]))
+      if (activeBrandId) {
+        getSources(activeBrandId).then(setSources).catch(() => setSources([]))
+        getBrandSocialAccounts(activeBrandId).then(setSocialAccounts).catch(() => setSocialAccounts([]))
+        getBrandAssets(activeBrandId, 'ANIMATION').then(setAnimationAssets).catch(() => setAnimationAssets([]))
+      } else {
+        setSources([])
+        setSocialAccounts([])
+        setAnimationAssets([])
+      }
+      loadFinalizedCortes()
+      loadFactoryRunningAnalyses()
     } else {
       setAnalyses([])
       setSocialAccounts([])
       setFinalizedCortes([])
+      setFactoryRunningAnalyses([])
     }
-  }, [brandId, filters])
+  }, [activeBrandId, filters, viewMode, brands, brandId])
 
   useEffect(() => {
-    if (!selectedAnalysis) return
+    if (!activeBrandId || !hasRunningAnalyses) return
     const id = setInterval(async () => {
       try {
-        const a = await getAutoCutAnalysis(selectedAnalysis.id)
-        setAnalyses((prev) => prev.map((x) => (x.id === a.id ? a : x)))
-        if (expandedId === a.id) setExpandedId(a.id)
-        if (a.status === 'done' || a.status === 'error') clearInterval(id)
+        const [list] = await Promise.all([
+          loadAnalysesForView(),
+          (async () => {
+            await loadFinalizedCortes()
+            return []
+          })(),
+        ])
+        setAnalyses(list)
+        await loadFactoryRunningAnalyses()
+        if (expandedId && !list.find((a) => a.id === expandedId)) {
+          setExpandedId(null)
+        }
       } catch {
-        clearInterval(id)
+        // mantém último estado visível; próxima iteração tenta novamente
       }
-    }, 3000)
+    }, 4000)
     return () => clearInterval(id)
-  }, [selectedAnalysis?.id, selectedAnalysis?.status, expandedId])
+  }, [activeBrandId, hasRunningAnalyses, filters, expandedId])
 
   async function handleGenerate(e) {
     e.preventDefault()
-    if (!brandId) {
-      setError('Selecione uma marca no menu à esquerda')
+    if (!activeBrandId) {
+      setError(
+        viewMode === 'factory'
+          ? 'Cadastre ao menos uma Brand nesta Factory para iniciar os cortes.'
+          : 'Selecione uma marca no menu à esquerda',
+      )
       return
     }
     if (!file && !sourceId && !youtubeUrl) {
@@ -175,19 +334,33 @@ export default function CortesAutomaticos() {
     setError('')
     setCreating(true)
     try {
+      const useBrandThumbDefaults = viewMode === 'factory' && !!selectedBrand
+      const effectiveThumbnailFont = useBrandThumbDefaults
+        ? (selectedBrand.thumbnail_font || 'impact')
+        : (thumbnailFont || 'impact')
+      const effectiveThumbnailBandColor = useBrandThumbDefaults
+        ? (selectedBrand.thumbnail_band_color || '#E12E20')
+        : (thumbnailBandColor || '#E12E20')
+      const effectiveThumbnailTextColor = useBrandThumbDefaults
+        ? (selectedBrand.thumbnail_text_color || '#0A0A0A')
+        : (thumbnailTextColor || '#0A0A0A')
+      const effectiveThumbnailStrokeColor = useBrandThumbDefaults
+        ? (selectedBrand.thumbnail_effect_color || '#FFEBDC')
+        : (thumbnailStrokeColor || '#FFEBDC')
+
       const a = await createAutoCutAnalysis({
         file: file || undefined,
         sourceId: sourceId || undefined,
         youtubeUrl: youtubeUrl || undefined,
-        brandId,
+        brandId: activeBrandId,
         name: name || undefined,
         assunto: assunto || undefined,
         convidados: convidados || undefined,
         promptVersion: promptVersion || undefined,
-        thumbnailFont: thumbnailFont || undefined,
-        thumbnailBandColor: thumbnailBandColor || undefined,
-        thumbnailTextColor: thumbnailTextColor || undefined,
-        thumbnailStrokeColor: thumbnailStrokeColor || undefined,
+        thumbnailFont: effectiveThumbnailFont || undefined,
+        thumbnailBandColor: effectiveThumbnailBandColor || undefined,
+        thumbnailTextColor: effectiveThumbnailTextColor || undefined,
+        thumbnailStrokeColor: effectiveThumbnailStrokeColor || undefined,
         shortsTarget,
         longsTarget,
       })
@@ -214,13 +387,13 @@ export default function CortesAutomaticos() {
   }
 
   async function handleResetStuck() {
-    if (!brandId) return
+    if (!activeBrandId) return
     setResettingStuck(true)
     setError('')
     try {
-      const res = await resetStuckAutoCuts(brandId)
+      const res = await resetStuckAutoCuts(activeBrandId)
       if (res.reset > 0) {
-        const list = await getAutoCutAnalyses(brandId, { excludeFinalized: true })
+        const list = await loadAnalysesForView()
         setAnalyses(list)
         setError(`${res.reset} análise(s) travada(s) limpa(s).`)
       }
@@ -232,13 +405,13 @@ export default function CortesAutomaticos() {
   }
 
   async function handleDeleteStuck() {
-    if (!brandId) return
+    if (!activeBrandId) return
     setDeletingStuck(true)
     setError('')
     try {
-      const res = await deleteStuckAutoCuts(brandId)
+      const res = await deleteStuckAutoCuts(activeBrandId)
       if (res.deleted > 0) {
-        const list = await getAutoCutAnalyses(brandId, { excludeFinalized: true })
+        const list = await loadAnalysesForView()
         setAnalyses(list)
         if (expandedId && !list.find((a) => a.id === expandedId)) setExpandedId(null)
         setError(`${res.deleted} job(s) interrompido(s) deletado(s).`)
@@ -293,10 +466,10 @@ export default function CortesAutomaticos() {
         overlay_margin: overlayAnimationOptions.asset_id ? overlayAnimationOptions.margin : undefined,
         overlay_height: overlayAnimationOptions.asset_id ? overlayAnimationOptions.height : undefined,
       })
-      const list = await getAutoCutAnalyses(brandId, { excludeFinalized: true })
+      const list = await loadAnalysesForView()
       setAnalyses(list)
       setExpandedId(null)
-      getAutoCutCortes(brandId, { finalized: true, ...filters }).then(setFinalizedCortes)
+      await loadFinalizedCortes()
       setError('Cortes em finalização (queima de legendas em background). Atualize a página para ver os resultados.')
     } catch (e) {
       setError(e.message)
@@ -321,8 +494,8 @@ export default function CortesAutomaticos() {
 
   async function handleDeleteCorte(corte) {
     try {
-      await deleteAutoCutCorte(corte.id, brandId)
-      setFinalizedCortes((prev) => prev.filter((c) => c.id !== corte.id))
+      await deleteAutoCutCorte(corte.id, null)
+      await loadFinalizedCortes()
     } catch (e) {
       setError(e.message)
     }
@@ -339,7 +512,15 @@ export default function CortesAutomaticos() {
     setError('')
     try {
       await uploadAutoCutCorteThumbnail(corte.id, file)
-      const refreshed = await getAutoCutCortes(brandId, { finalized: true, ...filters })
+      let refreshed = []
+      if (viewMode === 'factory' && factoryBrandIds.length > 0) {
+        const rows = await Promise.all(
+          factoryBrandIds.map((id) => getAutoCutCortes(id, { finalized: true, ...filters })),
+        )
+        refreshed = Array.from(new Map(rows.flat().map((c) => [c.id, c])).values())
+      } else {
+        refreshed = await getAutoCutCortes(activeBrandId, { finalized: true, ...filters })
+      }
       setFinalizedCortes(refreshed)
       const updated = refreshed.find((x) => x.id === corte.id)
       if (updated) setThumbnailModal(updated)
@@ -371,7 +552,6 @@ export default function CortesAutomaticos() {
       const pad = (n) => String(n).padStart(2, '0')
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
     }
-    const selectedBrand = brands.find((b) => String(b.id) === String(brandId))
     const brandExtra = selectedBrand?.youtube_description_extra || ''
     let preview = '{titulo do video}'
     try {
@@ -427,7 +607,6 @@ export default function CortesAutomaticos() {
     const now = new Date()
     const pad = (n) => String(n).padStart(2, '0')
     const toLocalInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-    const selectedBrand = brands.find((b) => String(b.id) === String(brandId))
     const brandExtra = selectedBrand?.youtube_description_extra || ''
     const title = corte.suggestion?.title || `Corte #${corte.id}`
     let preview = `${title}\n\n(Descrição padrão não pôde ser carregada no momento.)`
@@ -493,6 +672,34 @@ export default function CortesAutomaticos() {
       </p>
 
       {error && <div className="form-error">{error}</div>}
+
+      {viewMode === 'factory' && factoryInfo && (
+        <section className="section factory-processing-control">
+          <div className="factory-control-info">
+            <strong>Factory: {factoryInfo.name}</strong>
+            <span className={`factory-processing-badge ${factoryInfo.processing_paused ? 'paused' : 'running'}`}>
+              {factoryInfo.processing_paused ? 'Fila de jobs pausada' : 'Fila de jobs ativa'}
+            </span>
+            {factoryInfo.processing_paused && (
+              <div className="factory-paused-warning">
+                Novos jobs não iniciam enquanto a pausa estiver ativa. O job já em execução continua até o fim.
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className={`factory-toggle-btn ${factoryInfo.processing_paused ? 'resume' : 'pause'}`}
+            onClick={handleToggleFactoryProcessing}
+            disabled={togglingFactoryProcessing}
+          >
+            {togglingFactoryProcessing
+              ? 'Salvando...'
+              : factoryInfo.processing_paused
+                ? 'Continuar fila de jobs'
+                : 'Pausar fila de jobs'}
+          </button>
+        </section>
+      )}
 
       <section className="section">
         <h2>Gerar cortes</h2>
@@ -582,73 +789,85 @@ export default function CortesAutomaticos() {
             </select>
             <span className="form-hint">PT: transcrição e títulos em português. EN: transcrição e títulos em inglês.</span>
           </div>
-          <div className="form-group">
-            <label>Fonte da thumbnail automática</label>
-            <select
-              value={thumbnailFont}
-              onChange={(e) => setThumbnailFont(e.target.value)}
-            >
-              <option value="anton">Anton</option>
-              <option value="bebas">Bebas Neue</option>
-              <option value="montserrat">Montserrat ExtraBold</option>
-              <option value="impact">Impact</option>
-            </select>
-            <span className="form-hint">Opções fixas: Anton, Bebas Neue, Montserrat ExtraBold, Impact.</span>
-          </div>
-          <div className="form-group">
-            <label>Cor da faixa da thumbnail</label>
-            <div className="color-input-row">
-              <input
-                type="color"
-                value={thumbnailBandColor}
-                onChange={(e) => setThumbnailBandColor(e.target.value.toUpperCase())}
-              />
-              <input
-                type="text"
-                value={thumbnailBandColor}
-                onChange={(e) => setThumbnailBandColor(e.target.value)}
-                className="color-hex"
-                placeholder="#E12E20"
-              />
+          {viewMode === 'factory' ? (
+            <div className="form-group">
+              <label>Estilo da thumbnail</label>
+              <span className="form-hint">
+                No contexto Factory, fonte/cores da thumbnail são herdadas da Brand selecionada.
+                Edite em Brands da Factory.
+              </span>
             </div>
-            <span className="form-hint">Padrão vermelho. Formato HEX: #RRGGBB.</span>
-          </div>
-          <div className="form-group">
-            <label>Cor do texto da thumbnail</label>
-            <div className="color-input-row">
-              <input
-                type="color"
-                value={thumbnailTextColor}
-                onChange={(e) => setThumbnailTextColor(e.target.value.toUpperCase())}
-              />
-              <input
-                type="text"
-                value={thumbnailTextColor}
-                onChange={(e) => setThumbnailTextColor(e.target.value)}
-                className="color-hex"
-                placeholder="#0A0A0A"
-              />
-            </div>
-            <span className="form-hint">Cor principal da letra.</span>
-          </div>
-          <div className="form-group">
-            <label>Cor do efeito/contorno do texto</label>
-            <div className="color-input-row">
-              <input
-                type="color"
-                value={thumbnailStrokeColor}
-                onChange={(e) => setThumbnailStrokeColor(e.target.value.toUpperCase())}
-              />
-              <input
-                type="text"
-                value={thumbnailStrokeColor}
-                onChange={(e) => setThumbnailStrokeColor(e.target.value)}
-                className="color-hex"
-                placeholder="#FFEBDC"
-              />
-            </div>
-            <span className="form-hint">Contorno para destacar a letra sobre a faixa.</span>
-          </div>
+          ) : (
+            <>
+              <div className="form-group">
+                <label>Fonte da thumbnail automática</label>
+                <select
+                  value={thumbnailFont}
+                  onChange={(e) => setThumbnailFont(e.target.value)}
+                >
+                  <option value="anton">Anton</option>
+                  <option value="bebas">Bebas Neue</option>
+                  <option value="montserrat">Montserrat ExtraBold</option>
+                  <option value="impact">Impact</option>
+                </select>
+                <span className="form-hint">Opções fixas: Anton, Bebas Neue, Montserrat ExtraBold, Impact.</span>
+              </div>
+              <div className="form-group">
+                <label>Cor da faixa da thumbnail</label>
+                <div className="color-input-row">
+                  <input
+                    type="color"
+                    value={thumbnailBandColor}
+                    onChange={(e) => setThumbnailBandColor(e.target.value.toUpperCase())}
+                  />
+                  <input
+                    type="text"
+                    value={thumbnailBandColor}
+                    onChange={(e) => setThumbnailBandColor(e.target.value)}
+                    className="color-hex"
+                    placeholder="#E12E20"
+                  />
+                </div>
+                <span className="form-hint">Padrão vermelho. Formato HEX: #RRGGBB.</span>
+              </div>
+              <div className="form-group">
+                <label>Cor do texto da thumbnail</label>
+                <div className="color-input-row">
+                  <input
+                    type="color"
+                    value={thumbnailTextColor}
+                    onChange={(e) => setThumbnailTextColor(e.target.value.toUpperCase())}
+                  />
+                  <input
+                    type="text"
+                    value={thumbnailTextColor}
+                    onChange={(e) => setThumbnailTextColor(e.target.value)}
+                    className="color-hex"
+                    placeholder="#0A0A0A"
+                  />
+                </div>
+                <span className="form-hint">Cor principal da letra.</span>
+              </div>
+              <div className="form-group">
+                <label>Cor do efeito/contorno do texto</label>
+                <div className="color-input-row">
+                  <input
+                    type="color"
+                    value={thumbnailStrokeColor}
+                    onChange={(e) => setThumbnailStrokeColor(e.target.value.toUpperCase())}
+                  />
+                  <input
+                    type="text"
+                    value={thumbnailStrokeColor}
+                    onChange={(e) => setThumbnailStrokeColor(e.target.value)}
+                    className="color-hex"
+                    placeholder="#FFEBDC"
+                  />
+                </div>
+                <span className="form-hint">Contorno para destacar a letra sobre a faixa.</span>
+              </div>
+            </>
+          )}
           <div className="form-row">
             <div className="form-group">
               <label>Qtd. shorts no resultado final</label>
@@ -695,11 +914,11 @@ export default function CortesAutomaticos() {
             )}
           </div>
         </div>
-        {analyses.length === 0 ? (
+        {displayAnalyses.length === 0 ? (
           <p className="empty-msg">Nenhum job ainda.</p>
         ) : (
           <div className="analyses-list">
-            {analyses.map((a) => (
+            {displayAnalyses.map((a) => (
               <div key={a.id} className="analysis-wrapper">
                 <div
                   className={`analysis-card ${expandedId === a.id ? 'selected' : ''}`}

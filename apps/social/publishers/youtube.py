@@ -1,16 +1,19 @@
-"""Publisher para YouTube (vídeos longos e Shorts)."""
+"""Publisher para YouTube (videos longos e Shorts)."""
 import random
 import time
 import json
 from datetime import timedelta, timezone as dt_timezone
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from types import SimpleNamespace
 
 from django.utils import timezone
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-from apps.brands.models import BrandSocialAccount
+from apps.brands.models import BrandSocialAccount, BrandYouTubeCredential
 from apps.jobs.models import ScheduledPost
 from apps.social.publishers.base import BasePublisher
 from apps.social.services.youtube_credentials import get_credentials
@@ -20,11 +23,19 @@ MAX_RETRIES = 10
 
 
 class YouTubePublishError(Exception):
-    def __init__(self, message: str, status_code: int | None = None, reason: str = "", retriable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        reason: str = "",
+        retriable: bool = False,
+        retry_after_seconds: int | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.reason = reason
         self.retriable = retriable
+        self.retry_after_seconds = retry_after_seconds
 
 
 class YouTubePublisher(BasePublisher):
@@ -36,10 +47,12 @@ class YouTubePublisher(BasePublisher):
         video_path: str,
         job=None,
         scheduled_post: ScheduledPost | None = None,
+        youtube_credential: BrandYouTubeCredential | None = None,
     ) -> dict:
-        if not account.access_token and not account.refresh_token:
+        token_holder = youtube_credential if youtube_credential is not None else account
+        if not token_holder.access_token and not token_holder.refresh_token:
             raise ValueError("Conta sem tokens (OAuth não concluído)")
-        creds = get_credentials(account)
+        creds = get_credentials(account, youtube_credential=youtube_credential)
         youtube = build("youtube", "v3", credentials=creds)
         post = scheduled_post
         fallback_title = ""
@@ -59,6 +72,14 @@ class YouTubePublisher(BasePublisher):
             privacy = "private"
         made_for_kids = bool(getattr(account.brand, "youtube_made_for_kids", False))
         publish_at = self._get_publish_at(post)
+        interval_account = account
+        if youtube_credential is not None and not getattr(account, "channel_id", ""):
+            interval_account = SimpleNamespace(
+                brand=getattr(account, "brand", None),
+                channel_id=getattr(youtube_credential, "channel_id", ""),
+                platform=getattr(account, "platform", "YTB"),
+            )
+        self._enforce_channel_min_interval(youtube, interval_account, post)
         # Padrão para agendamento futuro no YouTube: privado + publishAt.
         if publish_at:
             privacy = "private"
@@ -102,9 +123,100 @@ class YouTubePublisher(BasePublisher):
         except YouTubePublishError as e:
             thumb_warning = str(e)
         result = {"video_id": video_id, "platform": account.platform}
+        if youtube_credential is not None:
+            result["youtube_credential_id"] = youtube_credential.id
         if thumb_warning:
             result["warning"] = thumb_warning
         return result
+
+    def _enforce_channel_min_interval(
+        self,
+        youtube,
+        account: BrandSocialAccount,
+        post: ScheduledPost | None,
+    ) -> None:
+        """
+        Evita publicar se o canal ja teve postagem recente abaixo do intervalo minimo da brand.
+        Usa publishedAt do ultimo video retornado pela API do YouTube.
+        """
+        if not post:
+            return
+        channel_id = (account.channel_id or "").strip()
+        if not channel_id:
+            return
+
+        brand = getattr(account, "brand", None)
+        if not brand:
+            return
+
+        platform_codes = {str(code).strip().upper() for code in (post.platforms or []) if code}
+        if platform_codes == {"YT"}:
+            min_interval_minutes = int(getattr(brand, "min_short_interval_minutes", 0) or 0)
+        elif platform_codes == {"YTB"}:
+            min_interval_minutes = int(getattr(brand, "min_long_interval_minutes", 0) or 0)
+        else:
+            platform = (account.platform or "").strip().upper()
+            if platform == "YT":
+                min_interval_minutes = int(getattr(brand, "min_short_interval_minutes", 0) or 0)
+            else:
+                min_interval_minutes = int(getattr(brand, "min_long_interval_minutes", 0) or 0)
+        if min_interval_minutes <= 0:
+            return
+
+        try:
+            resp = youtube.search().list(
+                part="snippet",
+                channelId=channel_id,
+                type="video",
+                order="date",
+                maxResults=1,
+            ).execute()
+        except HttpError as e:
+            err = self._http_error_to_publish_error(e)
+            # Se falhar a leitura, segue sem bloquear publicação.
+            if err.retriable:
+                raise YouTubePublishError(
+                    f"Falha ao consultar ultimo video do canal: {err}",
+                    status_code=err.status_code,
+                    reason=err.reason,
+                    retriable=True,
+                ) from e
+            return
+        except Exception:
+            return
+
+        items = (resp or {}).get("items") or []
+        if not items:
+            return
+        published_at = (
+            items[0].get("snippet", {}).get("publishedAt")
+            if isinstance(items[0], dict)
+            else None
+        )
+        if not published_at:
+            return
+        try:
+            published_dt = datetime.fromisoformat(
+                published_at.replace("Z", "+00:00")
+            ).astimezone(dt_timezone.utc)
+        except Exception:
+            return
+
+        now_utc = timezone.now().astimezone(dt_timezone.utc)
+        elapsed = (now_utc - published_dt).total_seconds()
+        required = min_interval_minutes * 60
+        if elapsed >= required:
+            return
+
+        wait_seconds = int(required - elapsed)
+        wait_minutes = max(1, int((wait_seconds + 59) / 60))
+        raise YouTubePublishError(
+            f"Intervalo minimo entre publicacoes ainda nao cumprido ({min_interval_minutes} min). "
+            f"Aguardar cerca de {wait_minutes} min.",
+            reason="minIntervalNotReached",
+            retriable=True,
+            retry_after_seconds=max(wait_seconds, 60),
+        )
 
     def _build_description(self, post: ScheduledPost | None) -> str:
         """Monta descrição final para YouTube."""
@@ -220,12 +332,41 @@ class YouTubePublisher(BasePublisher):
         except Exception:
             message = str(e)
         retriable = bool(status_code in RETRIABLE_STATUS_CODES or status_code == 429)
+        retry_after_seconds = None
+        if reason == "quotaExceeded":
+            retriable = True
+            retry_after_seconds = self._seconds_until_youtube_quota_reset()
         detail_msg = f"HTTP {status_code or '-'}"
         if reason:
             detail_msg += f" reason={reason}"
         if message:
             detail_msg += f" msg={message}"
-        return YouTubePublishError(detail_msg, status_code=status_code, reason=reason, retriable=retriable)
+        return YouTubePublishError(
+            detail_msg,
+            status_code=status_code,
+            reason=reason,
+            retriable=retriable,
+            retry_after_seconds=retry_after_seconds,
+        )
+
+    def _seconds_until_youtube_quota_reset(self) -> int:
+        """
+        Cota diária do YouTube Data API reinicia na meia-noite do horário do Pacífico.
+        Adiciona buffer de 5 min para evitar corrida no reset.
+        """
+        try:
+            now_pt = timezone.now().astimezone(ZoneInfo("America/Los_Angeles"))
+            next_reset = (now_pt + timedelta(days=1)).replace(
+                hour=0,
+                minute=5,
+                second=0,
+                microsecond=0,
+            )
+            delay = int((next_reset - now_pt).total_seconds())
+            return max(delay, 900)
+        except Exception:
+            # Fallback seguro: 6h
+            return 6 * 60 * 60
 
     def _resumable_upload(self, request):
         response = None

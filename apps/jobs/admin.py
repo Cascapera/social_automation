@@ -1,6 +1,16 @@
 from django import forms
 from django.contrib import admin
-from .models import Job, JobCut, RenderOutput, ScheduledPost
+from .models import (
+    Job,
+    JobCut,
+    RenderOutput,
+    ScheduledPost,
+    VideoInventoryItem,
+    FactoryScheduleRun,
+    FactoryPostingSchedule,
+    FactoryPostingAttemptLog,
+    PostedVideoLog,
+)
 
 
 class JobCutInline(admin.TabularInline):
@@ -94,3 +104,34 @@ class RenderOutputAdmin(admin.ModelAdmin):
 class ScheduledPostAdmin(admin.ModelAdmin):
     list_display = ("id", "job", "scheduled_at", "status", "created_at")
     list_filter = ("status",)
+
+
+@admin.register(VideoInventoryItem)
+class VideoInventoryItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "factory", "brand", "video_type", "status", "virality_score", "source_asset_id", "created_at")
+    list_filter = ("factory", "brand", "video_type", "status")
+    search_fields = ("title", "source_asset_id")
+
+
+@admin.register(FactoryScheduleRun)
+class FactoryScheduleRunAdmin(admin.ModelAdmin):
+    list_display = ("id", "factory", "run_date", "timezone", "created_at")
+    list_filter = ("factory", "timezone", "run_date")
+
+
+@admin.register(FactoryPostingSchedule)
+class FactoryPostingScheduleAdmin(admin.ModelAdmin):
+    list_display = ("id", "factory", "brand", "video_type", "scheduled_at", "status", "attempt_count")
+    list_filter = ("factory", "brand", "video_type", "status")
+
+
+@admin.register(FactoryPostingAttemptLog)
+class FactoryPostingAttemptLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "posting_schedule", "attempt_number", "result", "started_at", "finished_at")
+    list_filter = ("result",)
+
+
+@admin.register(PostedVideoLog)
+class PostedVideoLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "factory", "brand", "external_platform", "external_video_id", "posted_at")
+    list_filter = ("factory", "brand", "external_platform")

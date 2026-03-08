@@ -9,3 +9,6 @@ storage/media/
 .DS_Store
 node_modules/
 frontend/dist/
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal

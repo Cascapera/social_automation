@@ -11,5 +11,5 @@ class AutoCutAnalysisAdmin(admin.ModelAdmin):
 
 @admin.register(AutoCutSuggestion)
 class AutoCutSuggestionAdmin(admin.ModelAdmin):
-    list_display = ("id", "analysis", "cut_type", "title", "start_tc", "end_tc", "virality_score", "rank")
-    list_filter = ("cut_type",)
+    list_display = ("id", "analysis", "cut_type", "title", "theme_category", "source_asset_id", "virality_score", "rank")
+    list_filter = ("cut_type", "theme_category")

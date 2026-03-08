@@ -11,4 +11,8 @@ app.conf.beat_schedule = {
         "task": "apps.social.tasks.check_scheduled_posts_task",
         "schedule": 60.0,  # a cada 60 segundos
     },
+    "generate-daily-factory-schedules": {
+        "task": "apps.social.tasks.generate_daily_factory_schedules_task",
+        "schedule": 300.0,  # varre factories a cada 5 minutos
+    },
 }

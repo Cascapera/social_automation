@@ -32,12 +32,12 @@ cd C:\apps\social_automation
 # copy .env.example .env
 
 ==================================================
-3) BUILD E SUBIR BACKEND + REDIS + CELERY WORKER + BEAT
+3) BUILD E SUBIR BACKEND + REDIS + CELERY WORKERS + BEAT
 ==================================================
 
 cd C:\apps\social_automation
 docker compose build
-docker compose up -d redis web celery beat
+docker compose up -d redis web celery celery_publish beat
 
 # Conferir status:
 docker compose ps
@@ -57,8 +57,11 @@ docker compose logs -f beat
 # Logs da API:
 docker compose logs -f web
 
-# Logs do worker:
+# Logs do worker de processamento:
 docker compose logs -f celery
+
+# Logs do worker de publicação/agendamento:
+docker compose logs -f celery_publish
 
 # Migrações manuais (se precisar):
 docker compose exec web python manage.py migrate --noinput
@@ -88,7 +91,7 @@ docker run --rm -it `
 docker compose down
 
 # Subir novamente:
-docker compose up -d redis web celery beat
+docker compose up -d redis web celery celery_publish beat
 
 ==================================================
 8) ACESSO REMOTO NA REDE
@@ -104,7 +107,7 @@ docker compose up -d redis web celery beat
 9) CHECKLIST FINAL
 ==================================================
 
-1. docker compose ps mostra redis/web/celery "Up"
+1. docker compose ps mostra redis/web/celery/celery_publish "Up"
 2. docker compose ps mostra serviço beat rodando
 3. API responde em http://IP_DO_SERVIDOR:8000
 4. Frontend abre em http://IP_DO_SERVIDOR:5173 (se subir Vite)

@@ -1,0 +1,61 @@
+REINICIO RAPIDO (3 COMANDOS)
+
+1) Subir tudo
+   docker compose up -d
+
+2) Conferir servicos
+   docker compose ps
+
+3) Conferir fila e worker principal
+   docker compose exec redis redis-cli LLEN processing
+   docker compose exec celery celery -A config inspect active
+
+
+CHECKLIST DETALHADO - REINICIO DA MAQUINA (FACTORY)
+
+1) Subir os containers
+   docker compose up -d
+
+2) Confirmar se todos os servicos estao de pe
+   docker compose ps
+   Esperado: web, redis, celery, celery_publish, beat com status "Up"
+
+3) Confirmar filas e workers
+   docker compose exec redis redis-cli LLEN processing
+   docker compose exec redis redis-cli LLEN publish
+   docker compose exec celery celery -A config inspect active_queues
+   Esperado:
+   - processing/publish com numero coerente (0 ou >0 se houver backlog)
+   - worker "processing" e worker "publish" ativos
+
+4) Confirmar tasks periodicas (agendamento/publicacao)
+   docker compose logs --tail=80 beat
+   docker compose logs --tail=80 celery_publish
+   Esperado:
+   - beat disparando check-scheduled-posts e generate-daily-factory-schedules
+   - celery_publish consumindo fila publish
+
+5) Confirmar processamento de cortes automaticos
+   docker compose logs --tail=120 celery
+   Esperado:
+   - analyze_auto_cuts_task e finalizar_auto_cut_task recebendo/executando
+
+6) Conferir statuses travados (se necessario)
+   docker compose exec web python manage.py shell -c "from apps.auto_cuts.models import AutoCutAnalysis as A; print(list(A.objects.filter(status__in=['pending','transcribing','analyzing','error']).order_by('-id').values('id','status','progress','progress_message','error')[:20]))"
+
+7) Se houver job travado apos desligamento abrupto
+   7.1) Reiniciar apenas o worker de processamento:
+        docker compose restart celery
+   7.2) Reenfileirar manualmente o id do job (exemplo id=123):
+        docker compose exec web python manage.py shell -c "from apps.auto_cuts.models import AutoCutAnalysis as A; from apps.auto_cuts.tasks import analyze_auto_cuts_task; i=123; A.objects.filter(id=i).update(status='pending', error=''); analyze_auto_cuts_task.apply_async(args=[i], queue='processing'); print('reenfileirado', i)"
+
+8) URLS uteis para validar no frontend
+   - Cortes Automaticos: validar fila/progresso e cortes finalizados
+   - Banco de Videos (Factory): validar entrada no inventario
+   - Agendamento (Factory): validar agenda semanal e status
+   - Videos Postados: validar historico apos publicacao
+
+OBSERVACOES
+- Config recomendada de teste atual: WHISPER_DEVICE=cpu e WHISPER_MODEL=small.
+- Horario interno usa timezone da factory (ex.: America/Sao_Paulo) para agendamento.
+- Dados persistem no projeto (db.sqlite3 e storage/media).

@@ -163,8 +163,25 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "django-db")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = os.getenv("CELERY_TIMEZONE", TIME_ZONE)
+# Para alinhar scheduler/logs ao fuso local quando desejado.
+CELERY_ENABLE_UTC = os.getenv("CELERY_ENABLE_UTC", "0").lower() in ("1", "true", "yes")
 # CELERY_EAGER=1: executa tasks no mesmo processo (sem Redis). Útil para dev sem Docker.
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "").lower() in ("1", "true", "yes")
+CELERY_TASK_DEFAULT_QUEUE = "processing"
+CELERY_TASK_ROUTES = {
+    # Fila dedicada para publicação/agendamento (não deve ficar bloqueada por transcrição/render)
+    "apps.social.tasks.check_scheduled_posts_task": {"queue": "publish"},
+    "apps.social.tasks.generate_daily_factory_schedules_task": {"queue": "publish"},
+    "apps.social.tasks.post_to_platforms_task": {"queue": "publish"},
+    "apps.social.tasks.reconcile_youtube_schedules_task": {"queue": "publish"},
+    # Processamento pesado fica na fila padrão de processamento
+    "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": "processing"},
+    "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": "processing"},
+    "apps.jobs.tasks.process_job": {"queue": "processing"},
+    "apps.jobs.tasks.generate_subtitles_task": {"queue": "processing"},
+    "apps.jobs.tasks.burn_subtitles_task": {"queue": "processing"},
+}
 
 
 # FFmpeg

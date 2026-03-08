@@ -1,25 +1,115 @@
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
+from django.utils.text import slugify
 from rest_framework import serializers
-from apps.brands.models import Brand, BrandAsset, BrandSocialAccount
+from apps.brands.models import (
+    Factory,
+    Brand,
+    BrandAsset,
+    BrandSocialAccount,
+    BrandYouTubeCredential,
+)
+from apps.social.services.secret_crypto import encrypt_secret, is_secret_configured
 
 User = get_user_model()
 from apps.mediahub.models import SourceVideo
 from apps.cuts.models import Cut
-from apps.jobs.models import Job, JobCut, RenderOutput, ScheduledPost
+from apps.jobs.models import (
+    Job,
+    JobCut,
+    RenderOutput,
+    ScheduledPost,
+    VideoInventoryItem,
+    FactoryPostingSchedule,
+    PostedVideoLog,
+)
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte
 
 
+class FactorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Factory
+        fields = [
+            "id",
+            "name",
+            "timezone",
+            "is_active",
+            "scheduling_paused",
+            "processing_paused",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+
 class BrandSerializer(serializers.ModelSerializer):
+    youtube_client_secret = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        write_only=True,
+    )
+    youtube_client_secret_configured = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Brand
-        fields = ["id", "name", "slug", "youtube_made_for_kids", "youtube_description_extra"]
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "factory",
+            "theme_category",
+            "youtube_made_for_kids",
+            "youtube_description_extra",
+            "youtube_client_id",
+            "youtube_client_secret",
+            "youtube_client_secret_configured",
+            "youtube_redirect_uri",
+            "thumbnail_font",
+            "thumbnail_band_color",
+            "thumbnail_text_color",
+            "thumbnail_effect_color",
+            "min_short_interval_minutes",
+            "min_long_interval_minutes",
+            "max_shorts_per_day",
+            "max_longs_per_day",
+            "short_window_start",
+            "short_window_end",
+            "long_window_start",
+            "long_window_end",
+        ]
         extra_kwargs = {"slug": {"required": False}}
 
+    def get_youtube_client_secret_configured(self, obj):
+        return is_secret_configured(getattr(obj, "youtube_client_secret", ""))
+
     def create(self, validated_data):
+        if "youtube_client_secret" in validated_data:
+            validated_data["youtube_client_secret"] = encrypt_secret(
+                validated_data.get("youtube_client_secret", "")
+            )
         if not validated_data.get("slug"):
-            from django.utils.text import slugify
-            validated_data["slug"] = slugify(validated_data["name"])
-        return super().create(validated_data)
+            base_slug = slugify(validated_data["name"]) or "brand"
+            slug = base_slug
+            i = 2
+            while Brand.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{i}"
+                i += 1
+            validated_data["slug"] = slug
+        try:
+            return super().create(validated_data)
+        except IntegrityError as exc:
+            if "brands_brand.slug" in str(exc):
+                raise serializers.ValidationError(
+                    {"name": "Já existe uma brand com slug semelhante. Tente outro nome."}
+                )
+            raise
+
+    def update(self, instance, validated_data):
+        if "youtube_client_secret" in validated_data:
+            validated_data["youtube_client_secret"] = encrypt_secret(
+                validated_data.get("youtube_client_secret", "")
+            )
+        return super().update(instance, validated_data)
 
 
 class BrandAssetSerializer(serializers.ModelSerializer):
@@ -35,6 +125,73 @@ class BrandSocialAccountSerializer(serializers.ModelSerializer):
         model = BrandSocialAccount
         fields = ["id", "brand", "platform", "channel_id", "account_name", "created_at"]
         read_only_fields = ["id", "brand", "platform", "channel_id", "account_name", "created_at"]
+
+
+class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
+    client_secret = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    client_secret_configured = serializers.SerializerMethodField(read_only=True)
+    is_connected = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = BrandYouTubeCredential
+        fields = [
+            "id",
+            "brand",
+            "label",
+            "order_index",
+            "is_active",
+            "client_id",
+            "client_secret",
+            "client_secret_configured",
+            "redirect_uri",
+            "channel_id",
+            "account_name",
+            "quota_exceeded_until",
+            "last_error",
+            "is_connected",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "channel_id",
+            "account_name",
+            "quota_exceeded_until",
+            "last_error",
+            "is_connected",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_client_secret_configured(self, obj):
+        return is_secret_configured(getattr(obj, "client_secret", ""))
+
+    def get_is_connected(self, obj):
+        return bool((obj.refresh_token or "").strip() and (obj.channel_id or "").strip())
+
+    def validate_order_index(self, value):
+        if value is None:
+            return value
+        return max(1, int(value))
+
+    def create(self, validated_data):
+        if "client_secret" in validated_data:
+            validated_data["client_secret"] = encrypt_secret(validated_data.get("client_secret", ""))
+        if not validated_data.get("order_index"):
+            brand = validated_data.get("brand")
+            if brand:
+                max_order = (
+                    BrandYouTubeCredential.objects.filter(brand=brand)
+                    .order_by("-order_index")
+                    .values_list("order_index", flat=True)
+                    .first()
+                ) or 0
+                validated_data["order_index"] = max_order + 1
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "client_secret" in validated_data:
+            validated_data["client_secret"] = encrypt_secret(validated_data.get("client_secret", ""))
+        return super().update(instance, validated_data)
 
 
 class SourceVideoSerializer(serializers.ModelSerializer):
@@ -258,6 +415,8 @@ class AutoCutSuggestionSerializer(serializers.ModelSerializer):
             "reason",
             "hook",
             "virality_score",
+            "theme_category",
+            "source_asset_id",
             "rank",
             "duration_seconds",
             "duration_minutes",
@@ -348,3 +507,91 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
             "cortes",
         ]
         read_only_fields = ["status", "progress", "progress_message", "transcript", "error", "created_at"]
+
+
+class VideoInventoryItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VideoInventoryItem
+        fields = [
+            "id",
+            "factory",
+            "brand",
+            "auto_cut_corte",
+            "video_type",
+            "title",
+            "description",
+            "virality_score",
+            "source_asset_id",
+            "source_metadata",
+            "status",
+            "scheduled_for",
+            "posted_at",
+            "attempt_count",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class FactoryPostingScheduleSerializer(serializers.ModelSerializer):
+    posted_at = serializers.SerializerMethodField()
+    posted_on_channel = serializers.SerializerMethodField()
+    external_video_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FactoryPostingSchedule
+        fields = [
+            "id",
+            "factory",
+            "brand",
+            "inventory_item",
+            "video_type",
+            "scheduled_at",
+            "status",
+            "attempt_count",
+            "next_retry_at",
+            "scheduled_post",
+            "posted_at",
+            "posted_on_channel",
+            "external_video_id",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_posted_at(self, obj):
+        post = getattr(obj, "scheduled_post", None)
+        if post and getattr(post, "posted_at", None):
+            return post.posted_at
+        item = getattr(obj, "inventory_item", None)
+        return getattr(item, "posted_at", None)
+
+    def get_posted_on_channel(self, obj):
+        if obj.status != "DONE":
+            return False
+        return self.get_posted_at(obj) is not None
+
+    def get_external_video_id(self, obj):
+        post = getattr(obj, "scheduled_post", None)
+        if not post:
+            return ""
+        external_ids = getattr(post, "external_ids", {}) or {}
+        for value in external_ids.values():
+            if value:
+                return str(value)
+        return ""
+
+
+class PostedVideoLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PostedVideoLog
+        fields = [
+            "id",
+            "factory",
+            "brand",
+            "inventory_item",
+            "external_platform",
+            "external_video_id",
+            "posted_at",
+            "metadata_snapshot",
+            "created_at",
+        ]

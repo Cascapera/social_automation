@@ -5,21 +5,56 @@ from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
-from apps.brands.models import BrandSocialAccount
+from apps.brands.models import BrandSocialAccount, BrandYouTubeCredential
+from apps.social.services.secret_crypto import decrypt_secret
 
 
-def get_credentials(account: BrandSocialAccount) -> Credentials:
+def get_credentials(
+    account: BrandSocialAccount,
+    youtube_credential: BrandYouTubeCredential | None = None,
+    use_check_client: bool = False,
+) -> Credentials:
     """Retorna Credentials válidas, renovando access_token se expirado."""
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    brand = getattr(account, "brand", None)
+    source = youtube_credential if youtube_credential is not None else brand
+    source_secret = ""
+    source_client_id = ""
+    if source is not None:
+        try:
+            source_secret = decrypt_secret(
+                getattr(source, "client_secret", "")
+                or getattr(source, "youtube_client_secret", "")
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "Falha ao descriptografar client_secret do YouTube. "
+                "Verifique SOCIAL_ENCRYPTION_KEY."
+            ) from exc
+        source_client_id = str(
+            getattr(source, "client_id", "")
+            or getattr(source, "youtube_client_id", "")
+            or ""
+        ).strip()
+    check_client_id = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
+    check_client_secret = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+    if use_check_client and check_client_id and check_client_secret:
+        client_id = check_client_id
+        client_secret = check_client_secret
+    else:
+        client_id = source_client_id or os.getenv("GOOGLE_CLIENT_ID")
+        client_secret = source_secret or os.getenv("GOOGLE_CLIENT_SECRET")
     if not client_id or not client_secret:
-        raise ValueError("GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET devem estar configurados")
-    expiry = account.expires_at
+        raise ValueError(
+            "OAuth do YouTube não configurado para a brand "
+            "(youtube_client_id/youtube_client_secret) e sem fallback global."
+        )
+    token_source = youtube_credential if youtube_credential is not None else account
+    expiry = token_source.expires_at
     if expiry and getattr(expiry, "tzinfo", None) is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
     creds = Credentials(
-        token=account.access_token or None,
-        refresh_token=account.refresh_token or None,
+        token=token_source.access_token or None,
+        refresh_token=token_source.refresh_token or None,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=client_id,
         client_secret=client_secret,
@@ -35,8 +70,8 @@ def get_credentials(account: BrandSocialAccount) -> Credentials:
     # Renova quando expirado ou quando não temos token atual.
     if creds.expired or not creds.token:
         creds.refresh(Request())
-        account.access_token = creds.token
+        token_source.access_token = creds.token
         if creds.expiry:
-            account.expires_at = creds.expiry
-        account.save(update_fields=["access_token", "expires_at"])
+            token_source.expires_at = creds.expiry
+        token_source.save(update_fields=["access_token", "expires_at", "updated_at"])
     return creds

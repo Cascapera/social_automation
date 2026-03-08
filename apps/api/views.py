@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -14,10 +15,17 @@ from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny
 from django.http import FileResponse
 
-from apps.brands.models import Brand, BrandAsset, BrandSocialAccount
+from apps.brands.models import Factory, Brand, BrandAsset, BrandSocialAccount, BrandYouTubeCredential
 from apps.mediahub.models import SourceVideo
 from apps.cuts.models import Cut
-from apps.jobs.models import Job, RenderOutput, ScheduledPost
+from apps.jobs.models import (
+    Job,
+    RenderOutput,
+    ScheduledPost,
+    VideoInventoryItem,
+    FactoryPostingSchedule,
+    PostedVideoLog,
+)
 from apps.jobs.tasks import process_job, generate_subtitles_task, burn_subtitles_task
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte
 from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
@@ -26,6 +34,7 @@ from apps.jobs.services.subtitles import align_edited_to_original_words
 from apps.jobs.services.job_actions import archive_job as do_archive_job, delete_job as do_delete_job
 
 from .serializers import (
+    FactorySerializer,
     BrandSerializer,
     BrandAssetSerializer,
     SourceVideoSerializer,
@@ -38,6 +47,10 @@ from .serializers import (
     AutoCutSuggestionSerializer,
     AutoCutCorteSerializer,
     BrandSocialAccountSerializer,
+    BrandYouTubeCredentialSerializer,
+    VideoInventoryItemSerializer,
+    FactoryPostingScheduleSerializer,
+    PostedVideoLogSerializer,
 )
 
 User = get_user_model()
@@ -127,11 +140,25 @@ class RegisterViewSet(viewsets.ViewSet):
         )
 
 
+class FactoryViewSet(viewsets.ModelViewSet):
+    """CRUD de factories (pool multicanal)."""
+    queryset = Factory.objects.all().order_by("name")
+    serializer_class = FactorySerializer
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+
 class BrandViewSet(viewsets.ModelViewSet):
     """Lista e cria marcas."""
     queryset = Brand.objects.all()
     serializer_class = BrandSerializer
-    http_method_names = ["get", "post", "patch", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        return qs
 
     @action(detail=True, methods=["get"])
     def social_accounts(self, request, pk=None):
@@ -147,12 +174,34 @@ class BrandViewSet(viewsets.ModelViewSet):
         from apps.social.services.youtube_oauth import get_authorization_url, get_client_config
 
         brand = self.get_object()
-        if not get_client_config():
+        youtube_credential_id = request.query_params.get("youtube_credential_id")
+        youtube_credential = None
+        if youtube_credential_id:
+            youtube_credential = BrandYouTubeCredential.objects.filter(
+                id=youtube_credential_id,
+                brand=brand,
+            ).first()
+            if not youtube_credential:
+                return Response(
+                    {"error": "Credencial YouTube não encontrada para esta brand"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        try:
+            config = get_client_config(brand=brand, youtube_credential=youtube_credential)
+        except ValueError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if not config:
             return Response(
                 {"error": "OAuth não configurado"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        url = get_authorization_url(brand.id)
+        url = get_authorization_url(
+            brand.id,
+            youtube_credential.id if youtube_credential else None,
+        )
         return Response({"url": url})
 
     @action(detail=True, methods=["patch"], url_path="youtube-description")
@@ -191,6 +240,20 @@ class BrandSocialAccountViewSet(viewsets.ModelViewSet):
         if brand:
             qs = qs.filter(brand_id=brand)
         return qs
+
+
+class BrandYouTubeCredentialViewSet(viewsets.ModelViewSet):
+    """Credenciais YouTube por brand para fallback de cota."""
+    queryset = BrandYouTubeCredential.objects.all()
+    serializer_class = BrandYouTubeCredentialSerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related("brand")
+        brand = self.request.query_params.get("brand")
+        if brand:
+            qs = qs.filter(brand_id=brand)
+        return qs.order_by("order_index", "id")
 
 
 class BrandAssetViewSet(viewsets.ModelViewSet):
@@ -619,6 +682,12 @@ class ScheduledPostViewSet(viewsets.ModelViewSet):
                 Q(job__user=self.request.user)
                 | Q(auto_cut_corte__analysis__user=self.request.user)
             )
+        factory = self.request.query_params.get("factory")
+        if factory:
+            qs = qs.filter(
+                Q(job__brand__factory_id=factory)
+                | Q(auto_cut_corte__analysis__brand__factory_id=factory)
+            )
         brand = self.request.query_params.get("brand")
         if brand:
             qs = qs.filter(
@@ -659,6 +728,296 @@ class ScheduledPostViewSet(viewsets.ModelViewSet):
         post.save(update_fields=["scheduled_at", "status", "error", "retry_count", "posted_at"])
         serializer = self.get_serializer(post)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="remove-awaiting")
+    def remove_awaiting(self, request, pk=None):
+        """
+        Remove item aguardando postagem:
+        - remove ScheduledPost
+        - remove FactoryPostingSchedule vinculado
+        - remove VideoInventoryItem do banco
+        - remove mídia local do corte (quando existir)
+        """
+        post = self.get_object()
+        if post.status == "DONE":
+            return Response(
+                {"error": "Não é possível remover um vídeo já postado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        schedule = getattr(post, "factory_schedule", None)
+        inventory = getattr(schedule, "inventory_item", None) if schedule else None
+        deleted_files = 0
+        deleted_thumbnails = 0
+
+        with transaction.atomic():
+            # 1) apaga mídia local vinculada ao inventário (quando houver corte)
+            if inventory and inventory.auto_cut_corte_id:
+                corte = inventory.auto_cut_corte
+                if corte and getattr(corte, "file", None):
+                    try:
+                        corte.file.delete(save=False)
+                        deleted_files += 1
+                    except Exception:
+                        pass
+                if corte and getattr(corte, "thumbnail", None):
+                    try:
+                        corte.thumbnail.delete(save=False)
+                        deleted_thumbnails += 1
+                    except Exception:
+                        pass
+
+            # 2) remove agendamento operacional e inventário
+            schedule_id = schedule.id if schedule else None
+            inventory_id = inventory.id if inventory else None
+            if schedule:
+                schedule.delete()
+            if inventory:
+                inventory.delete()
+
+            # 3) remove ScheduledPost
+            post_id = post.id
+            post.delete()
+
+        return Response(
+            {
+                "ok": True,
+                "deleted_scheduled_post_id": post_id,
+                "deleted_factory_schedule_id": schedule_id,
+                "deleted_inventory_item_id": inventory_id,
+                "deleted_media_files": deleted_files,
+                "deleted_media_thumbnails": deleted_thumbnails,
+            }
+        )
+
+
+class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
+    """Banco de vídeos por brand/factory."""
+    queryset = VideoInventoryItem.objects.all().select_related("brand", "factory", "auto_cut_corte")
+    serializer_class = VideoInventoryItemSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        brand = self.request.query_params.get("brand")
+        status_filter = self.request.query_params.get("status")
+        video_type = self.request.query_params.get("video_type")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        if brand:
+            qs = qs.filter(brand_id=brand)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        if video_type in ("SHORT", "LONG"):
+            qs = qs.filter(video_type=video_type)
+        return qs.order_by("-created_at")
+
+    @action(detail=True, methods=["post"], url_path="remove-awaiting")
+    def remove_awaiting(self, request, pk=None):
+        """
+        Remove item aguardando postagem diretamente pelo inventário:
+        - remove ScheduledPost vinculado (quando houver)
+        - remove FactoryPostingSchedule vinculado (quando houver)
+        - remove VideoInventoryItem
+        - remove mídia local do corte
+        """
+        inventory = self.get_object()
+        if inventory.status == "POSTED":
+            return Response(
+                {"error": "Não é possível remover um vídeo já postado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        schedules = list(
+            FactoryPostingSchedule.objects.select_related("scheduled_post")
+            .filter(inventory_item=inventory)
+            .order_by("id")
+        )
+        scheduled_post_ids = [
+            s.scheduled_post_id for s in schedules if getattr(s, "scheduled_post_id", None)
+        ]
+
+        deleted_files = 0
+        deleted_thumbnails = 0
+        with transaction.atomic():
+            corte = getattr(inventory, "auto_cut_corte", None)
+            if corte and getattr(corte, "file", None):
+                try:
+                    corte.file.delete(save=False)
+                    deleted_files += 1
+                except Exception:
+                    pass
+            if corte and getattr(corte, "thumbnail", None):
+                try:
+                    corte.thumbnail.delete(save=False)
+                    deleted_thumbnails += 1
+                except Exception:
+                    pass
+
+            if scheduled_post_ids:
+                ScheduledPost.objects.filter(id__in=scheduled_post_ids).delete()
+            if schedules:
+                FactoryPostingSchedule.objects.filter(id__in=[s.id for s in schedules]).delete()
+
+            inventory_id = inventory.id
+            inventory.delete()
+
+        return Response(
+            {
+                "ok": True,
+                "deleted_inventory_item_id": inventory_id,
+                "deleted_factory_schedule_count": len(schedules),
+                "deleted_scheduled_post_count": len(scheduled_post_ids),
+                "deleted_media_files": deleted_files,
+                "deleted_media_thumbnails": deleted_thumbnails,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="retry-posting")
+    def retry_posting(self, request, pk=None):
+        """
+        Reativa a postagem para um item aguardando do inventário:
+        - ScheduledPost -> PENDING (mantendo horário planejado quando existir)
+        - FactoryPostingSchedule -> PLANNED
+        - VideoInventoryItem -> SCHEDULED
+        - Enfileira tentativa imediata somente se for para agora
+        """
+        inventory = self.get_object()
+        if inventory.status == "POSTED":
+            return Response(
+                {"error": "Este vídeo já foi postado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        schedule = (
+            FactoryPostingSchedule.objects.select_related("scheduled_post")
+            .filter(inventory_item=inventory)
+            .order_by("-id")
+            .first()
+        )
+        now = timezone.now()
+        post = schedule.scheduled_post if schedule and schedule.scheduled_post_id else None
+        planned_slot = (
+            (schedule.scheduled_at if schedule else None)
+            or inventory.scheduled_for
+            or (post.scheduled_at if post else None)
+        )
+        # Respeita o horário já planejado; só usa "agora + 30s" se não houver horário válido.
+        next_try = planned_slot if planned_slot and planned_slot > now else (now + timedelta(seconds=30))
+
+        # Se não houver ScheduledPost, cria um agendamento imediato para permitir
+        # "tentar novamente" direto do banco (status AVAILABLE/SCHEDULED sem post vinculado).
+        if post is None:
+            corte = getattr(inventory, "auto_cut_corte", None)
+            if not corte:
+                return Response(
+                    {"error": "Item sem corte/mídia vinculada para postagem."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            platform = "YT" if inventory.video_type == "SHORT" else "YTB"
+            post = ScheduledPost.objects.create(
+                job=None,
+                auto_cut_corte=corte,
+                platforms=[platform],
+                social_account=None,
+                scheduled_at=next_try,
+                title=(inventory.title or "")[:200],
+                description=(inventory.description or ""),
+                privacy_status="private",
+                status="PENDING",
+            )
+            if schedule is None:
+                schedule = FactoryPostingSchedule.objects.create(
+                    factory=inventory.factory,
+                    brand=inventory.brand,
+                    inventory_item=inventory,
+                    video_type=inventory.video_type,
+                    scheduled_at=next_try,
+                    status="PLANNED",
+                    next_retry_at=next_try,
+                    scheduled_post=post,
+                )
+            else:
+                schedule.scheduled_post = post
+                schedule.scheduled_at = next_try
+                schedule.status = "PLANNED"
+                schedule.next_retry_at = next_try
+                schedule.save(
+                    update_fields=["scheduled_post", "scheduled_at", "status", "next_retry_at", "updated_at"]
+                )
+        elif post.status == "DONE":
+            return Response(
+                {"error": "Este agendamento já foi concluído."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            post.status = "PENDING"
+            post.retry_count = 0
+            post.error = ""
+            post.posted_at = None
+            post.scheduled_at = next_try
+            post.save(update_fields=["status", "retry_count", "error", "posted_at", "scheduled_at"])
+
+            schedule.status = "PLANNED"
+            schedule.next_retry_at = next_try
+            schedule.save(update_fields=["status", "next_retry_at", "updated_at"])
+
+            inventory.status = "SCHEDULED"
+            inventory.scheduled_for = next_try
+            inventory.last_error = ""
+            inventory.save(update_fields=["status", "scheduled_for", "last_error", "updated_at"])
+
+        from apps.social.tasks import post_to_platforms_task
+
+        queued_immediately = next_try <= (now + timedelta(seconds=35))
+        if queued_immediately:
+            post_to_platforms_task.delay(post.id)
+
+        return Response(
+            {
+                "ok": True,
+                "inventory_item_id": inventory.id,
+                "scheduled_post_id": post.id,
+                "scheduled_for": next_try,
+                "queued_immediately": queued_immediately,
+            }
+        )
+
+
+class FactoryPostingScheduleViewSet(viewsets.ReadOnlyModelViewSet):
+    """Agenda e status operacional para debug."""
+    queryset = FactoryPostingSchedule.objects.all().select_related("factory", "brand", "inventory_item", "scheduled_post")
+    serializer_class = FactoryPostingScheduleSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        brand = self.request.query_params.get("brand")
+        status_filter = self.request.query_params.get("status")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        if brand:
+            qs = qs.filter(brand_id=brand)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs.order_by("scheduled_at", "id")
+
+
+class PostedVideoLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Histórico de vídeos já postados por brand."""
+    queryset = PostedVideoLog.objects.all().select_related("factory", "brand", "inventory_item")
+    serializer_class = PostedVideoLogSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        brand = self.request.query_params.get("brand")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        if brand:
+            qs = qs.filter(brand_id=brand)
+        return qs.order_by("-posted_at", "-id")
 
 
 class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
@@ -803,7 +1162,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             return Response({"error": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN)
         data = request.data or {}
         subtitle_style = data.get("subtitle_style") or {}
-        vertical_mode = data.get("vertical_mode") or "frame_center"
+        vertical_mode = data.get("vertical_mode") or "zoom_crop"
         background_color = data.get("background_color") or "#000000"
         custom_text = data.get("custom_text") or ""
         font_size_title = data.get("font_size_title")
