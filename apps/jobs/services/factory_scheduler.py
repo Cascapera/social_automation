@@ -211,7 +211,7 @@ def generate_daily_schedule_for_factory(
                 scheduled_post=scheduled_post,
             )
             item.status = "SCHEDULED"
-            item.scheduled_for = plan.scheduled_at.astimezone(dt_timezone.utc)
-            item.save(update_fields=["status", "scheduled_for", "updated_at"])
+            # scheduled_for só é preenchido quando o YouTube confirmar o envio (em _sync_factory_posting_status)
+            item.save(update_fields=["status", "updated_at"])
             created_count += 1
     return {"factory_id": factory.id, "created": created_count, "run_id": run.id}

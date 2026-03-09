@@ -837,7 +837,12 @@ class ScheduledPostViewSet(viewsets.ModelViewSet):
 
 class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
     """Banco de vídeos por brand/factory."""
-    queryset = VideoInventoryItem.objects.all().select_related("brand", "factory", "auto_cut_corte")
+    queryset = VideoInventoryItem.objects.all().select_related(
+        "brand", "factory",
+        "auto_cut_corte",
+        "auto_cut_corte__analysis",
+        "auto_cut_corte__analysis__source",
+    )
     serializer_class = VideoInventoryItemSerializer
 
     def get_queryset(self):
@@ -1008,9 +1013,8 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
             schedule.save(update_fields=["status", "next_retry_at", "updated_at"])
 
             inventory.status = "SCHEDULED"
-            inventory.scheduled_for = next_try
             inventory.last_error = ""
-            inventory.save(update_fields=["status", "scheduled_for", "last_error", "updated_at"])
+            inventory.save(update_fields=["status", "last_error", "updated_at"])
 
         from apps.social.tasks import post_to_platforms_task
 

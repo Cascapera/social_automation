@@ -203,7 +203,7 @@ export default function BancoVideos() {
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
                           <td className="banco-title">{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
-                          <td>{item.source_asset_id || '-'}</td>
+                          <td>{item.source_display_name || item.source_asset_id || '-'}</td>
                           <td>{STATUS_LABEL[item.status] || item.status || '-'}</td>
                           <td>{formatDate(item.created_at)}</td>
                           <td>{formatDate(item.scheduled_for)}</td>
@@ -261,7 +261,7 @@ export default function BancoVideos() {
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
                           <td className="banco-title">{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
-                          <td>{item.source_asset_id || '-'}</td>
+                          <td>{item.source_display_name || item.source_asset_id || '-'}</td>
                           <td>{formatDate(item.posted_at)}</td>
                         </tr>
                       ))}

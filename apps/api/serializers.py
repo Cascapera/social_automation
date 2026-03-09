@@ -515,6 +515,8 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
 
 
 class VideoInventoryItemSerializer(serializers.ModelSerializer):
+    source_display_name = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = VideoInventoryItem
         fields = [
@@ -527,6 +529,7 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
             "description",
             "virality_score",
             "source_asset_id",
+            "source_display_name",
             "source_metadata",
             "status",
             "scheduled_for",
@@ -536,6 +539,29 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_source_display_name(self, obj):
+        """Nome do vídeo original (source, YouTube URL ou arquivo) para exibir na coluna Fonte."""
+        corte = getattr(obj, "auto_cut_corte", None)
+        if not corte:
+            return (obj.source_asset_id or "").strip() or "-"
+        analysis = getattr(corte, "analysis", None)
+        if not analysis:
+            return (obj.source_asset_id or "").strip() or "-"
+        if getattr(analysis, "source_id", None) and getattr(analysis, "source", None):
+            title = (getattr(analysis.source, "title", None) or "").strip()
+            if title:
+                return title
+        url = (getattr(analysis, "youtube_url", None) or "").strip()
+        if url:
+            return url
+        f = getattr(analysis, "file", None)
+        if f and getattr(f, "name", None):
+            return f.name
+        name = (getattr(analysis, "name", None) or "").strip()
+        if name:
+            return name
+        return (obj.source_asset_id or "").strip() or "-"
 
 
 class FactoryPostingScheduleSerializer(serializers.ModelSerializer):

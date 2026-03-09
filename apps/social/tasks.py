@@ -356,9 +356,10 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
         item.status = "POSTED"
         item.posted_at = post.posted_at or now
+        item.scheduled_for = post.scheduled_at  # preenche "Agendado" só quando YouTube confirmou
         item.last_error = ""
         item.attempt_count = int(post.retry_count or 0)
-        item.save(update_fields=["status", "posted_at", "last_error", "attempt_count", "updated_at"])
+        item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
         external_video_id = ""
         for code in (post.platforms or []):
             external_video_id = str((post.external_ids or {}).get(code) or "")
@@ -383,10 +384,11 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         schedule.attempt_count = int(post.retry_count or 0)
         schedule.next_retry_at = None
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        item.status = "FAILED"
+        item.status = "AVAILABLE"
+        item.scheduled_for = None
         item.last_error = post.error or ""
         item.attempt_count = int(post.retry_count or 0)
-        item.save(update_fields=["status", "last_error", "attempt_count", "updated_at"])
+        item.save(update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"])
         return
     if post.status == "PENDING" and int(post.retry_count or 0) > 0:
         schedule.status = "PLANNED"
@@ -416,9 +418,10 @@ def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, extern
     schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
     item.status = "POSTED"
     item.posted_at = post.posted_at or now
+    item.scheduled_for = post.scheduled_at
     item.last_error = ""
     item.attempt_count = int(post.retry_count or 0)
-    item.save(update_fields=["status", "posted_at", "last_error", "attempt_count", "updated_at"])
+    item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
     if not PostedVideoLog.objects.filter(
         inventory_item=item,
         external_platform=platform,
