@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -254,6 +254,50 @@ class BrandYouTubeCredentialViewSet(viewsets.ModelViewSet):
         if brand:
             qs = qs.filter(brand_id=brand)
         return qs.order_by("order_index", "id")
+
+    def _handle_credential_error(self, exc):
+        """Evita 500: devolve 400 com mensagem clara para erros de cadastro."""
+        if isinstance(exc, IntegrityError):
+            msg = str(exc) or "Conflito ao salvar."
+            if "uniq_brand_youtube_credential_order" in msg or "order_index" in msg.lower():
+                return Response(
+                    {"error": "Já existe outra credencial com essa Ordem nesta marca. Use uma ordem diferente."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response({"error": f"Conflito de dados: {msg[:200]}"}, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(exc, ValueError) and "SOCIAL_ENCRYPTION_KEY" in str(exc):
+            return Response(
+                {"error": "Chave de criptografia não configurada. Defina SOCIAL_ENCRYPTION_KEY no .env."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return None
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            self.perform_create(serializer)
+        except (IntegrityError, ValueError) as e:
+            resp = self._handle_credential_error(e)
+            if resp is not None:
+                return resp
+            raise
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        try:
+            self.perform_update(serializer)
+        except (IntegrityError, ValueError) as e:
+            resp = self._handle_credential_error(e)
+            if resp is not None:
+                return resp
+            raise
+        return Response(serializer.data)
 
 
 class BrandAssetViewSet(viewsets.ModelViewSet):

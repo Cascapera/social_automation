@@ -270,6 +270,14 @@ def _is_factory_processing_paused(analysis) -> bool:
     return bool(factory and getattr(factory, "processing_paused", False))
 
 
+def _is_brand_only(analysis) -> bool:
+    """True quando a análise é de uma brand sem factory (conteúdo exclusivo da marca)."""
+    brand = getattr(analysis, "brand", None)
+    if not brand:
+        return False
+    return getattr(brand, "factory_id", None) is None
+
+
 @shared_task(bind=True)
 def analyze_auto_cuts_task(self, analysis_id: int) -> None:
     """Transcreve, analisa em chunks e agrega sugestões de cortes virais."""
@@ -440,11 +448,15 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
         logger.info("[FLUXO] Chamando Grok API (analyze_chunks_in_one_request)... %d blocos", len(chunks))
         MAX_RETRIES = 3
+        brand_only = _is_brand_only(analysis)
         allowed_theme_categories = _allowed_theme_categories_for_analysis(analysis)
-        logger.info(
-            "[FLUXO] Categorias permitidas para roteamento neste job: %s",
-            ", ".join(allowed_theme_categories),
-        )
+        if brand_only:
+            logger.info("[FLUXO] Brand sem factory: theme_category da LLM será ignorado (conteúdo exclusivo da marca).")
+        else:
+            logger.info(
+                "[FLUXO] Categorias permitidas para roteamento neste job: %s",
+                ", ".join(allowed_theme_categories),
+            )
         final = None
         for attempt in range(MAX_RETRIES):
             try:
@@ -455,6 +467,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     prompt_version=analysis.prompt_version or "viral",
                     enforce_minimum=(attempt < MAX_RETRIES - 1),
                     allowed_theme_categories=allowed_theme_categories,
+                    brand_only=brand_only,
                 )
                 logger.info(
                     "[FLUXO] Grok API respondeu OK. candidates=%d, ranked_shorts=%d, final_long_cuts=%d",
@@ -586,6 +599,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 duration_seconds = raw_duration
 
             rank += 1
+            theme_for_suggestion = (
+                (getattr(analysis.brand, "theme_category", None) or "").strip()
+                if brand_only and getattr(analysis, "brand", None)
+                else (item.get("theme_category") or "")
+            )
             sug = AutoCutSuggestion.objects.create(
                 analysis=analysis,
                 cut_type="short",
@@ -595,7 +613,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 reason=item.get("reason") or item.get("main_topic", ""),
                 hook=item.get("hook") or item.get("hook_sentence", ""),
                 virality_score=_normalize_virality_score(item.get("virality_score")),
-                theme_category=item.get("theme_category", ""),
+                theme_category=theme_for_suggestion,
                 source_asset_id=source_asset_id,
                 rank=rank,
                 duration_seconds=duration_seconds,
@@ -634,6 +652,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             else:
                 duration_minutes = item.get("duration_min")
 
+            theme_for_long = (
+                (getattr(analysis.brand, "theme_category", None) or "").strip()
+                if brand_only and getattr(analysis, "brand", None)
+                else (item.get("theme_category") or "")
+            )
             sug = AutoCutSuggestion.objects.create(
                 analysis=analysis,
                 cut_type="long",
@@ -642,7 +665,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 title=item.get("title_suggestion") or item.get("suggested_title") or item.get("title", ""),
                 reason=item.get("reason") or item.get("main_topic", ""),
                 virality_score=_normalize_virality_score(item.get("virality_score")),
-                theme_category=item.get("theme_category", ""),
+                theme_category=theme_for_long,
                 source_asset_id=source_asset_id,
                 duration_minutes=duration_minutes,
                 raw_data=item,

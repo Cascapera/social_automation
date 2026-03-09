@@ -217,6 +217,10 @@ class BrandYouTubeCredential(models.Model):
     label = models.CharField(max_length=120, blank=True, default="")
     order_index = models.PositiveIntegerField(default=1)
     is_active = models.BooleanField(default=True)
+    is_for_check = models.BooleanField(
+        default=False,
+        help_text="Se True, usada apenas para reconciliação/check do YouTube (YOUTUBE_CHECK_*).",
+    )
 
     client_id = models.CharField(max_length=255, blank=True, default="")
     client_secret = models.TextField(blank=True, default="")

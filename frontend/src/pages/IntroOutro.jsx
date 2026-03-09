@@ -91,9 +91,6 @@ export default function IntroOutro() {
   const [newBrandTextColor, setNewBrandTextColor] = useState('#0A0A0A')
   const [newBrandEffectColor, setNewBrandEffectColor] = useState('#FFEBDC')
   const [newBrandDescriptionExtra, setNewBrandDescriptionExtra] = useState('')
-  const [newBrandYoutubeClientId, setNewBrandYoutubeClientId] = useState('')
-  const [newBrandYoutubeClientSecret, setNewBrandYoutubeClientSecret] = useState('')
-  const [newBrandYoutubeRedirectUri, setNewBrandYoutubeRedirectUri] = useState('')
   const [newBrandShortMinInterval, setNewBrandShortMinInterval] = useState(60)
   const [newBrandLongMinInterval, setNewBrandLongMinInterval] = useState(180)
   const [newBrandMaxShortsPerDay, setNewBrandMaxShortsPerDay] = useState(3)
@@ -122,10 +119,6 @@ export default function IntroOutro() {
   const [editShortWindowEnd, setEditShortWindowEnd] = useState('22:00')
   const [editLongWindowStart, setEditLongWindowStart] = useState('12:00')
   const [editLongWindowEnd, setEditLongWindowEnd] = useState('22:00')
-  const [editYoutubeClientId, setEditYoutubeClientId] = useState('')
-  const [editYoutubeClientSecret, setEditYoutubeClientSecret] = useState('')
-  const [editYoutubeRedirectUri, setEditYoutubeRedirectUri] = useState('')
-  const [editYoutubeSecretConfigured, setEditYoutubeSecretConfigured] = useState(false)
   const [youtubeCredentials, setYoutubeCredentials] = useState([])
   const [youtubeCredentialSecrets, setYoutubeCredentialSecrets] = useState({})
   const [loadingYoutubeCredentials, setLoadingYoutubeCredentials] = useState(false)
@@ -194,10 +187,6 @@ export default function IntroOutro() {
     setEditShortWindowEnd(selected?.short_window_end || '22:00')
     setEditLongWindowStart(selected?.long_window_start || '12:00')
     setEditLongWindowEnd(selected?.long_window_end || '22:00')
-    setEditYoutubeClientId(selected?.youtube_client_id || '')
-    setEditYoutubeClientSecret('')
-    setEditYoutubeRedirectUri(selected?.youtube_redirect_uri || '')
-    setEditYoutubeSecretConfigured(!!selected?.youtube_client_secret_configured)
   }, [brandId, brands])
 
   async function handleAdd(e) {
@@ -253,8 +242,6 @@ export default function IntroOutro() {
         thumbnail_text_color: (newBrandTextColor || '').trim(),
         thumbnail_effect_color: (newBrandEffectColor || '').trim(),
         youtube_description_extra: newBrandDescriptionExtra || '',
-        youtube_client_id: newBrandYoutubeClientId || '',
-        youtube_redirect_uri: newBrandYoutubeRedirectUri || '',
         min_short_interval_minutes: Number(newBrandShortMinInterval || 0),
         min_long_interval_minutes: Number(newBrandLongMinInterval || 0),
         max_shorts_per_day: Number(newBrandMaxShortsPerDay || 0),
@@ -263,9 +250,6 @@ export default function IntroOutro() {
         short_window_end: newBrandShortWindowEnd || null,
         long_window_start: newBrandLongWindowStart || null,
         long_window_end: newBrandLongWindowEnd || null,
-      }
-      if ((newBrandYoutubeClientSecret || '').trim()) {
-        payload.youtube_client_secret = newBrandYoutubeClientSecret
       }
       const b = await createBrand(payload)
       if (newBrandLogoFile) {
@@ -278,9 +262,6 @@ export default function IntroOutro() {
       setNewBrandThemeCategory('')
       setNewBrandLogoFile(null)
       setNewBrandDescriptionExtra('')
-      setNewBrandYoutubeClientId('')
-      setNewBrandYoutubeClientSecret('')
-      setNewBrandYoutubeRedirectUri('')
       setShowNewBrand(false)
     } catch (e) {
       setError(e.message)
@@ -335,13 +316,7 @@ export default function IntroOutro() {
         short_window_end: editShortWindowEnd || null,
         long_window_start: editLongWindowStart || null,
         long_window_end: editLongWindowEnd || null,
-        youtube_client_id: editYoutubeClientId || '',
-        youtube_redirect_uri: editYoutubeRedirectUri || '',
-        ...(((editYoutubeClientSecret || '').trim())
-          ? { youtube_client_secret: editYoutubeClientSecret }
-          : {}),
       })
-      setEditYoutubeClientSecret('')
       const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
       await refreshBrands(fetcher)
     } catch (e) {
@@ -560,42 +535,6 @@ export default function IntroOutro() {
             </div>
 
             <div className="form-section">
-              <h3>OAuth YouTube (opcional por brand)</h3>
-              <p className="form-hint">
-                Preencha para usar um projeto Google Cloud exclusivo neste canal. Se vazio, usa o fallback global do .env.
-              </p>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Google Client ID</label>
-                  <input
-                    type="text"
-                    value={newBrandYoutubeClientId}
-                    onChange={(e) => setNewBrandYoutubeClientId(e.target.value)}
-                    placeholder="xxxxx.apps.googleusercontent.com"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Google Client Secret</label>
-                  <input
-                    type="password"
-                    value={newBrandYoutubeClientSecret}
-                    onChange={(e) => setNewBrandYoutubeClientSecret(e.target.value)}
-                    placeholder="GOCSPX-..."
-                  />
-                </div>
-                <div className="form-group">
-                  <label>YouTube Redirect URI</label>
-                  <input
-                    type="url"
-                    value={newBrandYoutubeRedirectUri}
-                    onChange={(e) => setNewBrandYoutubeRedirectUri(e.target.value)}
-                    placeholder="http://localhost:8000/api/youtube/callback/"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="form-section">
               <h3>Regras de Agendamento</h3>
               <div className="form-row">
                 <div className="form-group">
@@ -719,38 +658,6 @@ export default function IntroOutro() {
                 <div className="form-group">
                   <label>Máx longos por dia</label>
                   <input type="number" min="0" value={editMaxLongsPerDay} onChange={(e) => setEditMaxLongsPerDay(e.target.value)} />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Google Client ID (opcional por brand)</label>
-                  <input
-                    type="text"
-                    value={editYoutubeClientId}
-                    onChange={(e) => setEditYoutubeClientId(e.target.value)}
-                    placeholder="xxxxx.apps.googleusercontent.com"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Google Client Secret (opcional por brand)</label>
-                  {editYoutubeSecretConfigured && (
-                    <p className="form-hint">Secret já cadastrado. Preencha apenas para substituir.</p>
-                  )}
-                  <input
-                    type="password"
-                    value={editYoutubeClientSecret}
-                    onChange={(e) => setEditYoutubeClientSecret(e.target.value)}
-                    placeholder="GOCSPX-..."
-                  />
-                </div>
-                <div className="form-group">
-                  <label>YouTube Redirect URI (opcional por brand)</label>
-                  <input
-                    type="url"
-                    value={editYoutubeRedirectUri}
-                    onChange={(e) => setEditYoutubeRedirectUri(e.target.value)}
-                    placeholder="http://localhost:8000/api/youtube/callback/"
-                  />
                 </div>
               </div>
               <div className="form-row">

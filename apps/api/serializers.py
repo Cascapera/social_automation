@@ -140,6 +140,7 @@ class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
             "label",
             "order_index",
             "is_active",
+            "is_for_check",
             "client_id",
             "client_secret",
             "client_secret_configured",
@@ -176,16 +177,20 @@ class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         if "client_secret" in validated_data:
             validated_data["client_secret"] = encrypt_secret(validated_data.get("client_secret", ""))
-        if not validated_data.get("order_index"):
-            brand = validated_data.get("brand")
-            if brand:
-                max_order = (
-                    BrandYouTubeCredential.objects.filter(brand=brand)
-                    .order_by("-order_index")
-                    .values_list("order_index", flat=True)
-                    .first()
-                ) or 0
-                validated_data["order_index"] = max_order + 1
+        if "is_for_check" not in validated_data:
+            validated_data["is_for_check"] = False
+        brand = validated_data.get("brand")
+        if brand:
+            existing_orders = set(
+                BrandYouTubeCredential.objects.filter(brand=brand).values_list("order_index", flat=True)
+            )
+            requested = validated_data.get("order_index") or 0
+            order_index = max(1, int(requested)) if requested else None
+            if order_index is None:
+                order_index = (max(existing_orders) if existing_orders else 0) + 1
+            while order_index in existing_orders:
+                order_index += 1
+            validated_data["order_index"] = order_index
         return super().create(validated_data)
 
     def update(self, instance, validated_data):

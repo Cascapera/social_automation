@@ -504,10 +504,12 @@ def _validate_minimum_items(
     prompt_version: str,
     enforce_minimum: bool = True,
     allowed_theme_categories: list[str] | None = None,
+    brand_only: bool = False,
 ) -> None:
     """
     Garante mínimos para prompts virais.
     Se não cumprir, levanta erro para o caller retentar.
+    brand_only: quando True, não exige theme_category (conteúdo é de uma única marca).
     """
     pv = (prompt_version or "viral").strip().lower()
     candidate_shorts = payload.get("candidate_shorts")
@@ -543,35 +545,36 @@ def _validate_minimum_items(
                 raise ValueError(msg)
             logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
 
-    allowed_categories = {
-        str(x).strip().upper()
-        for x in (allowed_theme_categories or ALL_THEME_CATEGORIES)
-        if str(x).strip()
-    }
-    if not allowed_categories:
-        allowed_categories = set(ALL_THEME_CATEGORIES)
-    candidate_items = candidate_shorts if isinstance(candidate_shorts, list) else []
-    items_to_check = list(candidate_items) + list(ranked_shorts) + list(final_long_cuts)
-    invalid_count = 0
-    for item in items_to_check:
-        value = str((item or {}).get("theme_category") or "").strip().upper()
-        if value not in allowed_categories:
-            invalid_count += 1
-    if invalid_count > THEME_CATEGORY_RETRY_THRESHOLD:
-        msg = (
-            f"Resposta inválida: {invalid_count} itens sem theme_category válido "
-            f"(limite para retry={THEME_CATEGORY_RETRY_THRESHOLD})."
-        )
-        if enforce_minimum:
-            raise ValueError(msg)
-        logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
-    elif invalid_count > 0:
-        logger.warning(
-            "[FLUXO/Grok] Resposta parcial: %d item(ns) sem theme_category válido. "
-            "Não haverá nova chamada por estar dentro da margem (%d).",
-            invalid_count,
-            THEME_CATEGORY_RETRY_THRESHOLD,
-        )
+    if not brand_only:
+        allowed_categories = {
+            str(x).strip().upper()
+            for x in (allowed_theme_categories or ALL_THEME_CATEGORIES)
+            if str(x).strip()
+        }
+        if not allowed_categories:
+            allowed_categories = set(ALL_THEME_CATEGORIES)
+        candidate_items = candidate_shorts if isinstance(candidate_shorts, list) else []
+        items_to_check = list(candidate_items) + list(ranked_shorts) + list(final_long_cuts)
+        invalid_count = 0
+        for item in items_to_check:
+            value = str((item or {}).get("theme_category") or "").strip().upper()
+            if value not in allowed_categories:
+                invalid_count += 1
+        if invalid_count > THEME_CATEGORY_RETRY_THRESHOLD:
+            msg = (
+                f"Resposta inválida: {invalid_count} itens sem theme_category válido "
+                f"(limite para retry={THEME_CATEGORY_RETRY_THRESHOLD})."
+            )
+            if enforce_minimum:
+                raise ValueError(msg)
+            logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
+        elif invalid_count > 0:
+            logger.warning(
+                "[FLUXO/Grok] Resposta parcial: %d item(ns) sem theme_category válido. "
+                "Não haverá nova chamada por estar dentro da margem (%d).",
+                invalid_count,
+                THEME_CATEGORY_RETRY_THRESHOLD,
+            )
 
 
 def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
@@ -614,6 +617,7 @@ def _build_context_block(
     convidados: str = "",
     lang: str = "pt",
     allowed_theme_categories: list[str] | None = None,
+    brand_only: bool = False,
 ) -> str:
     """Monta bloco de contexto para o prompt (assunto + convidados)."""
     allowed = [
@@ -631,12 +635,19 @@ def _build_context_block(
         names = [n.strip() for n in convidados.split(",") if n.strip()]
         if names:
             parts.append(f"Guest(s): {', '.join(names)}" if lang == "en" else f"Convidado(s): {', '.join(names)}")
-    category_header = (
-        "ALLOWED THEME CATEGORIES FOR THIS JOB (use ONLY one of these exact values in theme_category):"
-        if lang == "en"
-        else "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB (use SOMENTE um destes valores exatos em theme_category):"
-    )
-    categories_block = category_header + "\n- " + "\n- ".join(allowed)
+    if brand_only:
+        categories_block = (
+            "This content is for a single brand; theme_category is OPTIONAL (you may leave empty or use any value for labeling)."
+            if lang == "en"
+            else "Este conteúdo é para uma única marca; theme_category é OPCIONAL (pode deixar vazio ou usar qualquer valor apenas para rotulagem)."
+        )
+    else:
+        category_header = (
+            "ALLOWED THEME CATEGORIES FOR THIS JOB (use ONLY one of these exact values in theme_category):"
+            if lang == "en"
+            else "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB (use SOMENTE um destes valores exatos em theme_category):"
+        )
+        categories_block = category_header + "\n- " + "\n- ".join(allowed)
     if not parts:
         return categories_block + "\n\n"
     header = (
@@ -655,11 +666,13 @@ def analyze_chunks_in_one_request(
     api_key: str | None = None,
     enforce_minimum: bool = True,
     allowed_theme_categories: list[str] | None = None,
+    brand_only: bool = False,
 ) -> dict:
     """
     Analisa todos os chunks em uma única requisição.
     chunks: [{text, start_sec, end_sec, segments}, ...]
     prompt_version: viral, educational, viral_en, educational_en
+    brand_only: quando True, theme_category é opcional (conteúdo para uma única marca).
     Retorna JSON com ranked_shorts e final_long_cuts (economia de tokens).
     """
     if not chunks:
@@ -682,6 +695,7 @@ def analyze_chunks_in_one_request(
         convidados,
         lang=lang,
         allowed_theme_categories=allowed_theme_categories,
+        brand_only=brand_only,
     )
     chunks_block = _build_chunks_block(chunks, lang=lang)
     user = template.format(
@@ -698,5 +712,6 @@ def analyze_chunks_in_one_request(
         prompt_version=pv,
         enforce_minimum=enforce_minimum,
         allowed_theme_categories=allowed_theme_categories,
+        brand_only=brand_only,
     )
     return parsed
