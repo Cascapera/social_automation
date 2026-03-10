@@ -946,13 +946,29 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
         )
         now = timezone.now()
         post = schedule.scheduled_post if schedule and schedule.scheduled_post_id else None
-        planned_slot = (
-            (schedule.scheduled_at if schedule else None)
-            or inventory.scheduled_for
-            or (post.scheduled_at if post else None)
-        )
-        # Respeita o horário já planejado; só usa "agora + 30s" se não houver horário válido.
-        next_try = planned_slot if planned_slot and planned_slot > now else (now + timedelta(seconds=30))
+        # Permite reagendar: se o front enviar scheduled_at, usa como próximo horário.
+        scheduled_raw = (request.data or {}).get("scheduled_at")
+        if scheduled_raw:
+            parsed = parse_datetime(str(scheduled_raw))
+            if parsed:
+                if timezone.is_naive(parsed):
+                    parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+                next_try = parsed if parsed > now else (now + timedelta(seconds=30))
+            else:
+                planned_slot = (
+                    (schedule.scheduled_at if schedule else None)
+                    or inventory.scheduled_for
+                    or (post.scheduled_at if post else None)
+                )
+                next_try = planned_slot if planned_slot and planned_slot > now else (now + timedelta(seconds=30))
+        else:
+            planned_slot = (
+                (schedule.scheduled_at if schedule else None)
+                or inventory.scheduled_for
+                or (post.scheduled_at if post else None)
+            )
+            # Respeita o horário já planejado; só usa "agora + 30s" se não houver horário válido.
+            next_try = planned_slot if planned_slot and planned_slot > now else (now + timedelta(seconds=30))
 
         # Se não houver ScheduledPost, cria um agendamento imediato para permitir
         # "tentar novamente" direto do banco (status AVAILABLE/SCHEDULED sem post vinculado).
@@ -1098,6 +1114,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         source_id = request.data.get("source")
         youtube_url = (request.data.get("youtube_url") or "").strip()
         brand_id = request.data.get("brand")
+        target_brand_id = request.data.get("target_brand")
         name = request.data.get("name", "")
         assunto = request.data.get("assunto", "")
         convidados = request.data.get("convidados", "")
@@ -1157,6 +1174,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         analysis = AutoCutAnalysis(
             user=request.user,
             brand_id=brand_id or None,
+            target_brand_id=target_brand_id or None,
             source_id=source_id or None,
             file=file_obj if file_obj else None,
             youtube_url=youtube_url or "",

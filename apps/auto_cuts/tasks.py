@@ -139,17 +139,18 @@ def _safe_save_analysis(analysis, update_fields):
 
 def _resolve_target_brand_for_suggestion(analysis, suggestion):
     """
-    Resolve a brand de destino via categoria (Factory 1:1).
-    Em contexto de Factory, só retorna brand quando categoria estiver válida e mapeada.
-    Sem fallback silencioso para outra brand.
+    Resolve a brand de destino via target_brand (prioridade) ou categoria (Factory 1:1).
+    Quando target_brand está definido, todos os cortes vão para esse canal (ignora theme_category).
     """
+    target = getattr(analysis, "target_brand", None)
+    if target:
+        return target
     base_brand = getattr(analysis, "brand", None)
     if not base_brand:
         return None
     category = (getattr(suggestion, "theme_category", "") or "").strip()
     factory_id = getattr(base_brand, "factory_id", None)
     if not factory_id:
-        # Fluxo fora de factory mantém a brand da análise.
         return base_brand
     if not category:
         return None
@@ -210,7 +211,10 @@ def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[di
     - remove itens sem categoria válida;
     - remove itens cuja categoria não possui brand mapeada;
     - retorna (itens_validos, ignorados_sem_categoria, ignorados_sem_mapeamento).
+    Quando target_brand está definido, passa todos os itens sem filtrar.
     """
+    if getattr(analysis, "target_brand_id", None):
+        return list(items or []), 0, 0
     base_brand = getattr(analysis, "brand", None)
     factory_id = getattr(base_brand, "factory_id", None) if base_brand else None
     if not factory_id:
@@ -271,7 +275,9 @@ def _is_factory_processing_paused(analysis) -> bool:
 
 
 def _is_brand_only(analysis) -> bool:
-    """True quando a análise é de uma brand sem factory (conteúdo exclusivo da marca)."""
+    """True quando target_brand está definido ou a brand não tem factory (conteúdo exclusivo da marca)."""
+    if getattr(analysis, "target_brand_id", None):
+        return True
     brand = getattr(analysis, "brand", None)
     if not brand:
         return False
@@ -468,6 +474,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     enforce_minimum=(attempt < MAX_RETRIES - 1),
                     allowed_theme_categories=allowed_theme_categories,
                     brand_only=brand_only,
+                    analysis_id=analysis.id,
                 )
                 logger.info(
                     "[FLUXO] Grok API respondeu OK. candidates=%d, ranked_shorts=%d, final_long_cuts=%d",
@@ -599,9 +606,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 duration_seconds = raw_duration
 
             rank += 1
+            brand_for_theme = getattr(analysis, "target_brand", None) or getattr(analysis, "brand", None)
             theme_for_suggestion = (
-                (getattr(analysis.brand, "theme_category", None) or "").strip()
-                if brand_only and getattr(analysis, "brand", None)
+                (getattr(brand_for_theme, "theme_category", None) or "").strip()
+                if brand_only and brand_for_theme
                 else (item.get("theme_category") or "")
             )
             sug = AutoCutSuggestion.objects.create(
@@ -652,9 +660,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             else:
                 duration_minutes = item.get("duration_min")
 
+            brand_for_theme = getattr(analysis, "target_brand", None) or getattr(analysis, "brand", None)
             theme_for_long = (
-                (getattr(analysis.brand, "theme_category", None) or "").strip()
-                if brand_only and getattr(analysis, "brand", None)
+                (getattr(brand_for_theme, "theme_category", None) or "").strip()
+                if brand_only and brand_for_theme
                 else (item.get("theme_category") or "")
             )
             sug = AutoCutSuggestion.objects.create(

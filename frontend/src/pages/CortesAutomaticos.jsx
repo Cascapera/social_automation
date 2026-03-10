@@ -53,6 +53,7 @@ export default function CortesAutomaticos() {
   const [name, setName] = useState('')
   const [assunto, setAssunto] = useState('')
   const [convidados, setConvidados] = useState('')
+  const [targetBrandId, setTargetBrandId] = useState('')
   const [promptVersion, setPromptVersion] = useState('educational')
   const [thumbnailFont, setThumbnailFont] = useState('impact')
   const [thumbnailBandColor, setThumbnailBandColor] = useState('#E12E20')
@@ -112,9 +113,10 @@ export default function CortesAutomaticos() {
   const selectedAnalysis = analyses.find((a) => a.id === expandedId)
   const fallbackFactoryBrandId = viewMode === 'factory' ? (brands[0]?.id || null) : null
   const activeBrandId = brandId || fallbackFactoryBrandId
-  const factoryBrandIds = viewMode === 'factory'
-    ? (brands || []).map((b) => b?.id).filter(Boolean)
+  const factoryBrands = viewMode === 'factory' && factoryId
+    ? (brands || []).filter((b) => String(b.factory || b.factory_id || '') === String(factoryId))
     : []
+  const factoryBrandIds = factoryBrands.map((b) => b?.id).filter(Boolean)
   const selectedBrand = brands.find((b) => String(b.id) === String(activeBrandId))
   const hasRunningAnalyses = analyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
     || factoryRunningAnalyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
@@ -272,6 +274,13 @@ export default function CortesAutomaticos() {
   }, [viewMode, factoryId])
 
   useEffect(() => {
+    if (viewMode === 'factory' && factoryId && targetBrandId) {
+      const isValid = factoryBrands.some((b) => String(b.id) === String(targetBrandId))
+      if (!isValid) setTargetBrandId('')
+    }
+  }, [viewMode, factoryId, factoryBrands, targetBrandId])
+
+  useEffect(() => {
     const shouldLoadFactoryAggregated = viewMode === 'factory' && factoryBrandIds.length > 0
     if (shouldLoadFactoryAggregated || activeBrandId) {
       loadAnalysesForView().catch(() => setAnalyses([]))
@@ -353,6 +362,7 @@ export default function CortesAutomaticos() {
         sourceId: sourceId || undefined,
         youtubeUrl: youtubeUrl || undefined,
         brandId: activeBrandId,
+        targetBrandId: targetBrandId || undefined,
         name: name || undefined,
         assunto: assunto || undefined,
         convidados: convidados || undefined,
@@ -372,6 +382,7 @@ export default function CortesAutomaticos() {
       setName('')
       setAssunto('')
       setConvidados('')
+      setTargetBrandId('')
       setPromptVersion('educational')
       setThumbnailFont('impact')
       setThumbnailBandColor('#E12E20')
@@ -776,6 +787,25 @@ export default function CortesAutomaticos() {
             />
             <span className="form-hint">Se houver mais de um convidado, escreva os nomes separados por vírgula.</span>
           </div>
+          {viewMode === 'factory' && factoryId && factoryBrandIds.length >= 1 ? (
+            <div className="form-group">
+              <label>Direcionar todos os cortes para</label>
+              <select
+                value={targetBrandId}
+                onChange={(e) => setTargetBrandId(e.target.value)}
+              >
+                <option value="">Nenhum (rotear por theme_category da IA)</option>
+                {factoryBrands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name || `Brand #${b.id}`}
+                  </option>
+                ))}
+              </select>
+              <span className="form-hint">
+                Se escolher uma brand, todos os cortes deste vídeo vão para esse canal, ignorando a categoria sugerida pela IA.
+              </span>
+            </div>
+          ) : null}
           <div className="form-group">
             <label>Modo de análise</label>
             <select

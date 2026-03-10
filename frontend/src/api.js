@@ -107,9 +107,11 @@ export async function removeAwaitingInventoryItem(id) {
   })
 }
 
-export async function retryAwaitingInventoryItem(id) {
+export async function retryAwaitingInventoryItem(id, payload = {}) {
+  const hasBody = payload && (payload.scheduled_at != null && payload.scheduled_at !== '')
   return apiRequest(`/video-inventory/${id}/retry-posting/`, {
     method: 'POST',
+    ...(hasBody ? { body: JSON.stringify({ scheduled_at: payload.scheduled_at }) } : {}),
   })
 }
 
@@ -555,6 +557,7 @@ export async function createAutoCutAnalysis({
   sourceId,
   youtubeUrl,
   brandId,
+  targetBrandId,
   name,
   assunto,
   convidados,
@@ -571,6 +574,7 @@ export async function createAutoCutAnalysis({
   if (sourceId) formData.append('source', sourceId)
   if (youtubeUrl) formData.append('youtube_url', youtubeUrl)
   if (brandId) formData.append('brand', brandId)
+  if (targetBrandId) formData.append('target_brand', targetBrandId)
   if (name) formData.append('name', name)
   if (assunto) formData.append('assunto', assunto)
   if (convidados) formData.append('convidados', convidados)

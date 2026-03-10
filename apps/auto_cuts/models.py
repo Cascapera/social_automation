@@ -30,6 +30,14 @@ class AutoCutAnalysis(models.Model):
         null=True,
         blank=True,
     )
+    target_brand = models.ForeignKey(
+        Brand,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="auto_cut_analyses_targeted",
+        help_text="Quando definido, todos os cortes deste vídeo vão para este canal (ignora theme_category da IA).",
+    )
     source = models.ForeignKey(
         SourceVideo,
         on_delete=models.SET_NULL,
