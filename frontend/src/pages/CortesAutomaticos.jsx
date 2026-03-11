@@ -111,12 +111,14 @@ export default function CortesAutomaticos() {
   const [togglingFactoryProcessing, setTogglingFactoryProcessing] = useState(false)
 
   const selectedAnalysis = analyses.find((a) => a.id === expandedId)
-  const fallbackFactoryBrandId = viewMode === 'factory' ? (brands[0]?.id || null) : null
-  const activeBrandId = brandId || fallbackFactoryBrandId
   const factoryBrands = viewMode === 'factory' && factoryId
     ? (brands || []).filter((b) => String(b.factory || b.factory_id || '') === String(factoryId))
     : []
   const factoryBrandIds = factoryBrands.map((b) => b?.id).filter(Boolean)
+  const fallbackFactoryBrandId = viewMode === 'factory'
+    ? (factoryBrands[0]?.id || brands[0]?.id || null)
+    : null
+  const activeBrandId = brandId || fallbackFactoryBrandId
   const selectedBrand = brands.find((b) => String(b.id) === String(activeBrandId))
   const hasRunningAnalyses = analyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
     || factoryRunningAnalyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
@@ -955,7 +957,14 @@ export default function CortesAutomaticos() {
                   onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}
                 >
                   <div className="analysis-header">
-                    <span className="analysis-name">{a.name || `Job #${a.id}`}</span>
+                    <span className="analysis-name">
+                      {a.name || `Job #${a.id}`}
+                      {viewMode === 'factory' && (
+                        <span className="analysis-direction">
+                          {' '}({a.target_brand_name || 'Todos'})
+                        </span>
+                      )}
+                    </span>
                     <div className="analysis-header-right">
                       <span className="analysis-status" data-status={a.status}>
                         {statusLabel[a.status] || a.status}

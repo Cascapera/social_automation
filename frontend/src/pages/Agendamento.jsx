@@ -12,6 +12,7 @@ import {
   getFactory,
   updateFactory,
   getFactorySchedules,
+  triggerImmediateSchedule,
 } from '../api'
 import { PlatformIcon } from '../components/PlatformIcons'
 import './Agendamento.css'
@@ -155,7 +156,10 @@ export default function Agendamento() {
   const [removingAwaitingId, setRemovingAwaitingId] = useState(null)
   const [factoryInfo, setFactoryInfo] = useState(null)
   const [togglingFactorySchedule, setTogglingFactorySchedule] = useState(false)
+  const [triggeringImmediate, setTriggeringImmediate] = useState(false)
   const [factoryWeekSchedules, setFactoryWeekSchedules] = useState([])
+  const [dailyScheduleStartTime, setDailyScheduleStartTime] = useState('11:00')
+  const [savingDailyScheduleTime, setSavingDailyScheduleTime] = useState(false)
 
   useEffect(() => {
     if (brandId) {
@@ -190,6 +194,7 @@ export default function Agendamento() {
       try {
         const f = await getFactory(factoryId)
         setFactoryInfo(f)
+        setDailyScheduleStartTime((f?.daily_schedule_start_time || '19:00').toString().slice(0, 5))
       } catch {
         setFactoryInfo(null)
       }
@@ -212,6 +217,7 @@ export default function Agendamento() {
       }
       const f = await getFactory(factoryId)
       setFactoryInfo(f)
+      setDailyScheduleStartTime((f?.daily_schedule_start_time || '19:00').toString().slice(0, 5))
     } catch {
       setFactoryInfo(null)
     }
@@ -370,6 +376,38 @@ export default function Agendamento() {
     }
   }
 
+  async function handleTriggerImmediateSchedule() {
+    if (!factoryInfo?.id || triggeringImmediate) return
+    setError('')
+    setTriggeringImmediate(true)
+    try {
+      const result = await triggerImmediateSchedule(factoryInfo.id)
+      if (result?.created > 0) {
+        reloadScheduledPosts()
+        if (factoryInfo?.id) await loadFactoryWeekSchedules(factoryInfo.id)
+      }
+    } catch (e) {
+      setError(e.message || 'Falha ao disparar agendamento imediato.')
+    } finally {
+      setTriggeringImmediate(false)
+    }
+  }
+
+  async function handleSaveDailyScheduleStartTime() {
+    if (!factoryInfo?.id || savingDailyScheduleTime) return
+    setSavingDailyScheduleTime(true)
+    setError('')
+    try {
+      const value = dailyScheduleStartTime.trim() ? `${dailyScheduleStartTime.slice(0, 5)}:00` : null
+      const updated = await updateFactory(factoryInfo.id, { daily_schedule_start_time: value || null })
+      setFactoryInfo(updated)
+    } catch (e) {
+      setError(e.message || 'Erro ao salvar horário.')
+    } finally {
+      setSavingDailyScheduleTime(false)
+    }
+  }
+
   const statusLabel = { PENDING: 'Pendente', POSTING: 'Postando', DONE: 'Postado', FAILED: 'Falhou' }
   const platformLabels = (arr) => (arr || []).map((p) => PLATFORMS.find((x) => x.id === p)?.label || p).join(', ')
 
@@ -511,18 +549,49 @@ export default function Agendamento() {
               </div>
             )}
           </div>
-          <button
-            type="button"
-            className={`factory-toggle-btn ${factoryInfo.scheduling_paused ? 'resume' : 'pause'}`}
-            onClick={handleToggleFactorySchedule}
-            disabled={togglingFactorySchedule}
-          >
-            {togglingFactorySchedule
-              ? 'Salvando...'
-              : factoryInfo.scheduling_paused
-                ? 'Continuar agendamento'
-                : 'Pausar agendamento'}
-          </button>
+          <div className="factory-daily-schedule-time">
+            <label htmlFor="daily-schedule-start">Horário fixo para agendar o dia seguinte:</label>
+            <input
+              id="daily-schedule-start"
+              type="time"
+              value={dailyScheduleStartTime}
+              onChange={(e) => setDailyScheduleStartTime(e.target.value)}
+            />
+            <button
+              type="button"
+              className="factory-toggle-btn"
+              onClick={handleSaveDailyScheduleStartTime}
+              disabled={savingDailyScheduleTime}
+            >
+              {savingDailyScheduleTime ? 'Salvando...' : 'Salvar horário'}
+            </button>
+          </div>
+          <p className="form-hint factory-daily-hint">
+            Nesse horário o sistema agenda os vídeos disponíveis para o dia seguinte conforme os horários fixos de cada brand.
+          </p>
+          <div className="factory-control-buttons">
+            <button
+              type="button"
+              className={`factory-toggle-btn ${factoryInfo.scheduling_paused ? 'resume' : 'pause'}`}
+              onClick={handleToggleFactorySchedule}
+              disabled={togglingFactorySchedule}
+            >
+              {togglingFactorySchedule
+                ? 'Salvando...'
+                : factoryInfo.scheduling_paused
+                  ? 'Continuar agendamento'
+                  : 'Pausar agendamento'}
+            </button>
+            <button
+              type="button"
+              className="factory-toggle-btn immediate"
+              onClick={handleTriggerImmediateSchedule}
+              disabled={triggeringImmediate}
+              title="Dispara o agendamento agora (para o dia seguinte). Útil quando há falha de servidor ou vídeos adicionados ao banco."
+            >
+              {triggeringImmediate ? 'Agendando...' : 'Agendamento Imediato'}
+            </button>
+          </div>
         </section>
       )}
 

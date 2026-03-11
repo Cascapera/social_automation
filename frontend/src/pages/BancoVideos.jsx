@@ -5,9 +5,10 @@ import './BancoVideos.css'
 
 const STATUS_LABEL = {
   AVAILABLE: 'Disponível',
-  SCHEDULED: 'Agendado',
+  SCHEDULED: 'Postando',
+  POSTING: 'Postando',
   POSTED: 'Postado',
-  FAILED: 'Falhou',
+  FAILED: 'Erro',
 }
 
 const TYPE_LABEL = {
@@ -22,6 +23,44 @@ function formatDate(value) {
   return d.toLocaleString('pt-BR')
 }
 
+/** Formata data curta dd/MM/yyyy HH:mm para exibição de agendamento. */
+function formatScheduledShort(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const year = d.getFullYear()
+  const h = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${day}/${month}/${year} ${h}:${min}`
+}
+
+function statusDisplay(item) {
+  const base = STATUS_LABEL[item.status] || item.status || '-'
+  const msg = item.status_message
+  if (item.status === 'FAILED') {
+    return base
+  }
+  if (item.status === 'SCHEDULED' || item.status === 'POSTING') {
+    return msg ? `${base} (${msg})` : base
+  }
+  return base
+}
+
+/** Formata data para input datetime-local (YYYY-MM-DDTHH:mm) em horário local. */
+function toDatetimeLocal(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${day}T${h}:${min}`
+}
+
 export default function BancoVideos() {
   const { viewMode, factoryId, brandId, brands } = useBrand()
   const [items, setItems] = useState([])
@@ -30,6 +69,8 @@ export default function BancoVideos() {
   const [error, setError] = useState('')
   const [removingId, setRemovingId] = useState(null)
   const [retryingId, setRetryingId] = useState(null)
+  const [retryModalItem, setRetryModalItem] = useState(null)
+  const [retryScheduledAt, setRetryScheduledAt] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -74,7 +115,7 @@ export default function BancoVideos() {
   )
 
   const summary = useMemo(() => {
-    const acc = { total: items.length, AVAILABLE: 0, SCHEDULED: 0, POSTED: 0, FAILED: 0 }
+    const acc = { total: items.length, AVAILABLE: 0, SCHEDULED: 0, POSTING: 0, POSTED: 0, FAILED: 0 }
     items.forEach((item) => {
       if (acc[item.status] != null) acc[item.status] += 1
     })
@@ -107,12 +148,24 @@ export default function BancoVideos() {
     }
   }
 
-  async function handleRetryPosting(item) {
+  function openRetryModal(item) {
+    if (!item?.id) return
+    const initial = item.scheduled_for ? toDatetimeLocal(item.scheduled_for) : toDatetimeLocal(new Date())
+    setRetryModalItem(item)
+    setRetryScheduledAt(initial || toDatetimeLocal(new Date()))
+    setError('')
+  }
+
+  async function handleRetryPosting(item, scheduledAtValue) {
     if (!item?.id) return
     setError('')
     setRetryingId(item.id)
+    if (retryModalItem?.id === item.id) setRetryModalItem(null)
     try {
-      const result = await retryAwaitingInventoryItem(item.id)
+      const payload = scheduledAtValue
+        ? { scheduled_at: new Date(scheduledAtValue).toISOString() }
+        : {}
+      const result = await retryAwaitingInventoryItem(item.id, payload)
       setItems((prev) =>
         prev.map((x) =>
           x.id === item.id
@@ -147,14 +200,55 @@ export default function BancoVideos() {
 
       {error && <div className="form-error">{error}</div>}
 
+      {retryModalItem && (
+        <div className="banco-modal-overlay" onClick={() => setRetryModalItem(null)} role="presentation">
+          <div className="banco-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={retryModalItem?.status === 'AVAILABLE' ? 'Agendar vídeo' : 'Reagendar e tentar novamente'}>
+            <h3>{retryModalItem?.status === 'AVAILABLE' ? 'Agendar vídeo' : 'Tentar novamente'}</h3>
+            <p className="banco-modal-desc">
+              {retryModalItem?.status === 'AVAILABLE'
+                ? 'Escolha a data e horário para postar este vídeo. O sistema enviará e agendará no YouTube.'
+                : 'Escolha o horário para a nova tentativa. O horário atual está preenchido; você pode alterá-lo.'}
+            </p>
+            <label className="banco-modal-label">
+              Horário para tentativa
+              <input
+                type="datetime-local"
+                value={retryScheduledAt}
+                onChange={(e) => setRetryScheduledAt(e.target.value)}
+                min={toDatetimeLocal(new Date())}
+                className="banco-modal-input"
+              />
+            </label>
+            <div className="banco-modal-actions">
+              <button
+                type="button"
+                className="btn-action"
+                disabled={retryingId === retryModalItem.id}
+                onClick={() => handleRetryPosting(retryModalItem, retryScheduledAt || undefined)}
+              >
+                {retryingId === retryModalItem.id ? 'Tentando...' : 'Tentar novamente'}
+              </button>
+              <button
+                type="button"
+                className="btn-action btn-cancel"
+                onClick={() => setRetryModalItem(null)}
+                disabled={retryingId === retryModalItem.id}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="section banco-filters">
         <div className="banco-summary">
           <span>Total: {summary.total}</span>
           <span>Aguardando: {awaitingItems.length}</span>
           <span>Postados: {postedItems.length}</span>
           <span>Disponíveis: {summary.AVAILABLE}</span>
-          <span>Agendados: {summary.SCHEDULED}</span>
-          <span>Falhas: {summary.FAILED}</span>
+          <span>Postando: {(summary.SCHEDULED || 0) + (summary.POSTING || 0)}</span>
+          <span>Erros: {summary.FAILED}</span>
         </div>
         <div className="banco-filter-row">
           <label>
@@ -190,8 +284,6 @@ export default function BancoVideos() {
                         <th>Score</th>
                         <th>Fonte</th>
                         <th>Status</th>
-                        <th>Criado</th>
-                        <th>Agendado</th>
                         <th>Erro</th>
                         <th>Ações</th>
                       </tr>
@@ -204,20 +296,22 @@ export default function BancoVideos() {
                           <td className="banco-title">{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
                           <td>{item.source_display_name || item.source_asset_id || '-'}</td>
-                          <td>{STATUS_LABEL[item.status] || item.status || '-'}</td>
-                          <td>{formatDate(item.created_at)}</td>
-                          <td>{formatDate(item.scheduled_for)}</td>
+                          <td>{statusDisplay(item)}</td>
                           <td className="banco-error">{item.last_error || '-'}</td>
                           <td>
                             <button
                               type="button"
                               className="btn-action"
-                              onClick={() => handleRetryPosting(item)}
+                              onClick={() => openRetryModal(item)}
                               disabled={retryingId === item.id || item.status === 'POSTING'}
-                              title="Tentar novamente a postagem deste vídeo"
+                              title={item.status === 'AVAILABLE' ? 'Agendar data e horário para postar este vídeo' : 'Tentar novamente e opcionalmente reagendar o horário'}
                               style={{ marginRight: 8 }}
                             >
-                              {retryingId === item.id ? 'Tentando...' : 'Tentar novamente'}
+                              {retryingId === item.id
+                                ? (item.status === 'AVAILABLE' ? 'Agendando...' : 'Tentando...')
+                                : item.status === 'AVAILABLE'
+                                  ? 'Agendar'
+                                  : 'Tentar novamente'}
                             </button>
                             <button
                               type="button"

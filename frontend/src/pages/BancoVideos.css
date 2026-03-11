@@ -76,3 +76,56 @@
   color: #fca5a5;
   min-width: 180px;
 }
+
+.banco-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.banco-modal {
+  background: var(--bg-dark, #1e1e1e);
+  border: 1px solid var(--border, #333);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  min-width: 320px;
+  max-width: 90vw;
+}
+
+.banco-modal h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.banco-modal-desc {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted, #888);
+}
+
+.banco-modal-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.banco-modal-input {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--bg, #252525);
+  color: var(--text, #eee);
+  font-size: 0.95rem;
+}
+
+.banco-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}

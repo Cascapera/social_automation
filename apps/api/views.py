@@ -146,6 +146,40 @@ class FactoryViewSet(viewsets.ModelViewSet):
     serializer_class = FactorySerializer
     http_method_names = ["get", "post", "patch", "head", "options"]
 
+    @action(detail=True, methods=["post"], url_path="trigger-immediate-schedule")
+    def trigger_immediate_schedule(self, request, pk=None):
+        """
+        Dispara o agendamento imediato para a factory.
+        Gera agenda para o dia seguinte respeitando as características de cada brand (slots).
+        Útil quando há falha de servidor ou falta de vídeos no estoque.
+        """
+        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
+        from datetime import timedelta
+        from django.utils import timezone
+        from zoneinfo import ZoneInfo
+
+        factory = self.get_object()
+        factory_tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
+        now_local = timezone.now().astimezone(factory_tz)
+        target_date = now_local.date() + timedelta(days=1)
+        try:
+            result = generate_daily_schedule_for_factory(
+                factory,
+                now_utc=timezone.now(),
+                target_date=target_date,
+                allow_rerun=True,
+            )
+            return Response({
+                "created": result.get("created", 0),
+                "factory_id": factory.id,
+                "target_date": str(target_date),
+            })
+        except Exception as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
 
 class BrandViewSet(viewsets.ModelViewSet):
     """Lista e cria marcas."""
@@ -842,6 +876,8 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
         "auto_cut_corte",
         "auto_cut_corte__analysis",
         "auto_cut_corte__analysis__source",
+    ).prefetch_related(
+        "posting_schedules__scheduled_post",
     )
     serializer_class = VideoInventoryItemSerializer
 
@@ -1029,8 +1065,9 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
             schedule.save(update_fields=["status", "next_retry_at", "updated_at"])
 
             inventory.status = "SCHEDULED"
+            inventory.scheduled_for = next_try
             inventory.last_error = ""
-            inventory.save(update_fields=["status", "last_error", "updated_at"])
+            inventory.save(update_fields=["status", "scheduled_for", "last_error", "updated_at"])
 
         from apps.social.tasks import post_to_platforms_task
 
@@ -1104,7 +1141,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             qs = qs.exclude(
                 Exists(AutoCutCorte.objects.filter(analysis_id=OuterRef("pk"), is_finalized=True))
             )
-        return qs.order_by("-created_at")
+        return qs.select_related("target_brand").order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

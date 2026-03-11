@@ -141,7 +141,14 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
     """
     Resolve a brand de destino via target_brand (prioridade) ou categoria (Factory 1:1).
     Quando target_brand está definido, todos os cortes vão para esse canal (ignora theme_category).
+    Fallback: quando theme_category vazio em factory, usa analysis.brand para não perder cortes.
     """
+    target_id = getattr(analysis, "target_brand_id", None)
+    if target_id:
+        from apps.brands.models import Brand
+        target = Brand.objects.filter(id=target_id).first()
+        if target:
+            return target
     target = getattr(analysis, "target_brand", None)
     if target:
         return target
@@ -153,31 +160,46 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
     if not factory_id:
         return base_brand
     if not category:
-        return None
+        # theme_category vazio: usa analysis.brand como fallback para não ignorar cortes
+        return base_brand
     from apps.brands.models import Brand
 
     mapped = Brand.objects.filter(
         factory_id=factory_id,
         theme_category=category,
     ).first()
-    return mapped
+    return mapped or base_brand
 
 
 def _sync_inventory_item_from_corte(corte):
     """
     Cria/atualiza item no banco de vídeos da factory ao finalizar corte.
+    Quando analysis.target_brand_id está definido, todos os cortes vão para essa brand
+    (ignora theme_category da sugestão).
     """
     if not corte or not getattr(corte, "analysis_id", None):
         return
-    analysis = corte.analysis
+    from apps.auto_cuts.models import AutoCutAnalysis
+
+    analysis = AutoCutAnalysis.objects.filter(id=corte.analysis_id).first()
+    if not analysis:
+        return
     suggestion = corte.suggestion
     target_brand = _resolve_target_brand_for_suggestion(analysis, suggestion)
     if not target_brand or not getattr(target_brand, "factory_id", None):
-        logger.warning(
-            "[FLUXO] Corte %s ignorado no inventário: sem roteamento válido (theme=%s).",
-            getattr(corte, "id", None),
-            getattr(suggestion, "theme_category", "") if suggestion else "",
-        )
+        if getattr(analysis, "target_brand_id", None):
+            logger.warning(
+                "[FLUXO] Corte %s: target_brand_id=%s definido mas brand não encontrada. Verifique se a brand existe.",
+                getattr(corte, "id", None),
+                analysis.target_brand_id,
+            )
+        else:
+            logger.warning(
+                "[FLUXO] Corte %s ignorado no inventário: sem roteamento válido (theme=%s). "
+                "Use 'Direcionar todos os cortes para' para enviar todos à mesma brand.",
+                getattr(corte, "id", None),
+                getattr(suggestion, "theme_category", "") if suggestion else "",
+            )
         return
     from apps.jobs.models import VideoInventoryItem
 
@@ -203,6 +225,12 @@ def _sync_inventory_item_from_corte(corte):
         auto_cut_corte=corte,
         defaults=defaults,
     )
+    if getattr(analysis, "target_brand_id", None):
+        logger.info(
+            "[FLUXO] Corte %s → inventário brand_id=%s (target_brand direcionado)",
+            getattr(corte, "id", None),
+            target_brand.id,
+        )
 
 
 def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[dict], int, int]:
@@ -456,8 +484,27 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         MAX_RETRIES = 3
         brand_only = _is_brand_only(analysis)
         allowed_theme_categories = _allowed_theme_categories_for_analysis(analysis)
-        if brand_only:
-            logger.info("[FLUXO] Brand sem factory: theme_category da LLM será ignorado (conteúdo exclusivo da marca).")
+        if getattr(analysis, "target_brand_id", None):
+            target_brand_obj = getattr(analysis, "target_brand", None)
+            factory = getattr(target_brand_obj, "factory", None) if target_brand_obj else None
+            factory_name = getattr(factory, "name", None) or "?"
+            brand_name = getattr(target_brand_obj, "name", None) or f"Brand #{analysis.target_brand_id}"
+            logger.info(
+                "[FLUXO] Factory (%s) : %s : theme_category da LLM será ignorado (conteúdo exclusivo da marca).",
+                factory_name,
+                brand_name,
+            )
+        elif brand_only:
+            base_brand = getattr(analysis, "brand", None)
+            factory = getattr(base_brand, "factory", None) if base_brand else None
+            if factory:
+                factory_name = getattr(factory, "name", None) or "?"
+                logger.info(
+                    "[FLUXO] Factory (%s) : todos : theme_category da LLM será ignorado (conteúdo exclusivo da marca).",
+                    factory_name,
+                )
+            else:
+                logger.info("[FLUXO] Brand sem factory: theme_category da LLM será ignorado (conteúdo exclusivo da marca).")
         else:
             logger.info(
                 "[FLUXO] Categorias permitidas para roteamento neste job: %s",

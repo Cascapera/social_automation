@@ -183,6 +183,12 @@
   font-weight: 600;
 }
 
+.analysis-direction {
+  font-weight: 500;
+  opacity: 0.85;
+  font-size: 0.95em;
+}
+
 .analysis-status {
   font-size: 0.85rem;
   padding: 0.2rem 0.5rem;

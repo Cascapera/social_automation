@@ -211,3 +211,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+
+# Reduz ruído no Celery: libs Google (file_cache, Refreshing credentials) em WARNING
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "loggers": {
+        "google": {"level": "WARNING"},
+        "google.auth": {"level": "WARNING"},
+        "googleapiclient": {"level": "WARNING"},
+    },
+}

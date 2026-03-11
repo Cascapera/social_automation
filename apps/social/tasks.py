@@ -2,7 +2,8 @@
 import os
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta, time
+from datetime import timezone as dt_timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,7 @@ from apps.jobs.models import (
     ScheduledPost,
     FactoryPostingSchedule,
     FactoryPostingAttemptLog,
+    FactoryScheduleRun,
     PostedVideoLog,
 )
 from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
@@ -85,6 +87,37 @@ def _first_youtube_platform(platforms) -> str | None:
     return None
 
 
+def _youtube_channel_key_and_interval(post) -> tuple[str | None, int]:
+    """
+    Para posts YouTube, retorna (channel_key, min_interval_seconds) para serialização.
+    channel_key identifica o canal; min_interval é o intervalo mínimo em segundos.
+    Para não-YouTube retorna (None, 0).
+    """
+    platform = _first_youtube_platform(post.platforms or [])
+    if not platform:
+        return None, 0
+    brand = _resolve_post_target_brand(post) or (getattr(post, "job", None) and getattr(post.job, "brand", None))
+    if not brand:
+        return None, 0
+    account = _resolve_social_account_for_platform(post, brand, platform)
+    if not account:
+        from apps.brands.models import BrandSocialAccount
+
+        account = (
+            BrandSocialAccount.objects.filter(
+                brand=brand,
+                platform__in=["YT", "YTB"],
+            )
+            .order_by("id")
+            .first()
+        )
+    channel_id = (getattr(account, "channel_id", None) or "").strip() if account else ""
+    channel_key = f"yt_{channel_id}" if channel_id else f"yt_brand_{brand.id}_{platform}"
+    # Usa defaults: shorts 60 min, longos 180 min (slots fixos já espaçam; intervalo só para fila de envio)
+    minutes = 60 if platform == "YT" else 180
+    return channel_key, minutes * 60
+
+
 def _resolve_social_account_for_platform(post: ScheduledPost, brand, platform: str):
     if post.social_account and post.social_account.platform in (platform, "YT", "YTB"):
         return post.social_account
@@ -151,10 +184,11 @@ def _youtube_video_exists_on_channel(account, video_id: str, youtube_credential=
     from googleapiclient.errors import HttpError
     from apps.social.services.youtube_credentials import get_credentials
 
+    # Usar o mesmo OAuth client que emitiu o token (brand/global). Check client causa unauthorized_client.
     creds = get_credentials(
         account,
         youtube_credential=youtube_credential,
-        use_check_client=YOUTUBE_CHECK_CLIENT_ENABLED,
+        use_check_client=False,
     )
     youtube = build("youtube", "v3", credentials=creds)
     try:
@@ -241,10 +275,11 @@ def _youtube_day_video_index(
     from googleapiclient.discovery import build
     from apps.social.services.youtube_credentials import get_credentials
 
+    # Mesmo OAuth client que emitiu o token (brand/global); check client causa unauthorized_client.
     creds = get_credentials(
         account,
         youtube_credential=youtube_credential,
-        use_check_client=YOUTUBE_CHECK_CLIENT_ENABLED,
+        use_check_client=False,
     )
     youtube = build("youtube", "v3", credentials=creds)
     # Descobre playlist de uploads da conta autenticada.
@@ -339,16 +374,41 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
     is_youtube = _platforms_are_youtube_only(post.platforms)
     if post.status == "DONE":
         if is_youtube:
-            # YouTube: DONE aqui significa upload retornou sucesso, mas ainda
-            # aguardamos confirmação na plataforma para concluir o ciclo.
-            schedule.status = "POSTING"
+            # YouTube: upload com sucesso = vídeo já está no canal (público ou agendado).
+            # Marcamos como POSTED para ir para "Vídeos Postados" e não rechecar (economiza cota).
+            schedule.status = "DONE"
             schedule.attempt_count = int(post.retry_count or 0)
-            schedule.next_retry_at = timezone.now() + timedelta(seconds=YOUTUBE_VERIFY_GRACE_SECONDS)
+            schedule.next_retry_at = None
             schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-            item.status = "POSTING"
-            item.last_error = "Aguardando confirmação de agendamento no YouTube."
+            item.status = "POSTED"
+            item.posted_at = post.posted_at or now
+            item.scheduled_for = post.scheduled_at
+            item.last_error = ""
             item.attempt_count = int(post.retry_count or 0)
-            item.save(update_fields=["status", "last_error", "attempt_count", "updated_at"])
+            item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
+            external_video_id = ""
+            for code in (post.platforms or []):
+                external_video_id = str((post.external_ids or {}).get(code) or "")
+                if external_video_id:
+                    break
+            if external_video_id and not PostedVideoLog.objects.filter(
+                inventory_item=item,
+                external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
+                external_video_id=external_video_id,
+            ).exists():
+                PostedVideoLog.objects.create(
+                    factory=schedule.factory,
+                    brand=schedule.brand,
+                    inventory_item=item,
+                    external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
+                    external_video_id=external_video_id,
+                    posted_at=post.posted_at or now,
+                    metadata_snapshot={
+                        "scheduled_post_id": post.id,
+                        "platforms": post.platforms or [],
+                        "external_ids": post.external_ids or {},
+                    },
+                )
             return
         schedule.status = "DONE"
         schedule.attempt_count = int(post.retry_count or 0)
@@ -404,6 +464,7 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
 def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, external_video_id: str, metadata: dict | None = None) -> None:
     """
     Marca agenda/inventário como efetivamente confirmado na plataforma.
+    Atualiza o ScheduledPost para DONE para sair da lista "aguardando" e ir para "postados".
     """
     schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
         "inventory_item", "factory", "brand"
@@ -412,6 +473,10 @@ def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, extern
         return
     item = schedule.inventory_item
     now = timezone.now()
+    post.status = "DONE"
+    post.posted_at = post.posted_at or now
+    post.error = ""
+    post.save(update_fields=["status", "posted_at", "error", "updated_at"])
     schedule.status = "DONE"
     schedule.attempt_count = int(post.retry_count or 0)
     schedule.next_retry_at = None
@@ -486,18 +551,18 @@ def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str
     post.delete()
 
 
+UPLOAD_INTERVAL_SECONDS = 60  # 1 vídeo por minuto na fila de envio
+
+
 @shared_task
 def check_scheduled_posts_task():
     """
     Roda a cada minuto via Beat.
-    - Fluxo padrão: publica PENDING quando scheduled_at <= now.
-    - YouTube-only (YT/YTB): antecipa upload mesmo com data futura para usar publishAt.
+    - Pega posts PENDING (scheduled_at <= now ou YouTube antecipado).
+    - Ordena brand por brand: processa toda a brand 1, depois brand 2, etc.
+    - Enfileira com 1 vídeo por minuto (countdown 0, 60, 120...) para aliviar a API.
     """
     now = timezone.now()
-    now_local = timezone.localtime(now)
-    if now_local.hour == 11:
-        generate_daily_factory_schedules_task.delay()
-
     due_posts = ScheduledPost.objects.filter(
         status="PENDING",
         scheduled_at__lte=now,
@@ -515,32 +580,57 @@ def check_scheduled_posts_task():
     for post in future_candidates:
         if _platforms_are_youtube_only(post.platforms):
             post_ids.add(post.id)
-    for post_id in sorted(post_ids):
-        post_to_platforms_task.delay(post_id)
-    # Reconciliação pós-agendamento YouTube (não bloqueia fluxo principal).
-    try:
-        reconcile_youtube_schedules_task.delay()
-    except Exception:
-        logger.exception("Falha ao enfileirar reconciliação YouTube.")
+    post_ids_list = sorted(post_ids)
+    if not post_ids_list:
+        return {"checked_due": 0, "queued": 0}
+
+    posts = list(
+        ScheduledPost.objects.filter(id__in=post_ids_list)
+        .select_related(
+            "job",
+            "job__brand",
+            "social_account",
+            "social_account__brand",
+            "auto_cut_corte",
+            "auto_cut_corte__analysis",
+        )
+        .order_by("social_account__brand_id", "scheduled_at", "id")
+    )
+    # Brand por brand, 1 vídeo por minuto
+    for i, p in enumerate(posts):
+        countdown = i * UPLOAD_INTERVAL_SECONDS
+        post_to_platforms_task.apply_async(args=[p.id], countdown=countdown)
+
     return {
         "checked_due": due_posts.count(),
-        "queued": len(post_ids),
-        "queued_future_youtube": max(0, len(post_ids) - due_posts.count()),
+        "queued": len(post_ids_list),
     }
 
 
 @shared_task
 def generate_daily_factory_schedules_task():
     """
-    Gera agenda diária das factories ativas (executa no horário local 11:00).
-    É idempotente por factory/dia.
+    A cada 30 min: para cada factory ativa, se já passou do horário fixo de agendamento
+    (daily_schedule_start_time, padrão 19:00) e ainda não foi gerada a agenda do DIA SEGUINTE, gera.
+    Os vídeos são agendados para o dia seguinte (ex: às 19h de 10/03 agenda para 11/03 8h, 9h, 10h...).
     """
     now = timezone.now()
     created_total = 0
     generated = 0
     for factory in Factory.objects.filter(is_active=True, scheduling_paused=False).order_by("id"):
+        tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
+        now_local = now.astimezone(tz)
+        # Agenda sempre para o DIA SEGUINTE
+        target_date = now_local.date() + timedelta(days=1)
+        start_time = getattr(factory, "daily_schedule_start_time", None) or time(19, 0)
+        if now_local.time() < start_time:
+            continue
+        if FactoryScheduleRun.objects.filter(factory=factory, run_date=target_date).exists():
+            continue
         try:
-            result = generate_daily_schedule_for_factory(factory, now_utc=now)
+            result = generate_daily_schedule_for_factory(
+                factory, now_utc=now, target_date=target_date
+            )
             if result.get("created", 0):
                 generated += 1
                 created_total += int(result.get("created", 0))
@@ -559,6 +649,7 @@ def reconcile_youtube_schedules_task():
     now = timezone.now()
     window_start = now - timedelta(days=1)
     window_end = now + timedelta(days=1)
+    # Só PENDING e POSTING: DONE já foi confirmado, rechecar gastaria cota à toa.
     candidates = (
         ScheduledPost.objects.select_related(
             "job",
@@ -568,7 +659,7 @@ def reconcile_youtube_schedules_task():
             "auto_cut_corte__analysis",
         )
         .filter(
-            status__in=["PENDING", "POSTING", "DONE"],
+            status__in=["PENDING", "POSTING"],
             scheduled_at__gte=window_start,
             scheduled_at__lte=window_end,
         )
@@ -607,23 +698,16 @@ def reconcile_youtube_schedules_task():
             publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
             if publish_at and timezone.is_naive(publish_at):
                 publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-            # Se ainda está agendado no canal para o futuro, mantém PLANNED.
-            if publish_at and publish_at > now:
-                still_scheduled += 1
-                _mark_factory_posting_still_scheduled(
-                    post,
-                    publish_at_raw=publish_at_raw,
-                    note="Agendado no YouTube e aguardando horário de publicação.",
-                )
-            else:
-                confirmed += 1
-                _mark_factory_posting_verified(
-                    post,
-                    platform=platform,
-                    external_video_id=video_id,
-                    metadata=verify_data,
-                )
-                _cleanup_local_media_if_possible(post)
+            # Confirmado no YouTube (já publicado ou agendado para o futuro): marca como POSTED
+            # e não recheca mais, economizando cota da API.
+            confirmed += 1
+            _mark_factory_posting_verified(
+                post,
+                platform=platform,
+                external_video_id=video_id,
+                metadata=verify_data,
+            )
+            _cleanup_local_media_if_possible(post)
             continue
         # Só remove quando há evidência de ausência real.
         if _should_remove_missing_by_verify_error(verify_data):
@@ -1140,13 +1224,20 @@ def post_to_platforms_task(self, scheduled_post_id: int):
             (item.get("reason") or "").strip() == "quotaExceeded"
             for item in retryable_errors
         )
+        has_upload_limit_exceeded = any(
+            (item.get("reason") or "").strip() == "uploadLimitExceeded"
+            for item in retryable_errors
+        )
         has_min_interval_not_reached = any(
             (item.get("reason") or "").strip() == "minIntervalNotReached"
             for item in retryable_errors
         )
         next_retry = int(post.retry_count or 0) + 1
-        should_not_consume_attempt = has_quota_exceeded or has_min_interval_not_reached
-        if not should_not_consume_attempt and next_retry > 3:
+        should_not_consume_attempt = (
+            has_quota_exceeded or has_upload_limit_exceeded or has_min_interval_not_reached
+        )
+        # 1 retentativa para erros de upload/título; erros de token/cota não contam
+        if not should_not_consume_attempt and next_retry > 1:
             errors.extend([item["message"] for item in retryable_errors])
         else:
             requested_delays = [
@@ -1154,9 +1245,11 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                 for item in retryable_errors
                 if item.get("retry_after_seconds")
             ]
-            # quotaExceeded: aguarda reset da cota diária (sem falha definitiva).
+            # quotaExceeded / uploadLimitExceeded: aguarda reset (sem falha definitiva).
             if has_quota_exceeded:
                 delay = max([3600] + requested_delays)
+            elif has_upload_limit_exceeded:
+                delay = max([24 * 3600] + requested_delays)
             elif has_min_interval_not_reached:
                 delay = max([60] + requested_delays)
             else:
@@ -1179,7 +1272,7 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                     f"Nova tentativa automática em {delay}s. {msg}"
                 )
             else:
-                post.error = f"Falha temporária (tentativa {next_retry}/3). Próxima tentativa em {delay}s. {msg}"
+                post.error = f"Falha temporária. 1 tentativa automática em {delay}s. Reagende manualmente se persistir. {msg}"
             post.upload_fingerprint = upload_fingerprint
             post.external_ids = external_ids
             retry_fields = [

@@ -1,5 +1,6 @@
 """Publisher para YouTube (videos longos e Shorts)."""
 import random
+import re
 import time
 import json
 from datetime import timedelta, timezone as dt_timezone
@@ -20,6 +21,25 @@ from apps.social.services.youtube_credentials import get_credentials
 
 RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
 MAX_RETRIES = 10
+YOUTUBE_TITLE_MAX_LENGTH = 100
+
+
+def _sanitize_youtube_title(title: str, fallback: str = "Vídeo") -> str:
+    """
+    Sanitiza título para a API do YouTube.
+    Limite: 100 caracteres. Remove caracteres de controle e garante não vazio.
+    Substitui < e > por equivalentes seguros (evita invalidTitle).
+    """
+    if not title or not isinstance(title, str):
+        return fallback
+    # Remove caracteres de controle (0x00-0x1F, 0x7F)
+    cleaned = "".join(c for c in title if ord(c) >= 32 and ord(c) != 127)
+    # Substitui < e > que podem causar invalidTitle em alguns contextos
+    cleaned = cleaned.replace("<", " - ").replace(">", " - ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return fallback
+    return cleaned[:YOUTUBE_TITLE_MAX_LENGTH] or fallback
 
 
 class YouTubePublishError(Exception):
@@ -61,7 +81,8 @@ class YouTubePublisher(BasePublisher):
         if not fallback_title and post and getattr(post, "auto_cut_corte_id", None):
             suggestion = getattr(post.auto_cut_corte, "suggestion", None)
             fallback_title = getattr(suggestion, "title", "") or f"Corte {post.auto_cut_corte_id}"
-        title = (post.title if post else "") or fallback_title or "Vídeo"
+        raw_title = (post.title if post else "") or fallback_title or "Vídeo"
+        title = _sanitize_youtube_title(raw_title, fallback="Vídeo")
         description = self._build_description(post)
         language_data = self._build_language_data(post)
         tags = (post.tags if post else []) or []
@@ -72,19 +93,12 @@ class YouTubePublisher(BasePublisher):
             privacy = "private"
         made_for_kids = bool(getattr(account.brand, "youtube_made_for_kids", False))
         publish_at = self._get_publish_at(post)
-        interval_account = account
-        if youtube_credential is not None and not getattr(account, "channel_id", ""):
-            interval_account = SimpleNamespace(
-                brand=getattr(account, "brand", None),
-                channel_id=getattr(youtube_credential, "channel_id", ""),
-                platform=getattr(account, "platform", "YTB"),
-            )
-        self._enforce_channel_min_interval(youtube, interval_account, post)
+        # Slots fixos já espaçam as postagens; não verificamos mais intervalo mínimo.
         # Padrão para agendamento futuro no YouTube: privado + publishAt.
         if publish_at:
             privacy = "private"
         snippet = {
-            "title": title[:200],
+            "title": title,
             "description": description[:5000],
             "tags": tags[:500] if tags else [],
             "categoryId": "22",
@@ -128,95 +142,6 @@ class YouTubePublisher(BasePublisher):
         if thumb_warning:
             result["warning"] = thumb_warning
         return result
-
-    def _enforce_channel_min_interval(
-        self,
-        youtube,
-        account: BrandSocialAccount,
-        post: ScheduledPost | None,
-    ) -> None:
-        """
-        Evita publicar se o canal ja teve postagem recente abaixo do intervalo minimo da brand.
-        Usa publishedAt do ultimo video retornado pela API do YouTube.
-        """
-        if not post:
-            return
-        channel_id = (account.channel_id or "").strip()
-        if not channel_id:
-            return
-
-        brand = getattr(account, "brand", None)
-        if not brand:
-            return
-
-        platform_codes = {str(code).strip().upper() for code in (post.platforms or []) if code}
-        if platform_codes == {"YT"}:
-            min_interval_minutes = int(getattr(brand, "min_short_interval_minutes", 0) or 0)
-        elif platform_codes == {"YTB"}:
-            min_interval_minutes = int(getattr(brand, "min_long_interval_minutes", 0) or 0)
-        else:
-            platform = (account.platform or "").strip().upper()
-            if platform == "YT":
-                min_interval_minutes = int(getattr(brand, "min_short_interval_minutes", 0) or 0)
-            else:
-                min_interval_minutes = int(getattr(brand, "min_long_interval_minutes", 0) or 0)
-        if min_interval_minutes <= 0:
-            return
-
-        try:
-            resp = youtube.search().list(
-                part="snippet",
-                channelId=channel_id,
-                type="video",
-                order="date",
-                maxResults=1,
-            ).execute()
-        except HttpError as e:
-            err = self._http_error_to_publish_error(e)
-            # Se falhar a leitura, segue sem bloquear publicação.
-            if err.retriable:
-                raise YouTubePublishError(
-                    f"Falha ao consultar ultimo video do canal: {err}",
-                    status_code=err.status_code,
-                    reason=err.reason,
-                    retriable=True,
-                ) from e
-            return
-        except Exception:
-            return
-
-        items = (resp or {}).get("items") or []
-        if not items:
-            return
-        published_at = (
-            items[0].get("snippet", {}).get("publishedAt")
-            if isinstance(items[0], dict)
-            else None
-        )
-        if not published_at:
-            return
-        try:
-            published_dt = datetime.fromisoformat(
-                published_at.replace("Z", "+00:00")
-            ).astimezone(dt_timezone.utc)
-        except Exception:
-            return
-
-        now_utc = timezone.now().astimezone(dt_timezone.utc)
-        elapsed = (now_utc - published_dt).total_seconds()
-        required = min_interval_minutes * 60
-        if elapsed >= required:
-            return
-
-        wait_seconds = int(required - elapsed)
-        wait_minutes = max(1, int((wait_seconds + 59) / 60))
-        raise YouTubePublishError(
-            f"Intervalo minimo entre publicacoes ainda nao cumprido ({min_interval_minutes} min). "
-            f"Aguardar cerca de {wait_minutes} min.",
-            reason="minIntervalNotReached",
-            retriable=True,
-            retry_after_seconds=max(wait_seconds, 60),
-        )
 
     def _build_description(self, post: ScheduledPost | None) -> str:
         """Monta descrição final para YouTube."""
@@ -336,11 +261,20 @@ class YouTubePublisher(BasePublisher):
         if reason == "quotaExceeded":
             retriable = True
             retry_after_seconds = self._seconds_until_youtube_quota_reset()
+        elif reason == "uploadLimitExceeded":
+            # Limite de upload do canal (vídeos/dia), não cota da API no Cloud Console.
+            retriable = True
+            retry_after_seconds = 24 * 3600
         detail_msg = f"HTTP {status_code or '-'}"
         if reason:
             detail_msg += f" reason={reason}"
         if message:
             detail_msg += f" msg={message}"
+        if reason == "uploadLimitExceeded":
+            detail_msg = (
+                "Canal atingiu o limite de uploads do dia (YouTube). "
+                "Não é cota da API no Cloud Console. Nova tentativa em 24h."
+            )
         return YouTubePublishError(
             detail_msg,
             status_code=status_code,

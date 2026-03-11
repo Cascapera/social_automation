@@ -91,14 +91,10 @@ export default function IntroOutro() {
   const [newBrandTextColor, setNewBrandTextColor] = useState('#0A0A0A')
   const [newBrandEffectColor, setNewBrandEffectColor] = useState('#FFEBDC')
   const [newBrandDescriptionExtra, setNewBrandDescriptionExtra] = useState('')
-  const [newBrandShortMinInterval, setNewBrandShortMinInterval] = useState(60)
-  const [newBrandLongMinInterval, setNewBrandLongMinInterval] = useState(180)
-  const [newBrandMaxShortsPerDay, setNewBrandMaxShortsPerDay] = useState(3)
-  const [newBrandMaxLongsPerDay, setNewBrandMaxLongsPerDay] = useState(1)
-  const [newBrandShortWindowStart, setNewBrandShortWindowStart] = useState('08:00')
-  const [newBrandShortWindowEnd, setNewBrandShortWindowEnd] = useState('22:00')
-  const [newBrandLongWindowStart, setNewBrandLongWindowStart] = useState('12:00')
-  const [newBrandLongWindowEnd, setNewBrandLongWindowEnd] = useState('22:00')
+  const [newBrandShortSlotTimes, setNewBrandShortSlotTimes] = useState([])
+  const [newBrandShortSlotTimeInput, setNewBrandShortSlotTimeInput] = useState('10:00')
+  const [newBrandLongSlotTimes, setNewBrandLongSlotTimes] = useState([])
+  const [newBrandLongSlotTimeInput, setNewBrandLongSlotTimeInput] = useState('20:00')
   const [creatingBrand, setCreatingBrand] = useState(false)
   const [showNewBrand, setShowNewBrand] = useState(false)
   const [youtubeDescriptionExtra, setYoutubeDescriptionExtra] = useState('')
@@ -111,14 +107,10 @@ export default function IntroOutro() {
   const [editBandColor, setEditBandColor] = useState('#E12E20')
   const [editTextColor, setEditTextColor] = useState('#0A0A0A')
   const [editEffectColor, setEditEffectColor] = useState('#FFEBDC')
-  const [editShortMinInterval, setEditShortMinInterval] = useState(60)
-  const [editLongMinInterval, setEditLongMinInterval] = useState(180)
-  const [editMaxShortsPerDay, setEditMaxShortsPerDay] = useState(3)
-  const [editMaxLongsPerDay, setEditMaxLongsPerDay] = useState(1)
-  const [editShortWindowStart, setEditShortWindowStart] = useState('08:00')
-  const [editShortWindowEnd, setEditShortWindowEnd] = useState('22:00')
-  const [editLongWindowStart, setEditLongWindowStart] = useState('12:00')
-  const [editLongWindowEnd, setEditLongWindowEnd] = useState('22:00')
+  const [editShortSlotTimes, setEditShortSlotTimes] = useState([])
+  const [newShortSlotTime, setNewShortSlotTime] = useState('10:00')
+  const [editLongSlotTimes, setEditLongSlotTimes] = useState([])
+  const [newLongSlotTime, setNewLongSlotTime] = useState('20:00')
   const [youtubeCredentials, setYoutubeCredentials] = useState([])
   const [youtubeCredentialSecrets, setYoutubeCredentialSecrets] = useState({})
   const [loadingYoutubeCredentials, setLoadingYoutubeCredentials] = useState(false)
@@ -179,14 +171,8 @@ export default function IntroOutro() {
     setEditBandColor(selected?.thumbnail_band_color || '#E12E20')
     setEditTextColor(selected?.thumbnail_text_color || '#0A0A0A')
     setEditEffectColor(selected?.thumbnail_effect_color || '#FFEBDC')
-    setEditShortMinInterval(Number(selected?.min_short_interval_minutes ?? 60))
-    setEditLongMinInterval(Number(selected?.min_long_interval_minutes ?? 180))
-    setEditMaxShortsPerDay(Number(selected?.max_shorts_per_day ?? 3))
-    setEditMaxLongsPerDay(Number(selected?.max_longs_per_day ?? 1))
-    setEditShortWindowStart(selected?.short_window_start || '08:00')
-    setEditShortWindowEnd(selected?.short_window_end || '22:00')
-    setEditLongWindowStart(selected?.long_window_start || '12:00')
-    setEditLongWindowEnd(selected?.long_window_end || '22:00')
+    setEditShortSlotTimes(Array.isArray(selected?.short_slot_times) ? selected.short_slot_times : [])
+    setEditLongSlotTimes(Array.isArray(selected?.long_slot_times) ? selected.long_slot_times : [])
   }, [brandId, brands])
 
   async function handleAdd(e) {
@@ -242,14 +228,8 @@ export default function IntroOutro() {
         thumbnail_text_color: (newBrandTextColor || '').trim(),
         thumbnail_effect_color: (newBrandEffectColor || '').trim(),
         youtube_description_extra: newBrandDescriptionExtra || '',
-        min_short_interval_minutes: Number(newBrandShortMinInterval || 0),
-        min_long_interval_minutes: Number(newBrandLongMinInterval || 0),
-        max_shorts_per_day: Number(newBrandMaxShortsPerDay || 0),
-        max_longs_per_day: Number(newBrandMaxLongsPerDay || 0),
-        short_window_start: newBrandShortWindowStart || null,
-        short_window_end: newBrandShortWindowEnd || null,
-        long_window_start: newBrandLongWindowStart || null,
-        long_window_end: newBrandLongWindowEnd || null,
+        short_slot_times: newBrandShortSlotTimes?.length ? newBrandShortSlotTimes : [],
+        long_slot_times: newBrandLongSlotTimes?.length ? newBrandLongSlotTimes : [],
       }
       const b = await createBrand(payload)
       if (newBrandLogoFile) {
@@ -308,14 +288,8 @@ export default function IntroOutro() {
         thumbnail_band_color: (editBandColor || '').trim(),
         thumbnail_text_color: (editTextColor || '').trim(),
         thumbnail_effect_color: (editEffectColor || '').trim(),
-        min_short_interval_minutes: Number(editShortMinInterval || 0),
-        min_long_interval_minutes: Number(editLongMinInterval || 0),
-        max_shorts_per_day: Number(editMaxShortsPerDay || 0),
-        max_longs_per_day: Number(editMaxLongsPerDay || 0),
-        short_window_start: editShortWindowStart || null,
-        short_window_end: editShortWindowEnd || null,
-        long_window_start: editLongWindowStart || null,
-        long_window_end: editLongWindowEnd || null,
+        short_slot_times: Array.isArray(editShortSlotTimes) ? editShortSlotTimes : [],
+        long_slot_times: Array.isArray(editLongSlotTimes) ? editLongSlotTimes : [],
       })
       const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
       await refreshBrands(fetcher)
@@ -536,37 +510,41 @@ export default function IntroOutro() {
 
             <div className="form-section">
               <h3>Regras de Agendamento</h3>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Intervalo mínimo short (min)</label>
-                  <input type="number" min="0" value={newBrandShortMinInterval} onChange={(e) => setNewBrandShortMinInterval(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Intervalo mínimo longo (min)</label>
-                  <input type="number" min="0" value={newBrandLongMinInterval} onChange={(e) => setNewBrandLongMinInterval(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Máx shorts por dia</label>
-                  <input type="number" min="0" value={newBrandMaxShortsPerDay} onChange={(e) => setNewBrandMaxShortsPerDay(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Máx longos por dia</label>
-                  <input type="number" min="0" value={newBrandMaxLongsPerDay} onChange={(e) => setNewBrandMaxLongsPerDay(e.target.value)} />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Janela shorts (início/fim)</label>
-                  <div className="form-row form-row-inline">
-                    <input type="time" value={newBrandShortWindowStart} onChange={(e) => setNewBrandShortWindowStart(e.target.value)} />
-                    <input type="time" value={newBrandShortWindowEnd} onChange={(e) => setNewBrandShortWindowEnd(e.target.value)} />
+              <div className="form-group">
+                <label>Horários fixos de short</label>
+                <p className="form-hint">Adicione os horários em que os shorts serão postados. Obrigatório.</p>
+                <div className="short-slots-list">
+                  {(newBrandShortSlotTimes || []).map((t, i) => (
+                    <span key={i} className="short-slot-chip">
+                      {t}
+                      <button type="button" onClick={() => setNewBrandShortSlotTimes((prev) => prev.filter((_, j) => j !== i))} title="Remover">×</button>
+                    </span>
+                  ))}
+                  <div className="short-slot-add">
+                    <input type="time" value={newBrandShortSlotTimeInput} onChange={(e) => setNewBrandShortSlotTimeInput(e.target.value)} />
+                    <button type="button" onClick={() => {
+                      const v = newBrandShortSlotTimeInput?.slice(0, 5)
+                      if (v && !newBrandShortSlotTimes.includes(v)) setNewBrandShortSlotTimes((prev) => [...prev, v].sort())
+                    }}>Adicionar</button>
                   </div>
                 </div>
-                <div className="form-group">
-                  <label>Janela longos (início/fim)</label>
-                  <div className="form-row form-row-inline">
-                    <input type="time" value={newBrandLongWindowStart} onChange={(e) => setNewBrandLongWindowStart(e.target.value)} />
-                    <input type="time" value={newBrandLongWindowEnd} onChange={(e) => setNewBrandLongWindowEnd(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>Horários fixos de vídeos longos</label>
+                <p className="form-hint">Adicione os horários em que os longos serão postados. Obrigatório para agendar longos.</p>
+                <div className="short-slots-list">
+                  {(newBrandLongSlotTimes || []).map((t, i) => (
+                    <span key={i} className="short-slot-chip">
+                      {t}
+                      <button type="button" onClick={() => setNewBrandLongSlotTimes((prev) => prev.filter((_, j) => j !== i))} title="Remover">×</button>
+                    </span>
+                  ))}
+                  <div className="short-slot-add">
+                    <input type="time" value={newBrandLongSlotTimeInput} onChange={(e) => setNewBrandLongSlotTimeInput(e.target.value)} />
+                    <button type="button" onClick={() => {
+                      const v = newBrandLongSlotTimeInput?.slice(0, 5)
+                      if (v && !newBrandLongSlotTimes.includes(v)) setNewBrandLongSlotTimes((prev) => [...prev, v].sort())
+                    }}>Adicionar</button>
                   </div>
                 </div>
               </div>
@@ -612,7 +590,7 @@ export default function IntroOutro() {
           <div className="add-form">
             <h2>Configuração de agendamento da brand</h2>
             <p className="form-hint">
-              Ajuste horários, intervalos e volume de postagem para esta brand.
+              Ajuste os horários fixos de postagem. O número de slots define quantos vídeos serão agendados por dia.
             </p>
             <form onSubmit={handleSaveBrandScheduling} className="brand-create-form">
               <div className="form-row">
@@ -643,36 +621,42 @@ export default function IntroOutro() {
                     ))}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label>Intervalo mínimo short (min)</label>
-                  <input type="number" min="0" value={editShortMinInterval} onChange={(e) => setEditShortMinInterval(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Intervalo mínimo longo (min)</label>
-                  <input type="number" min="0" value={editLongMinInterval} onChange={(e) => setEditLongMinInterval(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Máx shorts por dia</label>
-                  <input type="number" min="0" value={editMaxShortsPerDay} onChange={(e) => setEditMaxShortsPerDay(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Máx longos por dia</label>
-                  <input type="number" min="0" value={editMaxLongsPerDay} onChange={(e) => setEditMaxLongsPerDay(e.target.value)} />
-                </div>
               </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Janela shorts (início/fim)</label>
-                  <div className="form-row form-row-inline">
-                    <input type="time" value={editShortWindowStart} onChange={(e) => setEditShortWindowStart(e.target.value)} />
-                    <input type="time" value={editShortWindowEnd} onChange={(e) => setEditShortWindowEnd(e.target.value)} />
+              <div className="form-group">
+                <label>Horários fixos de short</label>
+                <p className="form-hint">Adicione os horários em que os shorts serão postados. Obrigatório.</p>
+                <div className="short-slots-list">
+                  {(editShortSlotTimes || []).map((t, i) => (
+                    <span key={i} className="short-slot-chip">
+                      {t}
+                      <button type="button" onClick={() => setEditShortSlotTimes((prev) => prev.filter((_, j) => j !== i))} title="Remover">×</button>
+                    </span>
+                  ))}
+                  <div className="short-slot-add">
+                    <input type="time" value={newShortSlotTime} onChange={(e) => setNewShortSlotTime(e.target.value)} />
+                    <button type="button" onClick={() => {
+                      const v = newShortSlotTime?.slice(0, 5)
+                      if (v && !editShortSlotTimes.includes(v)) setEditShortSlotTimes((prev) => [...prev, v].sort())
+                    }}>Adicionar</button>
                   </div>
                 </div>
-                <div className="form-group">
-                  <label>Janela longos (início/fim)</label>
-                  <div className="form-row form-row-inline">
-                    <input type="time" value={editLongWindowStart} onChange={(e) => setEditLongWindowStart(e.target.value)} />
-                    <input type="time" value={editLongWindowEnd} onChange={(e) => setEditLongWindowEnd(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>Horários fixos de vídeos longos</label>
+                <p className="form-hint">Adicione os horários em que os longos serão postados. Obrigatório para agendar longos.</p>
+                <div className="short-slots-list">
+                  {(editLongSlotTimes || []).map((t, i) => (
+                    <span key={i} className="short-slot-chip">
+                      {t}
+                      <button type="button" onClick={() => setEditLongSlotTimes((prev) => prev.filter((_, j) => j !== i))} title="Remover">×</button>
+                    </span>
+                  ))}
+                  <div className="short-slot-add">
+                    <input type="time" value={newLongSlotTime} onChange={(e) => setNewLongSlotTime(e.target.value)} />
+                    <button type="button" onClick={() => {
+                      const v = newLongSlotTime?.slice(0, 5)
+                      if (v && !editLongSlotTimes.includes(v)) setEditLongSlotTimes((prev) => [...prev, v].sort())
+                    }}>Adicionar</button>
                   </div>
                 </div>
               </div>

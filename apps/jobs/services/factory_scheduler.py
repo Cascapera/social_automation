@@ -28,32 +28,42 @@ def _to_local_dt(factory_tz: str, day: date, t: time) -> datetime:
     return datetime.combine(day, t).replace(tzinfo=tz)
 
 
-def _build_slots(
+def _parse_time_str(s: str) -> time | None:
+    """Converte 'HH:MM' ou 'HH:MM:SS' em time."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    parts = s.split(":")
+    if len(parts) >= 2:
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return time(h, m)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _build_slots_from_fixed_times(
     *,
     brand: Brand,
     day: date,
     factory_tz: str,
-    video_type: str,
-    start_time: time | None,
-    end_time: time | None,
-    interval_minutes: int,
-    max_per_day: int,
+    slot_times: list[str],
     now_local: datetime,
 ) -> list[datetime]:
-    if not start_time or not end_time or max_per_day <= 0:
-        return []
-    if start_time >= end_time:
-        return []
-    interval = max(1, int(interval_minutes or 1))
-    start_dt = _to_local_dt(factory_tz, day, start_time)
-    end_dt = _to_local_dt(factory_tz, day, end_time)
+    """Gera slots a partir de horários fixos (ex: ['10:00', '14:00', '18:00'])."""
     slots: list[datetime] = []
-    cursor = start_dt
-    while cursor <= end_dt and len(slots) < max_per_day:
-        if cursor >= now_local:
-            slots.append(cursor)
-        cursor = cursor + timedelta(minutes=interval)
-    return slots
+    for s in slot_times:
+        t = _parse_time_str(s)
+        if t is None:
+            continue
+        dt = _to_local_dt(factory_tz, day, t)
+        if dt >= now_local:
+            slots.append(dt)
+    return sorted(slots)
+
+
 
 
 def _order_with_source_diversity(items: list[VideoInventoryItem]) -> list[VideoInventoryItem]:
@@ -104,11 +114,17 @@ def generate_daily_schedule_for_factory(
     now_utc: datetime | None = None,
     *,
     allow_rerun: bool = False,
+    target_date: date | None = None,
 ) -> dict:
+    """
+    Gera agenda de postagens para uma factory.
+    target_date: dia para o qual gerar os slots. Se None, usa o dia local atual.
+    Quando chamado às 19h para agendar o dia seguinte, passar target_date=amanhã.
+    """
     now_utc = now_utc or timezone.now()
     tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
     now_local = now_utc.astimezone(tz)
-    local_day = now_local.date()
+    local_day = target_date if target_date is not None else now_local.date()
     run, created = FactoryScheduleRun.objects.get_or_create(
         factory=factory,
         run_date=local_day,
@@ -125,28 +141,26 @@ def generate_daily_schedule_for_factory(
     brands = Brand.objects.filter(factory=factory).order_by("id")
     for brand in brands:
         plans: list[SlotPlan] = []
-        short_slots = _build_slots(
+        short_slot_times = getattr(brand, "short_slot_times", None) or []
+        if not isinstance(short_slot_times, list):
+            short_slot_times = []
+        long_slot_times = getattr(brand, "long_slot_times", None) or []
+        if not isinstance(long_slot_times, list):
+            long_slot_times = []
+        short_slots = _build_slots_from_fixed_times(
             brand=brand,
             day=local_day,
             factory_tz=factory.timezone,
-            video_type="SHORT",
-            start_time=brand.short_window_start,
-            end_time=brand.short_window_end,
-            interval_minutes=brand.min_short_interval_minutes,
-            max_per_day=brand.max_shorts_per_day,
+            slot_times=short_slot_times,
             now_local=now_local,
-        )
-        long_slots = _build_slots(
+        ) if short_slot_times else []
+        long_slots = _build_slots_from_fixed_times(
             brand=brand,
             day=local_day,
             factory_tz=factory.timezone,
-            video_type="LONG",
-            start_time=brand.long_window_start,
-            end_time=brand.long_window_end,
-            interval_minutes=brand.min_long_interval_minutes,
-            max_per_day=brand.max_longs_per_day,
+            slot_times=long_slot_times,
             now_local=now_local,
-        )
+        ) if long_slot_times else []
         for dt in short_slots:
             plans.append(SlotPlan(brand=brand, video_type="SHORT", scheduled_at=dt))
         for dt in long_slots:
@@ -211,7 +225,7 @@ def generate_daily_schedule_for_factory(
                 scheduled_post=scheduled_post,
             )
             item.status = "SCHEDULED"
-            # scheduled_for só é preenchido quando o YouTube confirmar o envio (em _sync_factory_posting_status)
-            item.save(update_fields=["status", "updated_at"])
+            item.scheduled_for = plan.scheduled_at.astimezone(dt_timezone.utc)
+            item.save(update_fields=["status", "scheduled_for", "updated_at"])
             created_count += 1
     return {"factory_id": factory.id, "created": created_count, "run_id": run.id}

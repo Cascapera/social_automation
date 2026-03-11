@@ -2,7 +2,10 @@
 
 import json
 import logging
+import os
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,9 @@ REGRAS DE TÍTULO E THUMBNAIL:
 IMPORTANTE:
 - Use APENAS timestamps que aparecem na transcrição.
 - Não invente timestamps.
-- Não retorne texto fora do JSON."""
+- Não retorne texto fora do JSON.
+
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes."""
 
 SYSTEM_PROMPT_EDUCATIONAL = """Você é um editor especialista em conteúdo educacional e financeiro para Reels, TikTok, Shorts e YouTube. Analise transcrições com timestamps e identifique trechos com alto valor didático e explicativo. Priorize blocos completos que ensinam um conceito do início ao fim.
 
@@ -85,7 +90,9 @@ Para cortes longos:
 - start, end, duration_min, title_suggestion, reason
 - theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
 
-IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime."""
+IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime.
+
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes."""
 
 CHUNKS_PROMPT_TEMPLATE = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
 
@@ -273,7 +280,9 @@ TITLE + THUMBNAIL RULES:
 IMPORTANT:
 - Use ONLY timestamps present in the transcript.
 - Do not invent timestamps.
-- Return valid JSON only."""
+- Return valid JSON only.
+
+IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types."""
 
 CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -404,7 +413,9 @@ For long cuts:
 - start, end, duration_min, title_suggestion, reason
 - theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
 
-IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate."""
+IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate.
+
+IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types."""
 
 CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -658,6 +669,28 @@ def _build_context_block(
     return header + "\n".join(parts) + "\n\n" + categories_block + "\n\n"
 
 
+def _save_grok_response_json(parsed: dict, analysis_id: int | None = None) -> None:
+    """Salva a resposta parseada do Grok em JSON para análise (ativar com GROK_SAVE_RESPONSE_JSON=1)."""
+    if not (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().lower() in ("1", "true", "yes"):
+        return
+    try:
+        from django.conf import settings
+        media = Path(getattr(settings, "MEDIA_ROOT", "") or "").resolve()
+        if media and media.is_dir():
+            save_dir = media / "grok_responses"
+        else:
+            save_dir = Path(__file__).resolve().parents[3] / "storage" / "grok_responses"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"analysis_{analysis_id}_{ts}.json" if analysis_id else f"response_{ts}.json"
+        path = save_dir / name
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(parsed, f, ensure_ascii=False, indent=2)
+        logger.info("[FLUXO/Grok] Resposta salva em %s", path)
+    except Exception as e:
+        logger.warning("[FLUXO/Grok] Não foi possível salvar resposta em JSON: %s", e)
+
+
 def analyze_chunks_in_one_request(
     chunks: list[dict],
     assunto: str = "",
@@ -667,12 +700,14 @@ def analyze_chunks_in_one_request(
     enforce_minimum: bool = True,
     allowed_theme_categories: list[str] | None = None,
     brand_only: bool = False,
+    analysis_id: int | None = None,
 ) -> dict:
     """
     Analisa todos os chunks em uma única requisição.
     chunks: [{text, start_sec, end_sec, segments}, ...]
     prompt_version: viral, educational, viral_en, educational_en
     brand_only: quando True, theme_category é opcional (conteúdo para uma única marca).
+    analysis_id: opcional; se GROK_SAVE_RESPONSE_JSON=1, salva a resposta em JSON com este id no nome.
     Retorna JSON com ranked_shorts e final_long_cuts (economia de tokens).
     """
     if not chunks:
@@ -714,4 +749,5 @@ def analyze_chunks_in_one_request(
         allowed_theme_categories=allowed_theme_categories,
         brand_only=brand_only,
     )
+    _save_grok_response_json(parsed, analysis_id=analysis_id)
     return parsed

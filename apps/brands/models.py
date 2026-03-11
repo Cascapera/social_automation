@@ -8,6 +8,12 @@ class Factory(models.Model):
         default="America/Sao_Paulo",
         help_text="Timezone padrão da factory (IANA). Ex: America/Sao_Paulo.",
     )
+    daily_schedule_start_time = models.TimeField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Horário fixo (ex: 19:00) em que o sistema agenda os vídeos para o dia seguinte. Padrão 19h.",
+    )
     is_active = models.BooleanField(default=True)
     scheduling_paused = models.BooleanField(
         default=False,
@@ -106,41 +112,15 @@ class Brand(models.Model):
         default="#FFEBDC",
         help_text="Cor do contorno/efeito do texto da thumbnail (#RRGGBB).",
     )
-    min_short_interval_minutes = models.PositiveIntegerField(
-        default=60,
-        help_text="Intervalo mínimo entre shorts (min).",
-    )
-    min_long_interval_minutes = models.PositiveIntegerField(
-        default=180,
-        help_text="Intervalo mínimo entre vídeos longos (min).",
-    )
-    max_shorts_per_day = models.PositiveIntegerField(
-        default=3,
-        help_text="Máximo de shorts por dia.",
-    )
-    max_longs_per_day = models.PositiveIntegerField(
-        default=1,
-        help_text="Máximo de vídeos longos por dia.",
-    )
-    short_window_start = models.TimeField(
-        null=True,
+    short_slot_times = models.JSONField(
+        default=list,
         blank=True,
-        help_text="Início da janela de postagem de shorts.",
+        help_text="Horários fixos de shorts por dia (ex: ['10:00', '14:00', '18:00']). Obrigatório.",
     )
-    short_window_end = models.TimeField(
-        null=True,
+    long_slot_times = models.JSONField(
+        default=list,
         blank=True,
-        help_text="Fim da janela de postagem de shorts.",
-    )
-    long_window_start = models.TimeField(
-        null=True,
-        blank=True,
-        help_text="Início da janela de postagem de longos.",
-    )
-    long_window_end = models.TimeField(
-        null=True,
-        blank=True,
-        help_text="Fim da janela de postagem de longos.",
+        help_text="Horários fixos de vídeos longos por dia (ex: ['20:00']). Obrigatório para agendar longos.",
     )
 
     class Meta:

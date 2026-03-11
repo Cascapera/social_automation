@@ -21,9 +21,34 @@
 
 .factory-schedule-control {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.factory-daily-schedule-time {
+  display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.factory-daily-schedule-time label {
+  font-weight: 500;
+}
+
+.factory-daily-schedule-time input[type="time"] {
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.factory-daily-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted, #888);
+  margin: 0;
 }
 
 .factory-control-info {
@@ -78,6 +103,22 @@
 .factory-toggle-btn.resume {
   border-color: rgba(34, 197, 94, 0.65);
   color: #22c55e;
+}
+
+.factory-toggle-btn.immediate {
+  border-color: rgba(59, 130, 246, 0.65);
+  color: #3b82f6;
+}
+
+.factory-toggle-btn.immediate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.factory-control-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .weekly-factory-section {

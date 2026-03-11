@@ -77,6 +77,12 @@ export async function updateFactory(factoryId, payload) {
   })
 }
 
+export async function triggerImmediateSchedule(factoryId) {
+  return apiRequest(`/factories/${factoryId}/trigger-immediate-schedule/`, {
+    method: 'POST',
+  })
+}
+
 export async function getFactorySchedules(factoryId, status = null, brandId = null) {
   if (!factoryId) return []
   const params = new URLSearchParams()

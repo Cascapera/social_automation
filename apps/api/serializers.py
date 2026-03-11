@@ -33,6 +33,7 @@ class FactorySerializer(serializers.ModelSerializer):
             "id",
             "name",
             "timezone",
+            "daily_schedule_start_time",
             "is_active",
             "scheduling_paused",
             "processing_paused",
@@ -68,14 +69,8 @@ class BrandSerializer(serializers.ModelSerializer):
             "thumbnail_band_color",
             "thumbnail_text_color",
             "thumbnail_effect_color",
-            "min_short_interval_minutes",
-            "min_long_interval_minutes",
-            "max_shorts_per_day",
-            "max_longs_per_day",
-            "short_window_start",
-            "short_window_end",
-            "long_window_start",
-            "long_window_end",
+            "short_slot_times",
+            "long_slot_times",
         ]
         extra_kwargs = {"slug": {"required": False}}
 
@@ -486,12 +481,18 @@ class AutoCutCorteSerializer(serializers.ModelSerializer):
 class AutoCutAnalysisSerializer(serializers.ModelSerializer):
     suggestions = AutoCutSuggestionSerializer(many=True, read_only=True)
     cortes = AutoCutCorteSerializer(many=True, read_only=True)
+    target_brand_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_target_brand_name(self, obj):
+        target = getattr(obj, "target_brand", None)
+        return getattr(target, "name", None) if target else None
 
     class Meta:
         model = AutoCutAnalysis
         fields = [
             "id",
             "name",
+            "target_brand_name",
             "assunto",
             "convidados",
             "prompt_version",
@@ -516,6 +517,7 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
 
 class VideoInventoryItemSerializer(serializers.ModelSerializer):
     source_display_name = serializers.SerializerMethodField(read_only=True)
+    status_message = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = VideoInventoryItem
@@ -532,6 +534,7 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
             "source_display_name",
             "source_metadata",
             "status",
+            "status_message",
             "scheduled_for",
             "posted_at",
             "attempt_count",
@@ -539,6 +542,25 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_status_message(self, obj):
+        """
+        Mensagem de detalhe para status Postando: "Na fila" ou "Aguardando confirmação".
+        """
+        if obj.status in ("SCHEDULED", "POSTING"):
+            try:
+                schedule = obj.posting_schedules.select_related("scheduled_post").order_by("-id").first()
+            except Exception:
+                schedule = None
+            post = getattr(schedule, "scheduled_post", None) if schedule else None
+            external_ids = getattr(post, "external_ids", None) or {}
+            has_yt_id = bool(
+                str(external_ids.get("YT") or external_ids.get("YTB") or "").strip()
+            )
+            if obj.status == "POSTING":
+                return "Enviando..."
+            return "Aguardando confirmação" if has_yt_id else "Na fila"
+        return None
 
     def get_source_display_name(self, obj):
         """Nome do vídeo original (source, YouTube URL ou arquivo) para exibir na coluna Fonte."""
