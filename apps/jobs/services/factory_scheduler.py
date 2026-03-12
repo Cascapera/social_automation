@@ -115,11 +115,12 @@ def generate_daily_schedule_for_factory(
     *,
     allow_rerun: bool = False,
     target_date: date | None = None,
+    brand_id: int | None = None,
 ) -> dict:
     """
     Gera agenda de postagens para uma factory.
     target_date: dia para o qual gerar os slots. Se None, usa o dia local atual.
-    Quando chamado às 19h para agendar o dia seguinte, passar target_date=amanhã.
+    brand_id: quando informado, agenda apenas para essa brand (dentro da factory).
     """
     now_utc = now_utc or timezone.now()
     tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
@@ -138,15 +139,25 @@ def generate_daily_schedule_for_factory(
     day_end_local = (day_start_local + timedelta(days=1)) - timedelta(microseconds=1)
     day_start_utc = day_start_local.astimezone(dt_timezone.utc)
     day_end_utc = day_end_local.astimezone(dt_timezone.utc)
-    brands = Brand.objects.filter(factory=factory).order_by("id")
+    brands_qs = Brand.objects.filter(factory=factory).order_by("id")
+    if brand_id:
+        brands_qs = brands_qs.filter(id=brand_id)
+    brands = list(brands_qs)
+    DEFAULT_SHORT_SLOTS = ["10:00", "14:00", "18:00"]
+    DEFAULT_LONG_SLOTS = ["20:00"]
+
     for brand in brands:
         plans: list[SlotPlan] = []
         short_slot_times = getattr(brand, "short_slot_times", None) or []
         if not isinstance(short_slot_times, list):
             short_slot_times = []
+        if not short_slot_times:
+            short_slot_times = DEFAULT_SHORT_SLOTS
         long_slot_times = getattr(brand, "long_slot_times", None) or []
         if not isinstance(long_slot_times, list):
             long_slot_times = []
+        if not long_slot_times:
+            long_slot_times = DEFAULT_LONG_SLOTS
         short_slots = _build_slots_from_fixed_times(
             brand=brand,
             day=local_day,

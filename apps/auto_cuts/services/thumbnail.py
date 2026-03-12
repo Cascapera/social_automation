@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import tempfile
+import logging
 import re
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 from django.core.files import File
 
 from PIL import Image, ImageDraw, ImageFont
@@ -147,37 +150,77 @@ def _hex_to_rgb(hex_color: str, fallback: tuple[int, int, int]) -> tuple[int, in
     return tuple(int(value[i : i + 2], 16) for i in (1, 3, 5))
 
 
-def generate_auto_thumbnail(corte) -> bool:
+def generate_auto_thumbnail(corte, target_brand=None) -> bool:
     """
     Gera thumbnail automática usando timestamp sugerido + logo + texto inferior.
+    target_brand: quando fornecido (roteamento por theme), usa logo e cores dessa brand.
     Retorna True se gerou, False se não conseguiu.
     """
     try:
         analysis = corte.analysis
-        selected_font = (getattr(analysis, "thumbnail_font", "") or "impact").strip().lower()
+        # Prioridade: target_brand (roteamento por tema) > analysis.brand
+        # Quando target_brand existe, usar APENAS ela (nunca analysis) para evitar logo/cores da 1ª brand
+        brand = target_brand or getattr(analysis, "brand", None)
+
+        def _val(obj, attr, fallback):
+            v = (getattr(obj, attr, None) or "").strip()
+            return v if v else fallback
+
+        if target_brand:
+            selected_font = _val(target_brand, "thumbnail_font", "impact").lower()
+            band_color = _hex_to_rgb(_val(target_brand, "thumbnail_band_color", "#E12E20"), (225, 46, 32))
+            text_color = _hex_to_rgb(_val(target_brand, "thumbnail_text_color", "#0A0A0A"), (10, 10, 10))
+            stroke_color = _hex_to_rgb(_val(target_brand, "thumbnail_effect_color", "#FFEBDC"), (255, 235, 220))
+        else:
+            selected_font = (
+                _val(brand, "thumbnail_font", "") or _val(analysis, "thumbnail_font", "impact")
+            ).strip().lower()
+            band_color = _hex_to_rgb(
+                _val(brand, "thumbnail_band_color", "") or _val(analysis, "thumbnail_band_color", "#E12E20"),
+                (225, 46, 32),
+            )
+            text_color = _hex_to_rgb(
+                _val(brand, "thumbnail_text_color", "") or _val(analysis, "thumbnail_text_color", "#0A0A0A"),
+                (10, 10, 10),
+            )
+            stroke_color = _hex_to_rgb(
+                _val(brand, "thumbnail_effect_color", "") or _val(analysis, "thumbnail_stroke_color", "#FFEBDC"),
+                (255, 235, 220),
+            )
         if selected_font not in {"anton", "bebas", "montserrat", "impact"}:
             selected_font = "impact"
-        band_color = _hex_to_rgb(getattr(analysis, "thumbnail_band_color", "#E12E20"), (225, 46, 32))
-        text_color = _hex_to_rgb(getattr(analysis, "thumbnail_text_color", "#0A0A0A"), (10, 10, 10))
-        stroke_color = _hex_to_rgb(getattr(analysis, "thumbnail_stroke_color", "#FFEBDC"), (255, 235, 220))
-        source_video = analysis.video_file
-        if not source_video:
-            return False
-        source_video_path = Path(source_video.path)
-        if not source_video_path.exists():
-            return False
-
-        raw = corte.suggestion.raw_data or {}
-        ts_raw = raw.get("thumbnail_moment_timestamp") or raw.get("start_timestamp") or corte.suggestion.start_tc
-        ts_sec = tc_to_seconds(str(ts_raw))
-
-        # Garante que o frame esteja dentro do intervalo do corte quando possível.
-        start_sec = tc_to_seconds(corte.suggestion.start_tc or "")
-        end_sec = tc_to_seconds(corte.suggestion.end_tc or "")
-        if end_sec > start_sec:
-            if ts_sec < start_sec or ts_sec > end_sec:
+        # Para Shorts (vertical): extrair frame do corte já extraído (formato 9:16, ideal para YouTube Shorts)
+        # Para Longs (horizontal): usar vídeo original ou corte
+        is_short = (getattr(corte, "format", "") or "").lower() == "vertical"
+        if is_short and corte.file:
+            try:
+                corte_path = Path(corte.file.path)
+                if corte_path.exists():
+                    source_video_path = corte_path
+                    ts_sec = 1.0  # frame no início do short (já é o corte)
+                else:
+                    source_video_path = None
+                    ts_sec = 0.0
+            except Exception:
+                source_video_path = None
+        else:
+            source_video_path = None
+        if not source_video_path:
+            source_video = analysis.video_file
+            if not source_video:
+                return False
+            source_video_path = Path(source_video.path)
+            if not source_video_path.exists():
+                return False
+            raw = corte.suggestion.raw_data or {}
+            ts_raw = raw.get("thumbnail_moment_timestamp") or raw.get("start_timestamp") or corte.suggestion.start_tc
+            ts_sec = tc_to_seconds(str(ts_raw))
+            start_sec = tc_to_seconds(corte.suggestion.start_tc or "")
+            end_sec = tc_to_seconds(corte.suggestion.end_tc or "")
+            if end_sec > start_sec and (ts_sec < start_sec or ts_sec > end_sec):
                 ts_sec = start_sec + ((end_sec - start_sec) / 2.0)
 
+        raw = corte.suggestion.raw_data or {}
         thumb_text = (raw.get("thumbnail_text") or "").strip()
         if not thumb_text:
             fallback = (raw.get("suggested_title") or corte.suggestion.title or "").strip()
@@ -191,15 +234,22 @@ def generate_auto_thumbnail(corte) -> bool:
             _extract_frame_at(source_video_path, frame_path, ts_sec)
 
             img = Image.open(frame_path).convert("RGB")
-            draw = ImageDraw.Draw(img)
             w, h = img.size
+            # Shorts (9:16): se o frame for horizontal (16:9), recorta o centro para 9:16
+            if is_short and w > h:
+                new_w = int(h * 9 / 16)
+                if new_w > 0 and new_w < w:
+                    left = (w - new_w) // 2
+                    img = img.crop((left, 0, left + new_w, h))
+                    w, h = img.size
+            draw = ImageDraw.Draw(img)
 
-            # Logo topo-esquerda (se houver).
+            # Logo topo-esquerda (se houver) - usa target_brand ou analysis.brand
             logo_asset = (
-                BrandAsset.objects.filter(brand=analysis.brand, asset_type="LOGO")
+                BrandAsset.objects.filter(brand=brand, asset_type="LOGO")
                 .order_by("id")
                 .first()
-                if analysis.brand_id
+                if brand and getattr(brand, "id", None)
                 else None
             )
             margin = max(16, int(w * 0.02))
@@ -271,5 +321,6 @@ def generate_auto_thumbnail(corte) -> bool:
             with open(out_path, "rb") as f:
                 corte.thumbnail.save(f"autocut_{corte.id}.jpg", File(f), save=True)
             return True
-    except Exception:
+    except Exception as e:
+        logger.warning("[THUMB] Falha ao gerar thumbnail para corte %s: %s", getattr(corte, "id", "?"), e)
         return False

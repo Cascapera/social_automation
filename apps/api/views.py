@@ -150,24 +150,60 @@ class FactoryViewSet(viewsets.ModelViewSet):
     def trigger_immediate_schedule(self, request, pk=None):
         """
         Dispara o agendamento imediato para a factory.
-        Gera agenda para o dia seguinte respeitando as características de cada brand (slots).
-        Útil quando há falha de servidor ou falta de vídeos no estoque.
+        Gera agenda para o dia informado (ou dia seguinte se não informado).
+        Respeita horários das brands e vídeos disponíveis no banco.
+        Body opcional: {"target_date": "YYYY-MM-DD"}
         """
         from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
-        from datetime import timedelta
+        from datetime import date, timedelta
         from django.utils import timezone
         from zoneinfo import ZoneInfo
 
         factory = self.get_object()
         factory_tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
         now_local = timezone.now().astimezone(factory_tz)
-        target_date = now_local.date() + timedelta(days=1)
+        default_target = now_local.date() + timedelta(days=1)
+
+        target_date = default_target
+        brand_id = None
+        if request.data and isinstance(request.data, dict):
+            raw = (request.data.get("target_date") or "").strip()
+            if raw:
+                try:
+                    parsed = date.fromisoformat(raw)
+                    if parsed < now_local.date():
+                        return Response(
+                            {"error": "Data não pode ser no passado."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    target_date = parsed
+                except (ValueError, TypeError):
+                    return Response(
+                        {"error": "Data inválida. Use formato YYYY-MM-DD."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            bid = request.data.get("brand_id")
+            if bid is not None:
+                try:
+                    brand_id = int(bid)
+                except (ValueError, TypeError):
+                    pass
+
+        if brand_id:
+            from apps.brands.models import Brand
+            if not Brand.objects.filter(id=brand_id, factory=factory).exists():
+                return Response(
+                    {"error": "Brand não pertence a esta factory."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         try:
             result = generate_daily_schedule_for_factory(
                 factory,
                 now_utc=timezone.now(),
                 target_date=target_date,
                 allow_rerun=True,
+                brand_id=brand_id,
             )
             return Response({
                 "created": result.get("created", 0),
@@ -193,6 +229,78 @@ class BrandViewSet(viewsets.ModelViewSet):
         if factory:
             qs = qs.filter(factory_id=factory)
         return qs
+
+    @action(detail=True, methods=["post"], url_path="trigger-immediate-schedule")
+    def trigger_immediate_schedule(self, request, pk=None):
+        """
+        Agendamento imediato para uma marca (com ou sem factory).
+        Para marcas sem factory, cria uma factory pessoal automaticamente.
+        Body: {"target_date": "YYYY-MM-DD"}
+        """
+        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
+        from apps.brands.models import Factory
+        from datetime import date, timedelta
+        from django.utils import timezone
+        from zoneinfo import ZoneInfo
+
+        brand = self.get_object()
+        tz_name = (brand.factory.timezone if brand.factory else None) or "America/Sao_Paulo"
+        tz = ZoneInfo(tz_name)
+        now_local = timezone.now().astimezone(tz)
+        default_target = now_local.date() + timedelta(days=1)
+
+        target_date = default_target
+        if request.data and isinstance(request.data, dict):
+            raw = (request.data.get("target_date") or "").strip()
+            if raw:
+                try:
+                    parsed = date.fromisoformat(raw)
+                    if parsed < now_local.date():
+                        return Response(
+                            {"error": "Data não pode ser no passado."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    target_date = parsed
+                except (ValueError, TypeError):
+                    return Response(
+                        {"error": "Data inválida. Use formato YYYY-MM-DD."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        factory = brand.factory
+        if not factory:
+            factory, created = Factory.objects.get_or_create(
+                name=f"{brand.name} (pessoal #{brand.id})",
+                defaults={
+                    "timezone": "America/Sao_Paulo",
+                    "is_active": True,
+                    "scheduling_paused": True,
+                },
+            )
+            brand.factory = factory
+            brand.save(update_fields=["factory"])
+            if not created and not factory.scheduling_paused:
+                factory.scheduling_paused = True
+                factory.save(update_fields=["scheduling_paused"])
+
+        try:
+            result = generate_daily_schedule_for_factory(
+                factory,
+                now_utc=timezone.now(),
+                target_date=target_date,
+                allow_rerun=True,
+                brand_id=brand.id,
+            )
+            return Response({
+                "created": result.get("created", 0),
+                "factory_id": factory.id,
+                "target_date": str(target_date),
+            })
+        except Exception as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @action(detail=True, methods=["get"])
     def social_accounts(self, request, pk=None):
@@ -532,12 +640,9 @@ class JobViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user, brand_id=brand_id or None)
 
     def destroy(self, request, *args, **kwargs):
-        """Deleta o job e o arquivo exportado. Só permite se não houver agendamento pendente."""
+        """Deleta o job e o arquivo exportado. Registros de agendamento são preservados."""
         job = self.get_object()
-        try:
-            do_delete_job(job)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        do_delete_job(job)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
@@ -1162,7 +1267,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         thumbnail_stroke_color = (request.data.get("thumbnail_stroke_color") or "#FFEBDC").strip()
         shorts_target_raw = request.data.get("shorts_target", 12)
         longs_target_raw = request.data.get("longs_target", 3)
-        if prompt_version not in ("viral", "educational", "viral_en", "educational_en"):
+        if prompt_version not in ("viral", "educational", "viral_en", "educational_en", "viral_translate"):
             prompt_version = "viral"
         if thumbnail_font not in ("anton", "bebas", "montserrat", "impact"):
             thumbnail_font = "impact"

@@ -10,6 +10,68 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 THEME_CATEGORY_RETRY_THRESHOLD = 5
+
+# Palavras que aumentam CTR (preferir em títulos e thumbnails)
+CTR_WORDS_PT = [
+    "segredo", "verdade", "revelado", "ninguém fala", "exposto", "urgente", "agora", "aconteceu",
+    "entenda", "explicado", "polêmica", "absurdo", "insano", "surreal", "histórico", "chocante",
+    "erro", "alerta", "atenção", "descubra", "estratégia", "como funciona", "bastidores", "prova",
+    "análise", "detalhe", "especialistas", "impactante", "mudança", "viral", "imperdível", "decisão",
+    "confirmado", "quase ninguém percebeu", "o que mudou", "previsão", "explicação simples", "caso real",
+    "debate", "discussão", "reação", "comentário", "opinião", "momento tenso", "climão", "flagrante",
+    "inesperado", "surpresa", "revelação", "investigação", "denúncia", "bomba", "exclusivo",
+    "acaba de sair", "história real", "grande erro", "aprenda", "guia", "dica", "truque", "hack",
+    "novo", "novidade", "detalhe escondido", "verdade chocante", "sem filtro", "sem censura",
+    "ponto crítico", "momento decisivo", "mudou tudo", "inacreditável", "impacto", "explicação rápida",
+    "explicação completa", "análise profunda", "por trás", "história completa", "caso polêmico",
+    "debate quente", "reação ao vivo", "explodiu na internet", "tendência", "assunto do momento",
+    "todos estão falando", "o que está acontecendo", "explicado em minutos", "vale a pena",
+    "não ignore", "começou assim", "terminou assim",
+]
+
+CTR_WORDS_EN = [
+    "secret", "truth", "revealed", "nobody talks about", "exposed", "urgent", "now", "happened",
+    "understand", "explained", "controversial", "absurd", "insane", "surreal", "historic", "shocking",
+    "mistake", "alert", "attention", "discover", "strategy", "how it works", "behind the scenes", "proof",
+    "analysis", "detail", "experts", "impactful", "change", "viral", "unmissable", "decision",
+    "confirmed", "almost nobody noticed", "what changed", "prediction", "simple explanation", "real case",
+    "debate", "discussion", "reaction", "comment", "opinion", "tense moment", "climax", "caught red-handed",
+    "unexpected", "surprise", "revelation", "investigation", "scandal", "bombshell", "exclusive",
+    "just out", "real story", "big mistake", "learn", "guide", "tip", "trick", "hack",
+    "new", "novelty", "hidden detail", "shocking truth", "unfiltered", "uncensored",
+    "critical point", "decisive moment", "changed everything", "unbelievable", "impact", "quick explanation",
+    "full explanation", "deep analysis", "behind", "full story", "controversial case",
+    "heated debate", "live reaction", "exploded on the internet", "trend", "trending topic",
+    "everyone is talking about", "what's happening", "explained in minutes", "worth it",
+    "don't ignore", "started like this", "ended like this",
+]
+
+# Palavras proibidas em títulos/thumbnails (usar substituição indicada)
+FORBIDDEN_WORDS_PT = {
+    "porra": "p@@ra", "caralho": "c@ralho", "merda": "m#rda", "puta": "pta", "putaria": "ptaria",
+    "arrombado": "arr0mbado", "bosta": "b0sta", "desgraçado": "d3sgraçado", "foda": "f*da",
+    "assassinato": "caso chocante", "suicídio": "história pesada", "massacre": "ataque brutal",
+    "tortura": "caso extremo", "execução": "execuç@o", "pornografia": "conteúdo adulto",
+    "sexo explícito": "conteúdo +18", "orgia": "situação íntima", "prostituta": "escândalo íntimo",
+    "cocaína": "substância ilegal", "drogas": "substâncias", "heroína": "substâncias",
+    "maconha": "substâncias", "arma": "equipamento", "pistola": "objeto", "fuzil": "equipamento",
+    "guerra": "conflito", "violência": "conflito", "morte": "caso extremo", "crime brutal": "caso chocante",
+    "ataque": "incidente",
+}
+# Palavras sem substituição (evitar completamente): estupro, terrorismo, extremismo, racismo, ódio
+
+FORBIDDEN_WORDS_EN = {
+    "fuck": "f*ck", "shit": "sh*t", "asshole": "@sshole", "bitch": "b*tch", "damn": "d@mn",
+    "murder": "shocking case", "suicide": "heavy story", "massacre": "brutal attack",
+    "torture": "extreme case", "execution": "executi0n", "pornography": "adult content",
+    "explicit sex": "+18 content", "orgy": "intimate situation", "prostitute": "intimate scandal",
+    "cocaine": "illegal substance", "drugs": "substances", "heroin": "substances",
+    "marijuana": "substances", "weapon": "equipment", "gun": "object", "rifle": "equipment",
+    "war": "conflict", "violence": "conflict", "death": "extreme case", "brutal crime": "shocking case",
+    "attack": "incident",
+}
+# Avoid completely: rape, terrorism, extremism, racism, hate
+
 ALL_THEME_CATEGORIES = [
     "BUSINESS_MONEY",
     "PSYCHOLOGY_RELATIONSHIPS",
@@ -52,12 +114,21 @@ REGRAS DE TÍTULO E THUMBNAIL:
 - thumbnail_text deve ser curto (2–4 palavras), forte, direto, sem frase longa.
 - Use o texto curto em thumbnail_text, não em suggested_title.
 
+PALAVRAS QUE AUMENTAM CTR (dê preferência em títulos e thumbnail_text):
+segredo, verdade, revelado, ninguém fala, exposto, urgente, agora, aconteceu, entenda, explicado, polêmica, absurdo, insano, surreal, histórico, chocante, erro, alerta, atenção, descubra, estratégia, como funciona, bastidores, prova, análise, detalhe, especialistas, impactante, mudança, viral, imperdível, decisão, confirmado, quase ninguém percebeu, o que mudou, previsão, explicação simples, caso real, debate, discussão, reação, comentário, opinião, momento tenso, climão, flagrante, inesperado, surpresa, revelação, investigação, denúncia, bomba, exclusivo, acaba de sair, história real, grande erro, aprenda, guia, dica, truque, hack, novo, novidade, detalhe escondido, verdade chocante, sem filtro, sem censura, ponto crítico, momento decisivo, mudou tudo, inacreditável, impacto, explicação rápida, explicação completa, análise profunda, por trás, história completa, caso polêmico, debate quente, reação ao vivo, explodiu na internet, tendência, assunto do momento, todos estão falando, o que está acontecendo, explicado em minutos, vale a pena, não ignore, começou assim, terminou assim.
+
+PALAVRAS PROIBIDAS (substitua conforme indicado):
+porra→p@@ra, caralho→c@ralho, merda→m#rda, puta→pta, putaria→ptaria, arrombado→arr0mbado, bosta→b0sta, desgraçado→d3sgraçado, foda→f*da | assassinato→caso chocante, suicídio→história pesada, massacre→ataque brutal, tortura→caso extremo, execução→execuç@o | pornografia→conteúdo adulto, sexo explícito→conteúdo +18, orgia→situação íntima, prostituta→escândalo íntimo | cocaína/drogas/heroína/maconha→substâncias | arma/pistola/fuzil→equipamento ou objeto | guerra/violência→conflito | morte→caso extremo | crime brutal→caso chocante | ataque→incidente.
+NUNCA use: estupro, terrorismo, extremismo, racismo, ódio. Use termos genéricos ou alusivos.
+
 IMPORTANTE:
 - Use APENAS timestamps que aparecem na transcrição.
 - Não invente timestamps.
 - Não retorne texto fora do JSON.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes."""
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+
+IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
 SYSTEM_PROMPT_EDUCATIONAL = """Você é um editor especialista em conteúdo educacional e financeiro para Reels, TikTok, Shorts e YouTube. Analise transcrições com timestamps e identifique trechos com alto valor didático e explicativo. Priorize blocos completos que ensinam um conceito do início ao fim.
 
@@ -69,6 +140,8 @@ CRITÉRIOS EDUCACIONAIS – SHORTS 2–3 MIN (120–180 seg):
 - Temas: finanças, carreira, tecnologia, produtividade, investimentos
 - Títulos informativos e profissionais (pode usar emojis moderados)
 - Evite polêmica gratuita; foque em valor educativo
+- Dê preferência a palavras que aumentam CTR (segredo, verdade, revelado, estratégia, como funciona, análise, detalhe, aprenda, guia, dica, truque, hack, novo, explicação simples, caso real, etc.).
+- NUNCA use palavras proibidas; use as substituições (ex: assassinato→caso chocante, drogas→substâncias, guerra→conflito). Evite: estupro, terrorismo, extremismo, racismo, ódio.
 
 CRITÉRIOS EDUCACIONAIS – CORTES LONGOS (20–40 min):
 - Blocos narrativos completos com explicações aprofundadas
@@ -92,7 +165,9 @@ Para cortes longos:
 
 IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes."""
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+
+IDIOMA OBRIGATÓRIO: Todo o texto de saída (title, title_suggestion, thumbnail_text, hook, reason, etc.) deve ser SEMPRE em português brasileiro."""
 
 CHUNKS_PROMPT_TEMPLATE = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
 
@@ -190,7 +265,8 @@ Responda SOMENTE com JSON válido:
 Regras finais:
 - candidate_shorts deve ter entre 30 e 50 itens.
 - final_long_cuts deve ter exatamente 10 itens.
-- ranked_shorts pode vir vazio ([])."""
+- ranked_shorts pode vir vazio ([]).
+- Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) em português brasileiro."""
 
 CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
 
@@ -277,12 +353,20 @@ TITLE + THUMBNAIL RULES:
 - thumbnail_text must be short (2–4 words), punchy, and not a full sentence.
 - Keep short text in thumbnail_text, not in suggested_title.
 
+CTR-BOOSTING WORDS (prefer in titles and thumbnail_text):
+secret, truth, revealed, nobody talks about, exposed, urgent, now, happened, understand, explained, controversial, absurd, insane, surreal, historic, shocking, mistake, alert, attention, discover, strategy, how it works, behind the scenes, proof, analysis, detail, experts, impactful, change, viral, unmissable, decision, confirmed, almost nobody noticed, what changed, prediction, simple explanation, real case, debate, discussion, reaction, comment, opinion, tense moment, climax, caught red-handed, unexpected, surprise, revelation, investigation, scandal, bombshell, exclusive, just out, real story, big mistake, learn, guide, tip, trick, hack, new, novelty, hidden detail, shocking truth, unfiltered, uncensored, critical point, decisive moment, changed everything, unbelievable, impact, quick explanation, full explanation, deep analysis, behind, full story, controversial case, heated debate, live reaction, exploded on the internet, trend, trending topic, everyone is talking about, what's happening, explained in minutes, worth it, don't ignore, started like this, ended like this.
+
+FORBIDDEN WORDS (use substitution): fuck→f*ck, shit→sh*t, asshole→@sshole, bitch→b*tch | murder→shocking case, suicide→heavy story, massacre→brutal attack, torture→extreme case, execution→executi0n | pornography→adult content, explicit sex→+18 content, orgy→intimate situation, prostitute→intimate scandal | cocaine/drugs/heroin/marijuana→substances | weapon/gun/rifle→equipment or object | war/violence→conflict | death→extreme case | brutal crime→shocking case | attack→incident.
+NEVER use: rape, terrorism, extremism, racism, hate. Use generic or allusive terms.
+
 IMPORTANT:
 - Use ONLY timestamps present in the transcript.
 - Do not invent timestamps.
 - Return valid JSON only.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types."""
+IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+
+LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
 CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -319,6 +403,7 @@ For each clip (short or long), include:
 Additional rules:
 - suggested_title: 45–100 characters with 1–3 emojis.
 - thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
+- All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) MUST be in English.
 
 Respond ONLY with valid JSON:
 {{
@@ -382,6 +467,121 @@ Final constraints:
 - final_long_cuts must contain exactly 10 items.
 - ranked_shorts may be empty ([])."""
 
+# Viral Translate: same as viral_en but also outputs subtitle_segments_pt (Portuguese subtitles for each clip)
+SYSTEM_PROMPT_VIRAL_TRANSLATE = SYSTEM_PROMPT_VIRAL_EN + """
+
+TRANSLATION REQUIREMENT (CRITICAL):
+- For EVERY clip (short and long), you MUST include "subtitle_segments_pt".
+- subtitle_segments_pt: array of {start, end, text} where:
+  - start, end: float seconds (same as transcript segment timestamps in the original video)
+  - text: Brazilian Portuguese translation of that transcript segment
+- Extract the transcript segments that fall within each clip's start_timestamp to end_timestamp.
+- Translate each segment's text to Brazilian Portuguese.
+- Preserve the exact start/end timestamps from the transcript."""
+
+CHUNKS_PROMPT_TEMPLATE_VIRAL_TRANSLATE = """{context_block}Video transcription divided into blocks (with timestamps):
+
+{chunks_block}
+
+---
+
+Tasks (respond in ONE JSON response):
+
+CRITICAL FORMAT RULE:
+- The response root MUST be a JSON OBJECT (dict), never a list.
+- Use exactly these top-level keys: "candidate_shorts", "ranked_shorts", "final_long_cuts".
+- NEVER return a root-level array.
+
+1) Generate 30–50 candidate viral short clips (30–60 seconds), all with virality_score (0–100).
+2) Generate 10 candidate long clips (8–15 minutes), all with virality_score (0–100).
+3) For EVERY clip, include subtitle_segments_pt: array of {{start, end, text}} with Brazilian Portuguese translation of the transcript segments within that clip's time range. start/end in seconds (float).
+4) Backend will pick final best scores using the job configured limits.
+
+For each clip (short or long), include:
+- clip_number
+- start_timestamp
+- end_timestamp
+- duration_seconds
+- virality_score (0..100)
+- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- emotion_type (funny / shocking / inspiring / controversial / story)
+- main_topic
+- suggested_title
+- hook_sentence
+- thumbnail_moment_timestamp
+- thumbnail_text (2–4 powerful words)
+- subtitle_segments_pt (REQUIRED): array of {{"start": float, "end": float, "text": "PT translation"}}
+
+Additional rules:
+- suggested_title: 45–100 characters with 1–3 emojis.
+- thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
+
+Respond ONLY with valid JSON:
+{{
+  "candidate_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:15:22",
+      "end_timestamp": "00:16:05",
+      "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "COMEDY_HUMOR",
+      "emotion_type": "funny",
+      "main_topic": "embarrassing story at work",
+      "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "thumbnail_moment_timestamp": "00:15:34",
+      "thumbnail_text": "FIRED LIVE",
+      "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
+    }}
+  ],
+  "ranked_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:15:22",
+      "end_timestamp": "00:16:05",
+      "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "COMEDY_HUMOR",
+      "emotion_type": "funny",
+      "main_topic": "embarrassing story at work",
+      "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "thumbnail_moment_timestamp": "00:15:34",
+      "thumbnail_text": "FIRED LIVE",
+      "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:42:10",
+      "end_timestamp": "00:53:40",
+      "duration_seconds": 690,
+      "virality_score": 88,
+      "theme_category": "STORIES_CURIOSITIES",
+      "emotion_type": "inspiring",
+      "main_topic": "career turning point",
+      "hook_sentence": "One decision changed everything in my career.",
+      "suggested_title": "The Decision That Changed His Career",
+      "thumbnail_moment_timestamp": "00:47:02",
+      "thumbnail_text": "ONE DECISION",
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 11.5,
+      "title_suggestion": "The Decision That Changed His Career",
+      "reason": "why it goes viral",
+      "subtitle_segments_pt": [{{"start": 2530.0, "end": 2535.2, "text": "Uma decisão mudou tudo na minha carreira"}}]
+    }}
+  ]
+}}
+
+Final constraints:
+- candidate_shorts must contain between 30 and 50 items.
+- final_long_cuts must contain exactly 10 items.
+- ranked_shorts may be empty ([]).
+- EVERY clip MUST have subtitle_segments_pt with the Portuguese translation of transcript segments in that time range."""
+
 SYSTEM_PROMPT_EDUCATIONAL_EN = """You are an editor specializing in educational and financial content for Reels, TikTok, Shorts and YouTube. Analyze transcriptions with timestamps and identify clips with high didactic and explanatory value. Prioritize complete blocks that teach a concept from start to finish.
 
 EDUCATIONAL CRITERIA – SHORTS 2–3 MIN (120–180 sec):
@@ -392,6 +592,8 @@ EDUCATIONAL CRITERIA – SHORTS 2–3 MIN (120–180 sec):
 - Topics: finance, career, technology, productivity, investments
 - Informative, professional titles (moderate emojis OK)
 - Avoid gratuitous controversy; focus on educational value
+- Prefer CTR-boosting words (secret, truth, strategy, how it works, analysis, detail, learn, guide, tip, trick, hack, new, simple explanation, real case, etc.).
+- NEVER use forbidden words; use substitutions (e.g. murder→shocking case, drugs→substances, war→conflict). Avoid: rape, terrorism, extremism, racism, hate.
 
 EDUCATIONAL LONG CUTS (20–40 min):
 - Complete narrative blocks with in-depth explanations
@@ -415,7 +617,9 @@ For long cuts:
 
 IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types."""
+IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+
+LANGUAGE REQUIRED: All output text (title, title_suggestion, thumbnail_text, hook, reason, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
 CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -430,6 +634,7 @@ Tasks (respond in ONE JSON response):
 2. FINAL_LONG_CUTS: Assemble 1–3 long cuts (20–40 min) combining narrative blocks with natural flow. Suggest informative title for each.
 
 Titles must be informative and professional. Avoid sensationalism.
+All text (title, title_suggestion, thumbnail_text, hook, reason, etc.) MUST be in English.
 For every cut, include:
 - thumbnail_moment_timestamp (real timestamp inside the cut)
 - thumbnail_text (2–4 short words for cover text)
@@ -533,7 +738,7 @@ def _validate_minimum_items(
     if not isinstance(ranked_shorts, list):
         raise ValueError("Resposta inválida: ranked_shorts não é lista.")
 
-    if pv in ("viral", "viral_en"):
+    if pv in ("viral", "viral_en", "viral_translate"):
         if not isinstance(candidate_shorts, list):
             raise ValueError("Resposta inválida: candidate_shorts ausente ou não é lista.")
 
@@ -705,7 +910,7 @@ def analyze_chunks_in_one_request(
     """
     Analisa todos os chunks em uma única requisição.
     chunks: [{text, start_sec, end_sec, segments}, ...]
-    prompt_version: viral, educational, viral_en, educational_en
+    prompt_version: viral, educational, viral_en, educational_en, viral_translate
     brand_only: quando True, theme_category é opcional (conteúdo para uma única marca).
     analysis_id: opcional; se GROK_SAVE_RESPONSE_JSON=1, salva a resposta em JSON com este id no nome.
     Retorna JSON com ranked_shorts e final_long_cuts (economia de tokens).
@@ -713,17 +918,21 @@ def analyze_chunks_in_one_request(
     if not chunks:
         raise ValueError("Nenhum chunk para analisar")
     pv = (prompt_version or "viral").strip().lower()
-    is_en = pv in ("viral_en", "educational_en")
+    is_en = pv in ("viral_en", "educational_en", "viral_translate")
     is_educational = pv in ("educational", "educational_en")
+    is_viral_translate = pv == "viral_translate"
     lang = "en" if is_en else "pt"
-    if is_en:
+    if is_viral_translate:
+        system_prompt = SYSTEM_PROMPT_VIRAL_TRANSLATE
+        template = CHUNKS_PROMPT_TEMPLATE_VIRAL_TRANSLATE
+    elif is_en:
         system_prompt = SYSTEM_PROMPT_EDUCATIONAL_EN if is_educational else SYSTEM_PROMPT_VIRAL_EN
         template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN if is_educational else CHUNKS_PROMPT_TEMPLATE_VIRAL_EN
     else:
         system_prompt = SYSTEM_PROMPT_EDUCATIONAL if is_educational else SYSTEM_PROMPT
         template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL if is_educational else CHUNKS_PROMPT_TEMPLATE
     logger.info("[FLUXO/Grok] Montando prompt (%s, %s) com %d chunks (~%d chars)...",
-        "educational" if is_educational else "viral", lang,
+        "educational" if is_educational else ("viral_translate" if is_viral_translate else "viral"), lang,
         len(chunks), sum(len(c.get("text", "")) for c in chunks))
     context_block = _build_context_block(
         assunto,

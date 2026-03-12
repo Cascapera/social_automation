@@ -1,4 +1,5 @@
-const API_BASE = '/api'
+// Use URL direta quando o proxy falha (ex: Docker + npm no host)
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || '/api'
 
 function getToken() {
   return localStorage.getItem('access_token')
@@ -28,13 +29,27 @@ export async function apiRequest(endpoint, options = {}) {
 }
 
 export async function login(username, password) {
-  const res = await fetch(`${API_BASE}/auth/token/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
+  let res
+  try {
+    res = await fetch(`${API_BASE}/auth/token/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+  } catch (err) {
+    throw new Error(
+      'Não foi possível conectar ao servidor. Verifique se o Django está rodando na porta 8000 (docker compose up -d web).'
+    )
+  }
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.detail || 'Usuário ou senha incorretos')
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(
+        'Endpoint da API não encontrado (404). Verifique se o servidor correto está rodando na porta 8000.'
+      )
+    }
+    throw new Error(data.detail || 'Usuário ou senha incorretos')
+  }
   localStorage.setItem('access_token', data.access)
   localStorage.setItem('refresh_token', data.refresh)
   return data
@@ -77,9 +92,21 @@ export async function updateFactory(factoryId, payload) {
   })
 }
 
-export async function triggerImmediateSchedule(factoryId) {
+export async function triggerImmediateSchedule(factoryId, targetDate = null, brandId = null) {
+  const body = {}
+  if (targetDate) body.target_date = targetDate
+  if (brandId) body.brand_id = brandId
   return apiRequest(`/factories/${factoryId}/trigger-immediate-schedule/`, {
     method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function triggerBrandImmediateSchedule(brandId, targetDate = null) {
+  const body = targetDate ? { target_date: targetDate } : {}
+  return apiRequest(`/brands/${brandId}/trigger-immediate-schedule/`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 

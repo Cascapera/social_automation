@@ -73,15 +73,16 @@ class AutoCutAnalysis(models.Model):
         help_text="Nomes dos convidados separados por vírgula (ex: João, Maria, Pedro)",
     )
     prompt_version = models.CharField(
-        max_length=20,
+        max_length=24,
         choices=[
             ("viral", "Viral (PT)"),
             ("educational", "Educacional (PT)"),
             ("viral_en", "Viral (EN)"),
             ("educational_en", "Educacional (EN)"),
+            ("viral_translate", "Viral Translate - EN to PT"),
         ],
         default="viral",
-        help_text="Modelo de prompt e idioma: PT ou EN",
+        help_text="Modelo de prompt e idioma: PT, EN ou EN→PT com legendas",
     )
     THUMBNAIL_FONT_CHOICES = [
         ("anton", "Anton"),

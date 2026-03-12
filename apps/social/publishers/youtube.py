@@ -191,15 +191,22 @@ class YouTubePublisher(BasePublisher):
         corte = getattr(post, "auto_cut_corte", None)
         if not corte or not getattr(corte, "thumbnail", None):
             return
-        thumb_path = corte.thumbnail.path
-        media = MediaFileUpload(thumb_path, mimetype=None, resumable=False)
+        thumb_path = Path(corte.thumbnail.path)
+        if not thumb_path.exists():
+            raise YouTubePublishError(
+                f"Thumbnail não encontrada: {thumb_path}",
+                retriable=False,
+            )
+        is_short = (getattr(corte, "format", "") or "").lower() == "vertical"
+        media = MediaFileUpload(str(thumb_path), mimetype="image/jpeg", resumable=False)
         try:
             youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
         except HttpError as e:
             err = self._http_error_to_publish_error(e)
+            ctx = " (Short)" if is_short else ""
             # Não falha o upload do vídeo por erro de thumbnail, mas devolve rastreabilidade.
             raise YouTubePublishError(
-                f"Thumbnail falhou: {err}",
+                f"Thumbnail{ctx} falhou: {err}",
                 status_code=err.status_code,
                 reason=err.reason,
                 retriable=err.retriable,

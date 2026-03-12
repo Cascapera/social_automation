@@ -342,7 +342,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
     youtube_url = (analysis.youtube_url or "").strip()
     pv = (analysis.prompt_version or "viral").strip().lower()
-    transcript_lang = "en" if pv in ("viral_en", "educational_en") else "pt"
+    transcript_lang = "en" if pv in ("viral_en", "educational_en", "viral_translate") else "pt"
     analysis.status = "transcribing"
     analysis.progress_message = "Baixando vídeo do YouTube..." if youtube_url else "Transcrevendo vídeo..."
     analysis.progress = 2 if youtube_url else 5
@@ -564,7 +564,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
         suggestions_created = []
         rank = 0
-        is_viral_prompt = pv in ("viral", "viral_en")
+        is_viral_prompt = pv in ("viral", "viral_en", "viral_translate")
         is_educational_prompt = pv in ("educational", "educational_en")
         shorts_limit = max(1, min(30, int(getattr(analysis, "shorts_target", 12) or 12)))
         longs_limit = max(1, min(10, int(getattr(analysis, "longs_target", 3) or 3)))
@@ -751,18 +751,34 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             cut_start_sec = tc_to_seconds(sug.start_tc)
             cut_end_sec = tc_to_seconds(sug.end_tc)
             cut_duration = cut_end_sec - cut_start_sec
-            transcript_segments = analysis.transcript_segments or []
-            subtitle_segments = []
-            for seg in transcript_segments:
-                s_start = seg.get("start", 0)
-                s_end = seg.get("end", 0)
-                if s_end <= cut_start_sec or s_start >= cut_end_sec:
-                    continue
-                new_start = max(0.0, s_start - cut_start_sec)
-                new_end = min(cut_duration, s_end - cut_start_sec)
-                text = (seg.get("text") or "").strip()
-                if text:
-                    subtitle_segments.append({"start": new_start, "end": new_end, "text": text})
+            raw_item = getattr(sug, "raw_data", None) or {}
+            subtitle_segments_pt = raw_item.get("subtitle_segments_pt") if isinstance(raw_item, dict) else []
+            if pv == "viral_translate" and subtitle_segments_pt:
+                # Usar legendas traduzidas pelo Grok (timestamps absolutos → relativos ao corte)
+                subtitle_segments = []
+                for seg in subtitle_segments_pt:
+                    s_start = float(seg.get("start", 0))
+                    s_end = float(seg.get("end", 0))
+                    if s_end <= cut_start_sec or s_start >= cut_end_sec:
+                        continue
+                    new_start = max(0.0, s_start - cut_start_sec)
+                    new_end = min(cut_duration, s_end - cut_start_sec)
+                    text = (seg.get("text") or "").strip()
+                    if text:
+                        subtitle_segments.append({"start": new_start, "end": new_end, "text": text})
+            else:
+                transcript_segments = analysis.transcript_segments or []
+                subtitle_segments = []
+                for seg in transcript_segments:
+                    s_start = seg.get("start", 0)
+                    s_end = seg.get("end", 0)
+                    if s_end <= cut_start_sec or s_start >= cut_end_sec:
+                        continue
+                    new_start = max(0.0, s_start - cut_start_sec)
+                    new_end = min(cut_duration, s_end - cut_start_sec)
+                    text = (seg.get("text") or "").strip()
+                    if text:
+                        subtitle_segments.append({"start": new_start, "end": new_end, "text": text})
 
             # Shorts (vertical) têm legendas queimadas por padrão
             corte = AutoCutCorte.objects.create(
@@ -777,7 +793,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             )
             with open(out_path, "rb") as f:
                 corte.file.save(out_path.name, File(f), save=True)
-            generated_thumb = generate_auto_thumbnail(corte)
+            target_brand = _resolve_target_brand_for_suggestion(analysis, sug)
+            generated_thumb = generate_auto_thumbnail(corte, target_brand=target_brand)
             if generated_thumb:
                 logger.info("[FLUXO] Thumbnail automática gerada para corte %s.", corte.id)
             else:
@@ -853,6 +870,8 @@ def finalizar_auto_cut_task(
         return
 
     style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
+    # Shorts: subir legendas 10% do frame para não ficarem atrás dos botões do YouTube
+    style["margin_v"] = style.get("margin_v", 20) + int(1920 * 0.10)  # 1920 = altura típica vertical
     vert_mode = vertical_mode or "zoom_crop"
     bg_color = (background_color or "#000000").strip()
     link_text = (custom_text or "").strip()
@@ -1072,23 +1091,6 @@ def finalizar_auto_cut_task(
         except Exception as e:
             logger.exception("Erro ao sincronizar inventário do corte %s: %s", corte.id, e)
 
-    # Recalcula agenda no mesmo dia e já enfileira tentativa de publicação.
-    try:
-        brand = getattr(analysis, "brand", None)
-        factory = getattr(brand, "factory", None) if brand else None
-        if factory and not factory.scheduling_paused:
-            from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
-            from apps.social.tasks import check_scheduled_posts_task
-
-            generate_daily_schedule_for_factory(
-                factory,
-                now_utc=timezone.now(),
-                allow_rerun=True,
-            )
-            check_scheduled_posts_task.delay()
-    except Exception as e:
-        logger.exception(
-            "Erro ao recalcular agenda automática após finalização da análise %s: %s",
-            analysis.id,
-            e,
-        )
+    # Inventário já foi sincronizado acima. Agendamento automático ocorre SOMENTE às 19h
+    # via cron (generate_daily_factory_schedules_task). Não dispara aqui para evitar
+    # agendar novos cortes fora do horário esperado.

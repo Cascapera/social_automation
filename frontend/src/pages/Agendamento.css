@@ -19,11 +19,24 @@
   color: var(--text-muted);
 }
 
-.factory-schedule-control {
+.factory-schedule-control,
+.brand-schedule-control {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.75rem;
+}
+
+.brand-control-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.brand-no-factory-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted, #888);
+  margin: 0;
 }
 
 .factory-daily-schedule-time {
@@ -108,6 +121,74 @@
 .factory-toggle-btn.immediate {
   border-color: rgba(59, 130, 246, 0.65);
   color: #3b82f6;
+}
+
+/* Toggle switch On/Off para agendamento automático */
+.schedule-auto-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.schedule-auto-toggle label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.schedule-auto-toggle .switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+}
+
+.schedule-auto-toggle .switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.schedule-auto-toggle .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #4b5563;
+  border-radius: 26px;
+  transition: 0.25s;
+}
+
+.schedule-auto-toggle .slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.25s;
+}
+
+.schedule-auto-toggle input:checked + .slider {
+  background-color: #22c55e;
+}
+
+.schedule-auto-toggle input:checked + .slider:before {
+  transform: translateX(22px);
+}
+
+.schedule-auto-toggle .switch:has(input:disabled) .slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.schedule-auto-toggle .switch-label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
 }
 
 .factory-toggle-btn.immediate:disabled {

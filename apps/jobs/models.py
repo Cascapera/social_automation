@@ -150,18 +150,19 @@ class ScheduledPost(models.Model):
 
     job = models.ForeignKey(
         Job,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="scheduled_posts",
         null=True,
         blank=True,
+        help_text="Job de origem. SET_NULL ao deletar job para preservar histórico de agendamento.",
     )
     auto_cut_corte = models.ForeignKey(
         AutoCutCorte,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="scheduled_posts",
         null=True,
         blank=True,
-        help_text="Corte finalizado do Auto Cuts (opcional).",
+        help_text="Corte finalizado do Auto Cuts (opcional). SET_NULL ao deletar para preservar histórico.",
     )
     platforms = models.JSONField(
         default=list,
@@ -235,10 +236,11 @@ class VideoInventoryItem(models.Model):
     )
     auto_cut_corte = models.OneToOneField(
         AutoCutCorte,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="inventory_item",
+        help_text="Corte de origem. SET_NULL ao deletar para preservar histórico de agendamento.",
     )
     video_type = models.CharField(max_length=8, choices=VIDEO_TYPE)
     title = models.CharField(max_length=220, blank=True, default="")

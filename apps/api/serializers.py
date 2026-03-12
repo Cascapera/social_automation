@@ -334,8 +334,7 @@ class JobSerializer(serializers.ModelSerializer):
         return {"total": len(posts), "posted": done, "pending": pending}
 
     def get_can_delete(self, obj):
-        from apps.jobs.services.job_actions import has_pending_scheduled_posts
-        return not has_pending_scheduled_posts(obj)
+        return True
 
     def create(self, validated_data):
         cut_ids = validated_data.pop("cut_ids")

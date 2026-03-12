@@ -30,8 +30,6 @@ def archive_job(job: Job) -> None:
 
 
 def delete_job(job: Job) -> None:
-    """Deleta o job e o arquivo exportado. Levanta ValueError se houver agendamento pendente."""
-    if has_pending_scheduled_posts(job):
-        raise ValueError("Não é possível deletar: há agendamento de postagem pendente.")
+    """Deleta o job e o arquivo exportado. Registros de agendamento são preservados (job_id=SET_NULL)."""
     delete_job_output(job)
     job.delete()

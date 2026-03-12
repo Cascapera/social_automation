@@ -13,6 +13,7 @@ import {
   updateFactory,
   getFactorySchedules,
   triggerImmediateSchedule,
+  triggerBrandImmediateSchedule,
 } from '../api'
 import { PlatformIcon } from '../components/PlatformIcons'
 import './Agendamento.css'
@@ -157,6 +158,9 @@ export default function Agendamento() {
   const [factoryInfo, setFactoryInfo] = useState(null)
   const [togglingFactorySchedule, setTogglingFactorySchedule] = useState(false)
   const [triggeringImmediate, setTriggeringImmediate] = useState(false)
+  const [scheduleDateModalOpen, setScheduleDateModalOpen] = useState(false)
+  const [scheduleTargetDate, setScheduleTargetDate] = useState('')
+  const [scheduleForBrandId, setScheduleForBrandId] = useState(null)
   const [factoryWeekSchedules, setFactoryWeekSchedules] = useState([])
   const [dailyScheduleStartTime, setDailyScheduleStartTime] = useState('11:00')
   const [savingDailyScheduleTime, setSavingDailyScheduleTime] = useState(false)
@@ -228,7 +232,7 @@ export default function Agendamento() {
       const rows = await getFactorySchedules(
         factoryId,
         null,
-        viewMode === 'factory' && brandId ? brandId : null,
+        brandId || null,
       )
       setFactoryWeekSchedules(Array.isArray(rows) ? rows : [])
     } catch {
@@ -376,18 +380,50 @@ export default function Agendamento() {
     }
   }
 
-  async function handleTriggerImmediateSchedule() {
-    if (!factoryInfo?.id || triggeringImmediate) return
+  function getTomorrowDateStr() {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().slice(0, 10)
+  }
+
+  function getTodayDateStr() {
+    return new Date().toISOString().slice(0, 10)
+  }
+
+  function handleOpenScheduleDateModal(forBrandId = null) {
+    setScheduleForBrandId(forBrandId)
+    setScheduleTargetDate(getTomorrowDateStr())
+    setScheduleDateModalOpen(true)
+    setError('')
+  }
+
+  async function handleConfirmScheduleDate() {
+    if (triggeringImmediate || !scheduleTargetDate) return
+    const hasFactory = !!factoryInfo?.id
+    const brandIdToUse = scheduleForBrandId || brandId
+    if (!hasFactory && !brandIdToUse) return
+    if (hasFactory && !factoryInfo?.id) return
     setError('')
     setTriggeringImmediate(true)
     try {
-      const result = await triggerImmediateSchedule(factoryInfo.id)
-      if (result?.created > 0) {
-        reloadScheduledPosts()
-        if (factoryInfo?.id) await loadFactoryWeekSchedules(factoryInfo.id)
+      const result = hasFactory
+        ? await triggerImmediateSchedule(
+            factoryInfo.id,
+            scheduleTargetDate,
+            brandIdToUse || undefined,
+          )
+        : await triggerBrandImmediateSchedule(brandIdToUse, scheduleTargetDate)
+      setScheduleDateModalOpen(false)
+      setScheduleForBrandId(null)
+      reloadScheduledPosts()
+      if (factoryInfo?.id) {
+        await loadFactoryWeekSchedules(factoryInfo.id)
+      } else if (brandIdToUse && result?.factory_id) {
+        await loadFactoryInfo()
+        await loadFactoryWeekSchedules(result.factory_id)
       }
     } catch (e) {
-      setError(e.message || 'Falha ao disparar agendamento imediato.')
+      setError(e.message || 'Falha ao disparar agendamento.')
     } finally {
       setTriggeringImmediate(false)
     }
@@ -536,13 +572,64 @@ export default function Agendamento() {
         <p className="form-hint">Selecione uma brand da factory para criar/agendar jobs individuais. A visão semanal abaixo continua disponível sem selecionar brand.</p>
       )}
 
-      {factoryInfo && (
+      {brandId && viewMode === 'brand' && (
+        <section className="section brand-schedule-control">
+          <div className="brand-control-info">
+            <strong>Marca: {(brands || []).find((b) => String(b.id) === String(brandId))?.name || `Brand #${brandId}`}</strong>
+            {!factoryInfo && (
+              <p className="form-hint brand-no-factory-hint">
+                Marca sem factory: agendamento sob demanda. Uma factory pessoal é criada automaticamente quando necessário.
+              </p>
+            )}
+            {factoryInfo && (
+              <div className="schedule-auto-toggle">
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={!factoryInfo.scheduling_paused}
+                    onChange={handleToggleFactorySchedule}
+                    disabled={togglingFactorySchedule}
+                  />
+                  <span className="slider" />
+                </label>
+                <span className="switch-label">
+                  {factoryInfo.scheduling_paused ? 'Off' : 'On'} — Agendamento automático às 19h
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="factory-control-buttons">
+            <button
+              type="button"
+              className="factory-toggle-btn immediate"
+              onClick={() => handleOpenScheduleDateModal(brandId)}
+              disabled={triggeringImmediate}
+              title="Agenda vídeos disponíveis desta marca para o dia selecionado."
+            >
+              {triggeringImmediate ? 'Agendando...' : 'Agendamento Imediato'}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {factoryInfo && viewMode === 'factory' && (
         <section className="section factory-schedule-control">
           <div className="factory-control-info">
             <strong>Factory: {factoryInfo.name}</strong>
-            <span className={`factory-schedule-badge ${factoryInfo.scheduling_paused ? 'paused' : 'running'}`}>
-              {factoryInfo.scheduling_paused ? 'Agendamento pausado' : 'Agendamento ativo'}
-            </span>
+            <div className="schedule-auto-toggle">
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={!factoryInfo.scheduling_paused}
+                  onChange={handleToggleFactorySchedule}
+                  disabled={togglingFactorySchedule}
+                />
+                <span className="slider" />
+              </label>
+              <span className="switch-label">
+                {factoryInfo.scheduling_paused ? 'Off' : 'On'} — Agendamento automático às 19h
+              </span>
+            </div>
             {factoryInfo.scheduling_paused && (
               <div className="factory-paused-warning">
                 Factory pausada: geração de cortes continua normal, mas o agendamento/publicação ficam em espera.
@@ -572,22 +659,10 @@ export default function Agendamento() {
           <div className="factory-control-buttons">
             <button
               type="button"
-              className={`factory-toggle-btn ${factoryInfo.scheduling_paused ? 'resume' : 'pause'}`}
-              onClick={handleToggleFactorySchedule}
-              disabled={togglingFactorySchedule}
-            >
-              {togglingFactorySchedule
-                ? 'Salvando...'
-                : factoryInfo.scheduling_paused
-                  ? 'Continuar agendamento'
-                  : 'Pausar agendamento'}
-            </button>
-            <button
-              type="button"
               className="factory-toggle-btn immediate"
-              onClick={handleTriggerImmediateSchedule}
+              onClick={handleOpenScheduleDateModal}
               disabled={triggeringImmediate}
-              title="Dispara o agendamento agora (para o dia seguinte). Útil quando há falha de servidor ou vídeos adicionados ao banco."
+              title="Agenda vídeos disponíveis para o dia selecionado. Útil para agendar o fim de semana na sexta."
             >
               {triggeringImmediate ? 'Agendando...' : 'Agendamento Imediato'}
             </button>
@@ -908,6 +983,46 @@ export default function Agendamento() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {scheduleDateModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Agendar para qual dia?</h3>
+            <p className="form-hint">
+              O sistema agenda os vídeos disponíveis no banco para a data selecionada, respeitando os horários fixos de cada brand.
+            </p>
+            <div className="form-group">
+              <label htmlFor="schedule-target-date">Data</label>
+              <input
+                id="schedule-target-date"
+                type="date"
+                value={scheduleTargetDate}
+                onChange={(e) => setScheduleTargetDate(e.target.value)}
+                min={getTodayDateStr()}
+              />
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleDateModalOpen(false)
+                  setScheduleForBrandId(null)
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleConfirmScheduleDate}
+                disabled={triggeringImmediate || !scheduleTargetDate}
+              >
+                {triggeringImmediate ? 'Agendando...' : 'Agendar'}
+              </button>
+            </div>
           </div>
         </div>
       )}
