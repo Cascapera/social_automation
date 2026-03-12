@@ -166,14 +166,27 @@ class YouTubePublisher(BasePublisher):
             video_name = "Vídeo original"
 
         convidados = (analysis.convidados or "").strip() or "-"
-        lines = [
-            f"🎙️ Corte da live: {video_name}",
-            "",
-            f"Convidado: {convidados}",
-        ]
+        prompt_version = (getattr(analysis, "prompt_version", "") or "").strip().lower()
+        is_en = prompt_version.endswith("_en")
+
+        if is_en:
+            lines = [
+                f"🎙️ Clip from live: {video_name}",
+                "",
+                f"Guest: {convidados}",
+            ]
+            full_episode_label = "📺 Full episode:"
+        else:
+            lines = [
+                f"🎙️ Corte da live: {video_name}",
+                "",
+                f"Convidado: {convidados}",
+            ]
+            full_episode_label = "📺 Episódio completo:"
+
         youtube_url = (analysis.youtube_url or "").strip()
         if youtube_url:
-            lines.extend(["", "📺 Episódio completo:", youtube_url])
+            lines.extend(["", full_episode_label, youtube_url])
 
         auto_part = "\n".join(lines).strip()
         brand_extra = ""

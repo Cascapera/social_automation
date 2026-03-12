@@ -134,14 +134,14 @@ export default function CortesAutomaticos() {
     if (!analysis) return ''
     const videoName = (analysis.name || '').trim() || 'Vídeo original'
     const convidados = (analysis.convidados || '').trim() || '-'
-    const lines = [
-      `🎙️ Corte da live: ${videoName}`,
-      '',
-      `Convidado: ${convidados}`,
-    ]
+    const pv = (analysis.prompt_version || '').trim().toLowerCase()
+    const isEn = pv.endsWith('_en')
+    const lines = isEn
+      ? [`🎙️ Clip from live: ${videoName}`, '', `Guest: ${convidados}`]
+      : [`🎙️ Corte da live: ${videoName}`, '', `Convidado: ${convidados}`]
     const youtubeUrl = (analysis.youtube_url || '').trim()
     if (youtubeUrl) {
-      lines.push('', '📺 Episódio completo:', youtubeUrl)
+      lines.push('', isEn ? '📺 Full episode:' : '📺 Episódio completo:', youtubeUrl)
     }
     const autoPart = lines.join('\n').trim()
     const extra = (brandExtra || '').trim()
