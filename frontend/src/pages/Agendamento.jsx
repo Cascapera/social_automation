@@ -660,7 +660,7 @@ export default function Agendamento() {
             <button
               type="button"
               className="factory-toggle-btn immediate"
-              onClick={handleOpenScheduleDateModal}
+              onClick={() => handleOpenScheduleDateModal()}
               disabled={triggeringImmediate}
               title="Agenda vídeos disponíveis para o dia selecionado. Útil para agendar o fim de semana na sexta."
             >
