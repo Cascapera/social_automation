@@ -115,6 +115,7 @@ export default function CortesAutomaticos() {
     ? (brands || []).filter((b) => String(b.factory || b.factory_id || '') === String(factoryId))
     : []
   const factoryBrandIds = factoryBrands.map((b) => b?.id).filter(Boolean)
+  const factoryBrandIdsKey = factoryBrandIds.length ? [...factoryBrandIds].sort().join(',') : ''
   const fallbackFactoryBrandId = viewMode === 'factory'
     ? (factoryBrands[0]?.id || brands[0]?.id || null)
     : null
@@ -162,42 +163,15 @@ export default function CortesAutomaticos() {
       setFactoryRunningAnalyses([])
       return
     }
-    const factoryBrandIds = (brands || []).map((b) => b?.id).filter(Boolean)
-    if (factoryBrandIds.length === 0) {
-      setFactoryRunningAnalyses([])
-      return
-    }
-    try {
-      const settled = await Promise.allSettled(
-        factoryBrandIds.map((id) => getAutoCutAnalyses(id, { excludeFinalized: true })),
-      )
-      const rows = settled
-        .filter((r) => r.status === 'fulfilled')
-        .map((r) => r.value)
-      const merged = rows
-        .flat()
-        .filter((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
-      const dedup = Array.from(new Map(merged.map((a) => [a.id, a])).values())
-      setFactoryRunningAnalyses(dedup)
-    } catch {
-      setFactoryRunningAnalyses([])
-    }
+    // Fila universal: analyses já tem todos os jobs. Não precisa fetch extra.
+    setFactoryRunningAnalyses([])
   }
 
   async function loadAnalysesForView() {
     if (viewMode === 'factory') {
-      if (factoryBrandIds.length === 0) {
-        setAnalyses([])
-        return []
-      }
-      const settled = await Promise.allSettled(
-        factoryBrandIds.map((id) => getAutoCutAnalyses(id, { excludeFinalized: true })),
-      )
-      const rows = settled
-        .filter((r) => r.status === 'fulfilled')
-        .map((r) => r.value)
-      const merged = rows.flat()
-      const dedup = Array.from(new Map(merged.map((a) => [a.id, a])).values())
+      // Fila de jobs: universal (todas as factories). Sem filtro de brand.
+      const list = await getAutoCutAnalyses(null, { excludeFinalized: true })
+      const dedup = (Array.isArray(list) ? list : [])
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       setAnalyses(dedup)
       return dedup
@@ -276,14 +250,14 @@ export default function CortesAutomaticos() {
   }, [viewMode, factoryId])
 
   useEffect(() => {
-    if (viewMode === 'factory' && factoryId && targetBrandId) {
-      const isValid = factoryBrands.some((b) => String(b.id) === String(targetBrandId))
+    if (viewMode === 'factory' && factoryId && targetBrandId && factoryBrandIds.length > 0) {
+      const isValid = factoryBrandIds.some((id) => String(id) === String(targetBrandId))
       if (!isValid) setTargetBrandId('')
     }
-  }, [viewMode, factoryId, factoryBrands, targetBrandId])
+  }, [viewMode, factoryId, targetBrandId, factoryBrandIdsKey])
 
   useEffect(() => {
-    const shouldLoadFactoryAggregated = viewMode === 'factory' && factoryBrandIds.length > 0
+    const shouldLoadFactoryAggregated = viewMode === 'factory'
     if (shouldLoadFactoryAggregated || activeBrandId) {
       loadAnalysesForView().catch(() => setAnalyses([]))
       if (activeBrandId) {
@@ -303,30 +277,7 @@ export default function CortesAutomaticos() {
       setFinalizedCortes([])
       setFactoryRunningAnalyses([])
     }
-  }, [activeBrandId, filters, viewMode, brands, brandId])
-
-  useEffect(() => {
-    if (!activeBrandId || !hasRunningAnalyses) return
-    const id = setInterval(async () => {
-      try {
-        const [list] = await Promise.all([
-          loadAnalysesForView(),
-          (async () => {
-            await loadFinalizedCortes()
-            return []
-          })(),
-        ])
-        setAnalyses(list)
-        await loadFactoryRunningAnalyses()
-        if (expandedId && !list.find((a) => a.id === expandedId)) {
-          setExpandedId(null)
-        }
-      } catch {
-        // mantém último estado visível; próxima iteração tenta novamente
-      }
-    }, 4000)
-    return () => clearInterval(id)
-  }, [activeBrandId, hasRunningAnalyses, filters, expandedId])
+  }, [activeBrandId, filters, viewMode, brandId, factoryId, factoryBrandIdsKey])
 
   async function handleGenerate(e) {
     e.preventDefault()
@@ -962,7 +913,7 @@ export default function CortesAutomaticos() {
                       {a.name || `Job #${a.id}`}
                       {viewMode === 'factory' && (
                         <span className="analysis-direction">
-                          {' '}({a.target_brand_name || 'Todos'})
+                          {' '}({a.factory_name ? `${a.factory_name} · ` : ''}{a.target_brand_name || 'Todos'})
                         </span>
                       )}
                     </span>

@@ -5,6 +5,8 @@ from . import views
 urlpatterns = [
     path("connect/", views.youtube_connect),
     path("callback/", views.youtube_callback),
+    path("factory-check-connect/", views.factory_check_connect),
+    path("factory-check-callback/", views.factory_check_callback),
     path("pending-channels/", views.youtube_pending_channels),
     path("select-channel/", views.youtube_select_channel),
 ]

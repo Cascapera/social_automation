@@ -13,6 +13,24 @@ services:
     networks:
       - app
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-social_automation}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-social_automation}"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app
+
   web:
     build: .
     ports:
@@ -22,10 +40,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
     volumes:
       - .:/app
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - app
@@ -38,10 +59,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
     volumes:
       - .:/app
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       web:
         condition: service_started
@@ -56,10 +80,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
     volumes:
       - .:/app
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       web:
         condition: service_started
@@ -74,10 +101,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
     volumes:
       - .:/app
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       web:
         condition: service_started
@@ -94,3 +124,6 @@ services:
 networks:
   app:
     driver: bridge
+
+volumes:
+  postgres_data:

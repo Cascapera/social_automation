@@ -22,4 +22,9 @@ app.conf.beat_schedule = {
         "task": "apps.social.tasks.generate_daily_factory_schedules_task",
         "schedule": crontab(hour=19, minute=0),
     },
+    # Busca automática de vídeos nos canais de busca (quando auto_fetch_enabled).
+    "check-and-fetch-new-videos": {
+        "task": "apps.jobs.tasks_auto_fetch.check_and_fetch_new_videos_task",
+        "schedule": 900.0,  # a cada 15 min
+    },
 }

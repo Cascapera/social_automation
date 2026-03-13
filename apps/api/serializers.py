@@ -8,6 +8,7 @@ from apps.brands.models import (
     BrandAsset,
     BrandSocialAccount,
     BrandYouTubeCredential,
+    SearchChannel,
 )
 from apps.social.services.secret_crypto import encrypt_secret, is_secret_configured
 
@@ -27,6 +28,8 @@ from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCor
 
 
 class FactorySerializer(serializers.ModelSerializer):
+    has_youtube_check_credential = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Factory
         fields = [
@@ -37,10 +40,52 @@ class FactorySerializer(serializers.ModelSerializer):
             "is_active",
             "scheduling_paused",
             "processing_paused",
+            "auto_fetch_enabled",
+            "auto_fetch_min_per_brand",
+            "auto_fetch_min_total",
+            "auto_fetch_max_total",
+            "auto_fetch_min_video_age_hours",
+            "auto_fetch_max_video_age_hours",
+            "auto_fetch_prompt_version",
+            "auto_fetch_shorts_target",
+            "auto_fetch_longs_target",
+            "auto_fetch_min_duration_minutes",
+            "auto_fetch_min_views",
+            "has_youtube_check_credential",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at", "has_youtube_check_credential"]
+
+    def get_has_youtube_check_credential(self, obj):
+        from apps.brands.models import FactoryYouTubeCheckCredential
+        return FactoryYouTubeCheckCredential.objects.filter(
+            factory=obj,
+        ).exclude(refresh_token="").exists()
+
+
+class SearchChannelSerializer(serializers.ModelSerializer):
+    target_brand_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = SearchChannel
+        fields = [
+            "id",
+            "factory",
+            "youtube_channel_url",
+            "youtube_channel_id",
+            "channel_title",
+            "target_brand",
+            "target_brand_name",
+            "is_active",
+            "last_checked_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["youtube_channel_id", "channel_title", "last_checked_at", "created_at", "updated_at"]
+
+    def get_target_brand_name(self, obj):
+        return getattr(obj.target_brand, "name", None) if obj.target_brand else "Todos"
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -481,10 +526,18 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
     suggestions = AutoCutSuggestionSerializer(many=True, read_only=True)
     cortes = AutoCutCorteSerializer(many=True, read_only=True)
     target_brand_name = serializers.SerializerMethodField(read_only=True)
+    factory_name = serializers.SerializerMethodField(read_only=True)
 
     def get_target_brand_name(self, obj):
         target = getattr(obj, "target_brand", None)
         return getattr(target, "name", None) if target else None
+
+    def get_factory_name(self, obj):
+        brand = getattr(obj, "brand", None)
+        if not brand:
+            return None
+        factory = getattr(brand, "factory", None)
+        return getattr(factory, "name", None) if factory else None
 
     class Meta:
         model = AutoCutAnalysis
@@ -492,6 +545,7 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "target_brand_name",
+            "factory_name",
             "assunto",
             "convidados",
             "prompt_version",

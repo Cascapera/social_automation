@@ -43,6 +43,7 @@ export default function Layout() {
   const factoryMenuLinks = [
     { to: '/', label: 'Dashboard', end: true },
     { to: '/agendamento', label: 'Agendamento (Factory)' },
+    { to: '/canais-busca', label: 'Canais de Busca' },
     { to: '/cortes-automaticos', label: 'Criação de Cortes' },
     { to: '/banco-videos', label: 'Banco de Vídeos' },
     { to: '/midias-marca', label: 'Brands da Factory' },

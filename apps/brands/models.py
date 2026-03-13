@@ -23,6 +23,59 @@ class Factory(models.Model):
         default=False,
         help_text="Quando ativo, impede início de novos jobs de cortes automáticos na factory.",
     )
+    # Auto-fetch de vídeos de canais de busca
+    auto_fetch_enabled = models.BooleanField(
+        default=False,
+        help_text="Quando ativo, busca automaticamente vídeos nos canais de busca quando o banco está abaixo dos mínimos.",
+    )
+    auto_fetch_min_per_brand = models.PositiveSmallIntegerField(
+        default=3,
+        help_text="Mínimo de vídeos AVAILABLE por brand. Ao atingir, busca em fontes que direcionam para essa brand.",
+    )
+    auto_fetch_min_total = models.PositiveSmallIntegerField(
+        default=10,
+        help_text="Mínimo total de vídeos AVAILABLE na factory. Ao atingir, busca em qualquer fonte.",
+    )
+    auto_fetch_max_total = models.PositiveSmallIntegerField(
+        default=100,
+        help_text="Máximo de vídeos no banco. Evita loop infinito quando alguma brand tem estoque baixo.",
+    )
+    auto_fetch_min_video_age_hours = models.PositiveSmallIntegerField(
+        default=24,
+        help_text="Mínimo de horas desde a publicação do vídeo original para criar job. Política de direitos: 24h.",
+    )
+    auto_fetch_max_video_age_hours = models.PositiveSmallIntegerField(
+        default=168,
+        help_text="Máximo de horas desde a publicação. Vídeos mais antigos não são processados (tema esfriou). 168h = 7 dias.",
+    )
+    auto_fetch_prompt_version = models.CharField(
+        max_length=24,
+        choices=[
+            ("viral", "Viral (PT)"),
+            ("educational", "Educacional (PT)"),
+            ("viral_en", "Viral (EN)"),
+            ("educational_en", "Educacional (EN)"),
+            ("viral_translate", "Viral Translate - EN to PT"),
+        ],
+        default="viral",
+        help_text="Modo de análise usado nos jobs criados pela busca automática (válido para todas as brands da factory).",
+    )
+    auto_fetch_shorts_target = models.PositiveSmallIntegerField(
+        default=12,
+        help_text="Quantidade de cortes curtos (Shorts) por job criado pela busca automática.",
+    )
+    auto_fetch_longs_target = models.PositiveSmallIntegerField(
+        default=3,
+        help_text="Quantidade de cortes longos por job criado pela busca automática.",
+    )
+    auto_fetch_min_duration_minutes = models.PositiveSmallIntegerField(
+        default=50,
+        help_text="Duração mínima do vídeo em minutos. Ignora cortes/shorts que os canais postam (ex: 50 min).",
+    )
+    auto_fetch_min_views = models.PositiveIntegerField(
+        default=0,
+        help_text="Mínimo de visualizações. 0 = sem filtro. Ex: 10000 para só vídeos com 10k+ views.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -135,6 +188,140 @@ class Brand(models.Model):
     def __str__(self) -> str:
         return self.name
 
+
+class SearchChannel(models.Model):
+    """
+    Canal do YouTube que a factory monitora para buscar vídeos automaticamente.
+    Ao cadastrar, pode direcionar para um tema (Brand) ou "todos" (usa theme_category da IA).
+    """
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="search_channels",
+    )
+    youtube_channel_url = models.CharField(
+        max_length=500,
+        help_text="URL do canal (ex: youtube.com/@flowpodcast ou youtube.com/channel/UC...)",
+    )
+    youtube_channel_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="ID do canal no YouTube (preenchido ao validar/salvar).",
+    )
+    channel_title = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="Nome do canal (preenchido ao buscar).",
+    )
+    target_brand = models.ForeignKey(
+        Brand,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="search_channels_targeted",
+        help_text="Se preenchido, vídeos vão para este canal. Se vazio, usa theme_category da IA (todos).",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Se inativo, não busca vídeos neste canal.",
+    )
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        verbose_name = "Canal de busca"
+        verbose_name_plural = "Canais de busca"
+
+    def __str__(self) -> str:
+        title = self.channel_title or self.youtube_channel_id or "?"
+        return f"{self.factory.name} ← {title}"
+
+
+class FactoryYouTubeCheckCredential(models.Model):
+    """
+    Credencial OAuth (YOUTUBE_CHECK_*) por factory para busca de vídeos.
+    Autenticada via web; usada quando YOUTUBE_API_KEY não está disponível.
+    """
+    factory = models.OneToOneField(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="youtube_check_credential",
+    )
+    channel_id = models.CharField(max_length=64, blank=True, default="")
+    account_name = models.CharField(max_length=120, blank=True, default="")
+    access_token = models.TextField(blank=True, default="")
+    refresh_token = models.TextField(blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Credencial YouTube Check da Factory"
+        verbose_name_plural = "Credenciais YouTube Check da Factory"
+
+    def __str__(self) -> str:
+        return f"{self.factory.name} / {self.account_name or self.channel_id or '?'}"
+
+
+class ProcessedYoutubeVideo(models.Model):
+    """
+    Registro global de vídeos YouTube já processados (manual ou automático).
+    Evita reprocessar o mesmo vídeo em qualquer factory.
+
+    IMPORTANTE: Este registro NÃO deve ser apagado ao deletar jobs ou mídias.
+    Não há FK para AutoCutAnalysis — deletar job não afeta este registro.
+    Os registros permanecem para que o fluxo automático não reprocesse o mesmo vídeo.
+    """
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="processed_youtube_videos",
+    )
+    youtube_video_id = models.CharField(max_length=32)
+    source = models.CharField(
+        max_length=20,
+        choices=[("manual", "Manual"), ("auto", "Automático")],
+        default="manual",
+    )
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("factory", "youtube_video_id")
+        verbose_name = "Vídeo YouTube processado"
+        verbose_name_plural = "Vídeos YouTube processados"
+
+    def __str__(self) -> str:
+        return f"{self.factory.name} / {self.youtube_video_id}"
+
+
+class ProcessedChannelVideo(models.Model):
+    """Registro de vídeos já processados por canal de busca (complementa ProcessedYoutubeVideo)."""
+    search_channel = models.ForeignKey(
+        SearchChannel,
+        on_delete=models.CASCADE,
+        related_name="processed_videos",
+    )
+    youtube_video_id = models.CharField(max_length=32)
+    factory = models.ForeignKey(
+        Factory,
+        on_delete=models.CASCADE,
+        related_name="processed_channel_videos",
+    )
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("search_channel", "youtube_video_id")
+        verbose_name = "Vídeo processado"
+        verbose_name_plural = "Vídeos processados"
+
+    def __str__(self) -> str:
+        return f"{self.search_channel} / {self.youtube_video_id}"
+
+
 class BrandAsset(models.Model):
     ASSET_TYPES = [
         ("LOGO", "Logo"),
@@ -233,4 +420,3 @@ class BrandYouTubeCredential(models.Model):
         base = self.label or f"Credencial #{self.id}"
         channel = self.account_name or self.channel_id or "sem canal"
         return f"{self.brand.slug} / {base} / {channel}"
-

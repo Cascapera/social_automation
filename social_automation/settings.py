@@ -93,13 +93,34 @@ WSGI_APPLICATION = 'social_automation.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# Use PostgreSQL quando DATABASE_URL estiver definido (recomendado para Celery multi-worker)
+# Ex: postgresql://user:password@host:5432/dbname
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+_database_url = os.getenv("DATABASE_URL", "").strip()
+if _database_url and "postgres" in _database_url.split("://")[0].lower():
+    from urllib.parse import urlparse
+    # postgres:// e postgresql:// são equivalentes; psycopg2 aceita ambos
+    _u = _database_url.replace("postgres://", "postgresql://", 1)
+    _p = urlparse(_u)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": _p.path.lstrip("/").split("?")[0] or "postgres",
+            "USER": _p.username or "postgres",
+            "PASSWORD": _p.password or "",
+            "HOST": _p.hostname or "localhost",
+            "PORT": str(_p.port or 5432),
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {"connect_timeout": 10},
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation

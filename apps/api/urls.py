@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
     FactoryViewSet,
+    SearchChannelViewSet,
     BrandViewSet,
     BrandAssetViewSet,
     BrandSocialAccountViewSet,
@@ -23,6 +24,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register("factories", FactoryViewSet, basename="factory")
+router.register("search-channels", SearchChannelViewSet, basename="search-channel")
 router.register("brands", BrandViewSet, basename="brand")
 router.register("brand-assets", BrandAssetViewSet, basename="brand-asset")
 router.register("social-accounts", BrandSocialAccountViewSet, basename="social-account")

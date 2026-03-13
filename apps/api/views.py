@@ -15,7 +15,7 @@ from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny
 from django.http import FileResponse
 
-from apps.brands.models import Factory, Brand, BrandAsset, BrandSocialAccount, BrandYouTubeCredential
+from apps.brands.models import Factory, Brand, BrandAsset, BrandSocialAccount, BrandYouTubeCredential, SearchChannel
 from apps.mediahub.models import SourceVideo
 from apps.cuts.models import Cut
 from apps.jobs.models import (
@@ -35,6 +35,7 @@ from apps.jobs.services.job_actions import archive_job as do_archive_job, delete
 
 from .serializers import (
     FactorySerializer,
+    SearchChannelSerializer,
     BrandSerializer,
     BrandAssetSerializer,
     SourceVideoSerializer,
@@ -215,6 +216,74 @@ class FactoryViewSet(viewsets.ModelViewSet):
                 {"error": str(exc)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    @action(detail=True, methods=["get"], url_path="youtube-check-connect-url")
+    def youtube_check_connect_url(self, request, pk=None):
+        """Retorna URL para OAuth da API de busca (YOUTUBE_CHECK_*)."""
+        from apps.social.services.youtube_oauth import (
+            get_factory_check_authorization_url,
+            get_check_client_config,
+        )
+
+        factory = self.get_object()
+        if not get_check_client_config():
+            return Response(
+                {"error": "YOUTUBE_CHECK_CLIENT_ID e YOUTUBE_CHECK_CLIENT_SECRET devem estar no .env"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        try:
+            url = get_factory_check_authorization_url(factory.id)
+            return Response({"url": url})
+        except ValueError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+
+class SearchChannelViewSet(viewsets.ModelViewSet):
+    """CRUD de canais de busca (YouTube) por factory."""
+    queryset = SearchChannel.objects.all().select_related("factory", "target_brand")
+    serializer_class = SearchChannelSerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        return qs.order_by("id")
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        _resolve_search_channel(instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if "youtube_channel_url" in serializer.validated_data:
+            _resolve_search_channel(instance)
+
+
+def _resolve_search_channel(channel: SearchChannel) -> None:
+    """Resolve channel_id e channel_title a partir da URL."""
+    from apps.auto_cuts.services.youtube_fetch import (
+        parse_channel_identifier,
+        resolve_channel_id,
+        get_channel_info,
+        _get_youtube_client,
+    )
+    youtube = _get_youtube_client()
+    if not youtube:
+        return
+    channel_id_raw, handle = parse_channel_identifier(channel.youtube_channel_url)
+    resolved = resolve_channel_id(youtube, channel_id_raw, handle)
+    if resolved:
+        channel.youtube_channel_id = resolved
+        info = get_channel_info(resolved)
+        if info:
+            channel.channel_title = (info.get("title") or "")[:200]
+        channel.last_checked_at = timezone.now()
+        channel.save(update_fields=["youtube_channel_id", "channel_title", "last_checked_at", "updated_at"])
 
 
 class BrandViewSet(viewsets.ModelViewSet):
@@ -1234,9 +1303,11 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "head", "options", "delete"]
 
     def get_queryset(self):
+        from django.db.models import Q
         qs = super().get_queryset()
         if self.request.user.is_authenticated:
-            qs = qs.filter(user=self.request.user)
+            # Inclui jobs do usuário OU do auto-fetch (user=None)
+            qs = qs.filter(Q(user=self.request.user) | Q(user__isnull=True))
         brand = self.request.query_params.get("brand")
         if brand:
             qs = qs.filter(brand_id=brand)
@@ -1246,7 +1317,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             qs = qs.exclude(
                 Exists(AutoCutCorte.objects.filter(analysis_id=OuterRef("pk"), is_finalized=True))
             )
-        return qs.select_related("target_brand").order_by("-created_at")
+        return qs.select_related("target_brand", "brand", "brand__factory").order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -1300,6 +1371,29 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Verifica se vídeo YouTube já foi processado (evita duplicata manual/auto)
+        if youtube_url:
+            from apps.auto_cuts.services.youtube_fetch import extract_video_id
+            from apps.brands.models import ProcessedYoutubeVideo
+
+            video_id = extract_video_id(youtube_url)
+            if video_id:
+                factory = None
+                if brand_id:
+                    try:
+                        brand = Brand.objects.get(id=brand_id)
+                        factory = getattr(brand, "factory", None)
+                    except Brand.DoesNotExist:
+                        pass
+                if factory and ProcessedYoutubeVideo.objects.filter(
+                    factory=factory,
+                    youtube_video_id=video_id,
+                ).exists():
+                    return Response(
+                        {"error": "Este vídeo já foi processado nesta factory. Evite duplicatas."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         # Nome do job: usuário informou, nome do vídeo, ou "Job N"
         if name and name.strip():
             job_name = name.strip()
@@ -1332,6 +1426,19 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             longs_target=longs_target,
         )
         analysis.save()
+
+        # Registra vídeo processado (manual) para evitar reprocessamento
+        if youtube_url:
+            from apps.auto_cuts.services.youtube_fetch import extract_video_id
+            from apps.brands.models import ProcessedYoutubeVideo
+
+            video_id = extract_video_id(youtube_url)
+            if video_id and analysis.brand_id and analysis.brand.factory_id:
+                ProcessedYoutubeVideo.objects.get_or_create(
+                    factory_id=analysis.brand.factory_id,
+                    youtube_video_id=video_id,
+                    defaults={"source": "manual"},
+                )
 
         analyze_auto_cuts_task.delay(analysis.id)
 
@@ -1553,9 +1660,10 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
+        from django.db.models import Q
         qs = super().get_queryset()
         if self.request.user.is_authenticated:
-            qs = qs.filter(analysis__user=self.request.user)
+            qs = qs.filter(Q(analysis__user=self.request.user) | Q(analysis__user__isnull=True))
         brand = self.request.query_params.get("brand")
         if brand:
             qs = qs.filter(analysis__brand_id=brand)

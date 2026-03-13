@@ -7,6 +7,9 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from apps.social.services.secret_crypto import decrypt_secret
 
+# State prefix para OAuth da factory (canais de busca)
+FACTORY_CHECK_STATE_PREFIX = "fcheck:"
+
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
@@ -165,6 +168,87 @@ def fetch_tokens_and_channels(code: str, brand_id: int, youtube_credential_id: i
         scopes=YOUTUBE_SCOPES,
     )
     # Listar canais
+    youtube = build("youtube", "v3", credentials=creds)
+    resp = youtube.channels().list(part="snippet", mine=True).execute()
+    channels = [
+        {"id": item["id"], "title": item["snippet"]["title"]}
+        for item in resp.get("items", [])
+    ]
+    expires_at = getattr(creds, "expiry", None)
+    return {
+        "access_token": creds.token,
+        "refresh_token": creds.refresh_token or "",
+        "expires_at": expires_at,
+        "channels": channels,
+    }
+
+
+def get_check_client_config() -> dict | None:
+    """Retorna config do YOUTUBE_CHECK_CLIENT_* para OAuth de busca de vídeos."""
+    client_id = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+    if not client_id or not client_secret:
+        return None
+    # Não usar YOUTUBE_REDIRECT_URI (callback de Contas); factory-check tem callback próprio
+    redirect_uri = (
+        (os.getenv("YOUTUBE_CHECK_REDIRECT_URI") or "").strip()
+        or "http://127.0.0.1:8000/api/youtube/factory-check-callback/"
+    )
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": [redirect_uri],
+            "token_uri": "https://oauth2.googleapis.com/token",
+        },
+        "redirect_uri": redirect_uri,
+    }
+
+
+def get_factory_check_authorization_url(factory_id: int) -> str:
+    """URL de autorização OAuth para credencial de busca da factory."""
+    config = get_check_client_config()
+    if not config:
+        raise ValueError("YOUTUBE_CHECK_CLIENT_ID e YOUTUBE_CHECK_CLIENT_SECRET devem estar no .env")
+    params = {
+        "client_id": config["web"]["client_id"],
+        "redirect_uri": config["redirect_uri"],
+        "response_type": "code",
+        "scope": " ".join(YOUTUBE_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": f"{FACTORY_CHECK_STATE_PREFIX}{int(factory_id)}",
+    }
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+
+
+def fetch_tokens_for_factory_check(code: str, factory_id: int) -> dict:
+    """Troca code por tokens para credencial de busca da factory."""
+    config = get_check_client_config()
+    if not config:
+        raise ValueError("YOUTUBE_CHECK_CLIENT_ID e YOUTUBE_CHECK_CLIENT_SECRET devem estar no .env")
+    web = config["web"]
+    token_resp = requests.post(
+        web["token_uri"],
+        data={
+            "code": code,
+            "client_id": web["client_id"],
+            "client_secret": web["client_secret"],
+            "redirect_uri": config["redirect_uri"],
+            "grant_type": "authorization_code",
+        },
+        timeout=30,
+    )
+    token_resp.raise_for_status()
+    token_data = token_resp.json()
+    creds = Credentials(
+        token=token_data.get("access_token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=web["token_uri"],
+        client_id=web["client_id"],
+        client_secret=web["client_secret"],
+        scopes=YOUTUBE_SCOPES,
+    )
     youtube = build("youtube", "v3", credentials=creds)
     resp = youtube.channels().list(part="snippet", mine=True).execute()
     channels = [

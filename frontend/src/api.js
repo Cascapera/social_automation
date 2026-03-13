@@ -119,6 +119,34 @@ export async function getFactorySchedules(factoryId, status = null, brandId = nu
   return apiRequest(`/factory-schedules/?${params.toString()}`)
 }
 
+export async function getSearchChannels(factoryId = null) {
+  const qs = factoryId ? `?factory=${factoryId}` : ''
+  return apiRequest(`/search-channels/${qs}`)
+}
+
+export async function createSearchChannel(data) {
+  return apiRequest('/search-channels/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateSearchChannel(id, data) {
+  return apiRequest(`/search-channels/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteSearchChannel(id) {
+  return apiRequest(`/search-channels/${id}/`, { method: 'DELETE' })
+}
+
+export async function getFactoryYoutubeCheckConnectUrl(factoryId) {
+  const data = await apiRequest(`/factories/${factoryId}/youtube-check-connect-url/`)
+  return data.url
+}
+
 export async function getVideoInventory({
   factoryId = null,
   brandId = null,

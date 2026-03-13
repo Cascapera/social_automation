@@ -7,12 +7,15 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
-from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential
+from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential, Factory, FactoryYouTubeCheckCredential
 from apps.social.services.youtube_oauth import (
     get_authorization_url,
     fetch_tokens_and_channels,
     get_client_config,
     parse_state_value,
+    get_factory_check_authorization_url,
+    fetch_tokens_for_factory_check,
+    FACTORY_CHECK_STATE_PREFIX,
 )
 
 CACHE_PREFIX = "youtube_oauth:"
@@ -241,3 +244,70 @@ def _frontend_url(path: str) -> str:
 
     base = os.getenv("FRONTEND_URL", "http://localhost:5173")
     return f"{base.rstrip('/')}{path}"
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def factory_check_connect(request):
+    """Inicia OAuth para credencial de busca da factory. Query: ?factory_id=X"""
+    factory_id = request.query_params.get("factory_id")
+    if not factory_id:
+        return Response(
+            {"error": "factory_id é obrigatório"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        factory = Factory.objects.get(id=int(factory_id))
+    except (ValueError, Factory.DoesNotExist):
+        return Response(
+            {"error": "Factory não encontrada"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    try:
+        url = get_factory_check_authorization_url(factory.id)
+        return redirect(url)
+    except ValueError as exc:
+        return Response(
+            {"error": str(exc)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def factory_check_callback(request):
+    """Callback OAuth para credencial de busca da factory."""
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    error_param = request.query_params.get("error")
+    base_path = "/canais-busca"
+    if error_param:
+        return redirect(_frontend_url(f"{base_path}?error={error_param}"))
+    if not code or not state or not state.startswith(FACTORY_CHECK_STATE_PREFIX):
+        return redirect(_frontend_url(f"{base_path}?error=missing_code_or_state"))
+    try:
+        factory_id = int(state[len(FACTORY_CHECK_STATE_PREFIX) :])
+        factory = Factory.objects.get(id=factory_id)
+    except (ValueError, Factory.DoesNotExist):
+        return redirect(_frontend_url(f"{base_path}?error=invalid_factory"))
+    try:
+        data = fetch_tokens_for_factory_check(code, factory_id)
+    except Exception as e:
+        return redirect(_frontend_url(f"{base_path}?error=oauth_failed&detail={str(e)[:50]}"))
+    channels = data.get("channels") or []
+    if not channels:
+        return redirect(_frontend_url(f"{base_path}?error=no_channels"))
+    channel = channels[0]
+    if len(channels) > 1:
+        channel = next((c for c in channels if "YouTube" in c.get("title", "")), channels[0])
+    cred, _ = FactoryYouTubeCheckCredential.objects.update_or_create(
+        factory=factory,
+        defaults={
+            "channel_id": channel.get("id", ""),
+            "account_name": channel.get("title", ""),
+            "access_token": data.get("access_token", ""),
+            "refresh_token": data.get("refresh_token", ""),
+            "expires_at": data.get("expires_at"),
+        },
+    )
+    return redirect(_frontend_url(f"{base_path}?youtube_check_connected=1&factory_id={factory_id}"))

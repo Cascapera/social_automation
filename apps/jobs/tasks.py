@@ -4,6 +4,7 @@ from pathlib import Path
 from celery import shared_task
 from django.conf import settings
 
+from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
 from .services.pipeline import run_job
 from .services.subtitles import (
     generate_subtitles,
