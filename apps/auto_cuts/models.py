@@ -38,6 +38,15 @@ class AutoCutAnalysis(models.Model):
         related_name="auto_cut_analyses_targeted",
         help_text="Quando definido, todos os cortes deste vídeo vão para este canal (ignora theme_category da IA).",
     )
+    distribution_mode = models.CharField(
+        max_length=20,
+        choices=[
+            ("theme", "Por tema (IA)"),
+            ("distribute", "Distribuir pelas Brands"),
+        ],
+        default="theme",
+        help_text="Quando target_brand vazio: 'theme' usa categoria da IA; 'distribute' envia para a brand com menos vídeos no banco.",
+    )
     source = models.ForeignKey(
         SourceVideo,
         on_delete=models.SET_NULL,

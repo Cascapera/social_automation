@@ -1328,6 +1328,9 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         youtube_url = (request.data.get("youtube_url") or "").strip()
         brand_id = request.data.get("brand")
         target_brand_id = request.data.get("target_brand")
+        distribution_mode = (request.data.get("distribution_mode") or "theme").strip().lower()
+        if distribution_mode not in ("theme", "distribute"):
+            distribution_mode = "theme"
         name = request.data.get("name", "")
         assunto = request.data.get("assunto", "")
         convidados = request.data.get("convidados", "")
@@ -1411,6 +1414,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             user=request.user,
             brand_id=brand_id or None,
             target_brand_id=target_brand_id or None,
+            distribution_mode=distribution_mode,
             source_id=source_id or None,
             file=file_obj if file_obj else None,
             youtube_url=youtube_url or "",

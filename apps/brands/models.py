@@ -227,7 +227,11 @@ class SearchChannel(models.Model):
         null=True,
         blank=True,
         related_name="search_channels_targeted",
-        help_text="Se preenchido, vídeos vão para este canal. Se vazio, usa theme_category da IA (todos).",
+        help_text="Se preenchido, vídeos vão para este canal. Se vazio e distribute_by_brands=False, usa theme_category da IA.",
+    )
+    distribute_by_brands = models.BooleanField(
+        default=False,
+        help_text="Se ativo, ignora tema e distribui para a brand com menos vídeos no banco (equilibra estoque).",
     )
     is_active = models.BooleanField(
         default=True,

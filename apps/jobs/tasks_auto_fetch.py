@@ -205,10 +205,17 @@ def check_and_fetch_new_videos_task() -> dict:
                 continue
 
             video_title = (video_to_process.get("title") or "").strip()[:200] or "Auto-fetch"
+            target_brand = None
+            distribution_mode = "theme"
+            if getattr(search_channel, "distribute_by_brands", False):
+                distribution_mode = "distribute"
+            else:
+                target_brand = search_channel.target_brand
             analysis = AutoCutAnalysis.objects.create(
                 user=None,
                 brand=first_brand,
-                target_brand=search_channel.target_brand,
+                target_brand=target_brand,
+                distribution_mode=distribution_mode,
                 youtube_url=youtube_url,
                 name=video_title,
                 assunto="",

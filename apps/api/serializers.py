@@ -77,6 +77,7 @@ class SearchChannelSerializer(serializers.ModelSerializer):
             "channel_title",
             "target_brand",
             "target_brand_name",
+            "distribute_by_brands",
             "is_active",
             "last_checked_at",
             "created_at",
@@ -85,7 +86,9 @@ class SearchChannelSerializer(serializers.ModelSerializer):
         read_only_fields = ["youtube_channel_id", "channel_title", "last_checked_at", "created_at", "updated_at"]
 
     def get_target_brand_name(self, obj):
-        return getattr(obj.target_brand, "name", None) if obj.target_brand else "Todos"
+        if getattr(obj, "distribute_by_brands", False):
+            return "Distribuir pelas Brands"
+        return getattr(obj.target_brand, "name", None) if obj.target_brand else "Por tema"
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -531,7 +534,11 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
 
     def get_target_brand_name(self, obj):
         target = getattr(obj, "target_brand", None)
-        return getattr(target, "name", None) if target else None
+        if target:
+            return getattr(target, "name", None)
+        if (getattr(obj, "distribution_mode", "") or "").strip() == "distribute":
+            return "Distribuir pelas Brands"
+        return "Por tema"
 
     def get_factory_name(self, obj):
         brand = getattr(obj, "brand", None)
@@ -546,6 +553,7 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "target_brand_name",
+            "distribution_mode",
             "factory_name",
             "assunto",
             "convidados",

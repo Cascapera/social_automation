@@ -250,7 +250,7 @@ export default function CortesAutomaticos() {
   }, [viewMode, factoryId])
 
   useEffect(() => {
-    if (viewMode === 'factory' && factoryId && targetBrandId && factoryBrandIds.length > 0) {
+    if (viewMode === 'factory' && factoryId && targetBrandId && targetBrandId !== 'distribute' && factoryBrandIds.length > 0) {
       const isValid = factoryBrandIds.some((id) => String(id) === String(targetBrandId))
       if (!isValid) setTargetBrandId('')
     }
@@ -315,12 +315,16 @@ export default function CortesAutomaticos() {
         ? (selectedBrand.thumbnail_effect_color || '#FFEBDC')
         : (thumbnailStrokeColor || '#FFEBDC')
 
+      const isDistribute = targetBrandId === 'distribute'
+      const effectiveTargetBrandId = (targetBrandId && targetBrandId !== 'distribute') ? targetBrandId : undefined
+      const distributionMode = isDistribute ? 'distribute' : 'theme'
       const a = await createAutoCutAnalysis({
         file: file || undefined,
         sourceId: sourceId || undefined,
         youtubeUrl: youtubeUrl || undefined,
         brandId: activeBrandId,
-        targetBrandId: targetBrandId || undefined,
+        targetBrandId: effectiveTargetBrandId,
+        distributionMode,
         name: name || undefined,
         assunto: assunto || undefined,
         convidados: convidados || undefined,
@@ -747,20 +751,21 @@ export default function CortesAutomaticos() {
           </div>
           {viewMode === 'factory' && factoryId && factoryBrandIds.length >= 1 ? (
             <div className="form-group">
-              <label>Direcionar todos os cortes para</label>
+              <label>Direcionamento dos cortes</label>
               <select
                 value={targetBrandId}
                 onChange={(e) => setTargetBrandId(e.target.value)}
               >
-                <option value="">Nenhum (rotear por theme_category da IA)</option>
+                <option value="">Por tema (IA)</option>
+                <option value="distribute">Distribuir pelas Brands</option>
                 {factoryBrands.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name || `Brand #${b.id}`}
+                    Direcionar para {b.name || `Brand #${b.id}`}
                   </option>
                 ))}
               </select>
               <span className="form-hint">
-                Se escolher uma brand, todos os cortes deste vídeo vão para esse canal, ignorando a categoria sugerida pela IA.
+                Por tema: usa categoria da IA. Distribuir: envia para a brand com menos vídeos no banco. Direcionar: todos para a brand escolhida.
               </span>
             </div>
           ) : null}

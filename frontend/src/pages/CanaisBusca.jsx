@@ -103,7 +103,7 @@ export default function CanaisBusca() {
     if (ch) {
       setEditingId(ch.id)
       setUrl(ch.youtube_channel_url || '')
-      setTargetBrandId(ch.target_brand_id || '')
+      setTargetBrandId(ch.distribute_by_brands ? 'distribute' : (ch.target_brand_id || ''))
       setIsActive(ch.is_active ?? true)
     } else {
       setEditingId(null)
@@ -132,10 +132,12 @@ export default function CanaisBusca() {
     setSaving(true)
     setError('')
     try {
+      const isDistribute = targetBrandId === 'distribute'
       const payload = {
         factory: factoryId,
         youtube_channel_url: url.trim(),
-        target_brand: targetBrandId || null,
+        target_brand: isDistribute ? null : (targetBrandId || null),
+        distribute_by_brands: isDistribute,
         is_active: isActive,
       }
       if (editingId) {
@@ -229,7 +231,7 @@ export default function CanaisBusca() {
       <h1>Canais de Busca</h1>
       <p className="canais-busca-desc">
         Canais do YouTube que esta factory monitora para buscar vídeos automaticamente.
-        Ao cadastrar, direcione para um tema (Brand) ou deixe "Todos" para rotear por theme_category.
+        Ao cadastrar, direcione para uma Brand, use &quot;Por tema&quot; (IA) ou &quot;Distribuir pelas Brands&quot; para equilibrar o estoque.
       </p>
 
       {error && (
@@ -463,11 +465,13 @@ export default function CanaisBusca() {
                   value={targetBrandId}
                   onChange={(e) => setTargetBrandId(e.target.value || '')}
                 >
-                  <option value="">Todos (rotear por theme_category)</option>
+                  <option value="">Por tema (IA)</option>
+                  <option value="distribute">Distribuir pelas Brands</option>
                   {brandsForFactory.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
+                    <option key={b.id} value={b.id}>Direcionar para {b.name}</option>
                   ))}
                 </select>
+                <span className="form-hint">Por tema: usa categoria da IA. Distribuir: envia para a brand com menos vídeos no banco.</span>
               </div>
               <label className="checkbox-label">
                 <input

@@ -139,9 +139,10 @@ def _safe_save_analysis(analysis, update_fields):
 
 def _resolve_target_brand_for_suggestion(analysis, suggestion):
     """
-    Resolve a brand de destino via target_brand (prioridade) ou categoria (Factory 1:1).
-    Quando target_brand está definido, todos os cortes vão para esse canal (ignora theme_category).
-    Fallback: quando theme_category vazio em factory, usa analysis.brand para não perder cortes.
+    Resolve a brand de destino via target_brand (prioridade), distribute ou categoria (Factory 1:1).
+    - target_brand definido: todos os cortes vão para esse canal.
+    - distribution_mode=distribute: envia para a brand com menos vídeos AVAILABLE no banco.
+    - distribution_mode=theme: usa theme_category da IA para mapear.
     """
     target_id = getattr(analysis, "target_brand_id", None)
     if target_id:
@@ -155,12 +156,36 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
     base_brand = getattr(analysis, "brand", None)
     if not base_brand:
         return None
-    category = (getattr(suggestion, "theme_category", "") or "").strip()
     factory_id = getattr(base_brand, "factory_id", None)
     if not factory_id:
         return base_brand
+
+    distribution_mode = getattr(analysis, "distribution_mode", "") or "theme"
+    if distribution_mode == "distribute":
+        from apps.brands.models import Brand
+        from apps.jobs.models import VideoInventoryItem
+        from django.db.models import Count
+
+        brands = list(Brand.objects.filter(factory_id=factory_id).values_list("id", flat=True))
+        if not brands:
+            return base_brand
+        counts = (
+            VideoInventoryItem.objects.filter(
+                factory_id=factory_id,
+                brand_id__in=brands,
+                status="AVAILABLE",
+            )
+            .values("brand_id")
+            .annotate(cnt=Count("id"))
+        )
+        count_by_brand = {r["brand_id"]: r["cnt"] for r in counts}
+        min_count = min(count_by_brand.get(bid, 0) for bid in brands)
+        candidates = [bid for bid in brands if count_by_brand.get(bid, 0) == min_count]
+        chosen_id = min(candidates)
+        return Brand.objects.filter(id=chosen_id).first() or base_brand
+
+    category = (getattr(suggestion, "theme_category", "") or "").strip()
     if not category:
-        # theme_category vazio: usa analysis.brand como fallback para não ignorar cortes
         return base_brand
     from apps.brands.models import Brand
 
@@ -242,6 +267,8 @@ def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[di
     Quando target_brand está definido, passa todos os itens sem filtrar.
     """
     if getattr(analysis, "target_brand_id", None):
+        return list(items or []), 0, 0
+    if (getattr(analysis, "distribution_mode", "") or "").strip() == "distribute":
         return list(items or []), 0, 0
     base_brand = getattr(analysis, "brand", None)
     factory_id = getattr(base_brand, "factory_id", None) if base_brand else None

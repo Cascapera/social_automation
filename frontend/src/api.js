@@ -619,6 +619,7 @@ export async function createAutoCutAnalysis({
   youtubeUrl,
   brandId,
   targetBrandId,
+  distributionMode = 'theme',
   name,
   assunto,
   convidados,
@@ -636,6 +637,7 @@ export async function createAutoCutAnalysis({
   if (youtubeUrl) formData.append('youtube_url', youtubeUrl)
   if (brandId) formData.append('brand', brandId)
   if (targetBrandId) formData.append('target_brand', targetBrandId)
+  formData.append('distribution_mode', distributionMode || 'theme')
   if (name) formData.append('name', name)
   if (assunto) formData.append('assunto', assunto)
   if (convidados) formData.append('convidados', convidados)
