@@ -257,6 +257,11 @@ export default function CortesAutomaticos() {
   }, [viewMode, factoryId, targetBrandId, factoryBrandIdsKey])
 
   useEffect(() => {
+    const mode = selectedBrand?.vertical_mode || 'zoom_crop'
+    setVerticalOptions((o) => (o.mode === mode ? o : { ...o, mode }))
+  }, [activeBrandId, selectedBrand?.vertical_mode])
+
+  useEffect(() => {
     const shouldLoadFactoryAggregated = viewMode === 'factory'
     if (shouldLoadFactoryAggregated || activeBrandId) {
       loadAnalysesForView().catch(() => setAnalyses([]))
@@ -985,8 +990,8 @@ export default function CortesAutomaticos() {
                               value={verticalOptions.mode}
                               onChange={(e) => setVerticalOptions((o) => ({ ...o, mode: e.target.value }))}
                             >
-                              <option value="frame_center">Enquadrar e centralizar</option>
                               <option value="zoom_crop">Zoom e corte</option>
+                              <option value="frame_center">Enquadrar e centralizar</option>
                             </select>
                           </label>
                           <label>

@@ -116,6 +116,7 @@ class BrandSerializer(serializers.ModelSerializer):
             "thumbnail_effect_color",
             "short_slot_times",
             "long_slot_times",
+            "vertical_mode",
         ]
         extra_kwargs = {"slug": {"required": False}}
 

@@ -23,6 +23,8 @@ const ASSET_TYPES = [
   { id: 'OUTRO', label: 'Outro' },
   { id: 'CTA', label: 'CTA' },
   { id: 'ANIMATION', label: 'Animação overlay (PNG/GIF)' },
+  { id: 'THUMB_SHORT', label: 'Thumb Shorts' },
+  { id: 'THUMB_LONG', label: 'Thumb Longs' },
 ]
 
 const THEME_CATEGORY_OPTIONS = [
@@ -95,6 +97,7 @@ export default function IntroOutro() {
   const [newBrandShortSlotTimeInput, setNewBrandShortSlotTimeInput] = useState('10:00')
   const [newBrandLongSlotTimes, setNewBrandLongSlotTimes] = useState([])
   const [newBrandLongSlotTimeInput, setNewBrandLongSlotTimeInput] = useState('20:00')
+  const [newBrandVerticalMode, setNewBrandVerticalMode] = useState('zoom_crop')
   const [creatingBrand, setCreatingBrand] = useState(false)
   const [showNewBrand, setShowNewBrand] = useState(false)
   const [youtubeDescriptionExtra, setYoutubeDescriptionExtra] = useState('')
@@ -110,6 +113,7 @@ export default function IntroOutro() {
   const [editShortSlotTimes, setEditShortSlotTimes] = useState([])
   const [newShortSlotTime, setNewShortSlotTime] = useState('10:00')
   const [editLongSlotTimes, setEditLongSlotTimes] = useState([])
+  const [editVerticalMode, setEditVerticalMode] = useState('zoom_crop')
   const [newLongSlotTime, setNewLongSlotTime] = useState('20:00')
   const [youtubeCredentials, setYoutubeCredentials] = useState([])
   const [youtubeCredentialSecrets, setYoutubeCredentialSecrets] = useState({})
@@ -173,6 +177,7 @@ export default function IntroOutro() {
     setEditEffectColor(selected?.thumbnail_effect_color || '#FFEBDC')
     setEditShortSlotTimes(Array.isArray(selected?.short_slot_times) ? selected.short_slot_times : [])
     setEditLongSlotTimes(Array.isArray(selected?.long_slot_times) ? selected.long_slot_times : [])
+    setEditVerticalMode(selected?.vertical_mode || 'zoom_crop')
   }, [brandId, brands])
 
   async function handleAdd(e) {
@@ -188,6 +193,12 @@ export default function IntroOutro() {
         const logos = assets.filter((a) => a.asset_type === 'LOGO')
         for (const logo of logos) {
           await deleteBrandAsset(logo.id)
+        }
+      }
+      if (assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') {
+        const existing = assets.filter((a) => a.asset_type === assetType)
+        for (const a of existing) {
+          await deleteBrandAsset(a.id)
         }
       }
       await createBrandAsset(brandId, assetType, file, label.trim())
@@ -230,6 +241,7 @@ export default function IntroOutro() {
         youtube_description_extra: newBrandDescriptionExtra || '',
         short_slot_times: newBrandShortSlotTimes?.length ? newBrandShortSlotTimes : [],
         long_slot_times: newBrandLongSlotTimes?.length ? newBrandLongSlotTimes : [],
+        vertical_mode: newBrandVerticalMode || 'zoom_crop',
       }
       const b = await createBrand(payload)
       if (newBrandLogoFile) {
@@ -290,6 +302,7 @@ export default function IntroOutro() {
         thumbnail_effect_color: (editEffectColor || '').trim(),
         short_slot_times: Array.isArray(editShortSlotTimes) ? editShortSlotTimes : [],
         long_slot_times: Array.isArray(editLongSlotTimes) ? editLongSlotTimes : [],
+        vertical_mode: editVerticalMode || 'zoom_crop',
       })
       const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
       await refreshBrands(fetcher)
@@ -492,6 +505,16 @@ export default function IntroOutro() {
                 <ColorField label="Cor texto thumbnail" value={newBrandTextColor} onChange={setNewBrandTextColor} />
                 <ColorField label="Cor efeito thumbnail" value={newBrandEffectColor} onChange={setNewBrandEffectColor} />
               </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Modo de edição de shorts</label>
+                  <select value={newBrandVerticalMode} onChange={(e) => setNewBrandVerticalMode(e.target.value)}>
+                    <option value="zoom_crop">Zoom e corte</option>
+                    <option value="frame_center">Enquadrar e centralizar</option>
+                  </select>
+                  <p className="form-hint">Zoom preenche a tela; Enquadrar adiciona bordas e logo.</p>
+                </div>
+              </div>
             </div>
 
             <div className="form-section">
@@ -620,6 +643,14 @@ export default function IntroOutro() {
                       <option key={t.id} value={t.id}>{t.label}</option>
                     ))}
                   </select>
+                </div>
+                <div className="form-group">
+                  <label>Modo de edição de shorts</label>
+                  <select value={editVerticalMode} onChange={(e) => setEditVerticalMode(e.target.value)}>
+                    <option value="zoom_crop">Zoom e corte</option>
+                    <option value="frame_center">Enquadrar e centralizar</option>
+                  </select>
+                  <p className="form-hint">Zoom preenche a tela; Enquadrar adiciona bordas e logo.</p>
                 </div>
               </div>
               <div className="form-group">
@@ -866,6 +897,11 @@ export default function IntroOutro() {
                 Ao enviar um novo logo, o sistema remove automaticamente os logos anteriores desta brand.
               </p>
             )}
+            {(assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') && (
+              <p className="form-hint">
+                Modelo de capa sobreposto ao frame. PNG com transparência. Dimensões: Thumb Shorts 1080×1920 px, Thumb Longs 1920×1080 px. O título é desenhado por cima na faixa inferior.
+              </p>
+            )}
             <form onSubmit={handleAdd}>
               <div className="form-row">
                 <div className="form-group">
@@ -887,10 +923,10 @@ export default function IntroOutro() {
                 </div>
               </div>
               <div className="form-group">
-                <label>Arquivo {assetType === 'LOGO' ? '(imagem PNG/JPG)' : '(vídeo ou imagem)'}</label>
+                <label>Arquivo {(assetType === 'LOGO' || assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') ? '(imagem PNG/JPG)' : '(vídeo ou imagem)'}</label>
                 <input
                   type="file"
-                  accept={assetType === 'LOGO' ? 'image/*' : 'video/*,image/*'}
+                  accept={(assetType === 'LOGO' || assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') ? 'image/*' : 'video/*,image/*'}
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                   required
                 />

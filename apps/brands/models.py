@@ -175,6 +175,12 @@ class Brand(models.Model):
         blank=True,
         help_text="Horários fixos de vídeos longos por dia (ex: ['20:00']). Obrigatório para agendar longos.",
     )
+    vertical_mode = models.CharField(
+        max_length=20,
+        choices=[("zoom_crop", "Zoom e corte"), ("frame_center", "Enquadrar e centralizar")],
+        default="zoom_crop",
+        help_text="Modo de reenquadramento vertical para shorts (16:9 → 9:16). Zoom preenche a tela; Enquadrar adiciona bordas e logo.",
+    )
 
     class Meta:
         constraints = [
@@ -330,6 +336,8 @@ class BrandAsset(models.Model):
         ("OUTRO", "Outro vídeo"),
         ("CTA", "CTA vídeo/imagem"),
         ("ANIMATION", "Animação overlay (PNG/GIF com transparência)"),
+        ("THUMB_SHORT", "Thumb Shorts"),
+        ("THUMB_LONG", "Thumb Longs"),
     ]
 
     brand = models.ForeignKey(Brand, on_delete=models.CASCADE, related_name="assets")

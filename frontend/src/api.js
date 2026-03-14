@@ -684,7 +684,7 @@ export async function updateAutoCutCorte(id, { needs_subtitle, user_wants_finali
 
 export async function finalizarAutoCutJob(analysisId, {
   subtitle_style: subtitleStyle = {},
-  vertical_mode: verticalMode = 'frame_center',
+  vertical_mode: verticalMode = 'zoom_crop',
   background_color: backgroundColor = '#000000',
   custom_text: customText = '',
   font_size_title: fontSizeTitle,

@@ -809,8 +809,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             return
         # Finaliza no mesmo fluxo para garantir que o job seja concluído
         # (cortes finalizados + inventário) antes do próximo job pesado.
+        brand = getattr(analysis, "brand", None)
+        vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
         finalizar_auto_cut_task.run(
             analysis.id,
+            vertical_mode=vert_mode,
             horizontal_insert_logo=True,
             horizontal_logo_x=20,
             horizontal_logo_y=20,

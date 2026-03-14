@@ -263,13 +263,38 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 except Exception:
                     pass
 
-            # Faixa inferior fixa em 20% da altura da thumbnail.
+            # Modelo de capa (Thumb Shorts ou Thumb Longs) - sobrepõe ao frame
+            thumb_asset_type = "THUMB_SHORT" if is_short else "THUMB_LONG"
+            thumb_asset = (
+                BrandAsset.objects.filter(brand=brand, asset_type=thumb_asset_type)
+                .order_by("id")
+                .first()
+                if brand and getattr(brand, "id", None)
+                else None
+            )
+            has_thumb_model = thumb_asset and thumb_asset.file
+
             rect_h = max(1, int(h * 0.20))
             rect_w = w
             rect_x1 = 0
             rect_y1 = h - rect_h
             rect_x2 = rect_x1 + rect_w
             rect_y2 = h
+
+            if has_thumb_model:
+                try:
+                    overlay_img = Image.open(thumb_asset.file.path).convert("RGBA")
+                    overlay_resized = overlay_img.resize((w, h), Image.Resampling.LANCZOS)
+                    img_rgba = img.convert("RGBA")
+                    img = Image.alpha_composite(img_rgba, overlay_resized).convert("RGB")
+                    draw = ImageDraw.Draw(img)
+                except Exception as e:
+                    logger.warning("[THUMB] Falha ao aplicar modelo %s: %s", thumb_asset_type, e)
+                    has_thumb_model = False
+
+            if not has_thumb_model:
+                # Faixa inferior fixa em 20% da altura (fallback quando não há modelo)
+                draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], fill=band_color)
 
             # Texto totalmente contido na faixa (quebra + redução de fonte).
             text_padding_x = max(20, int(w * 0.03))
@@ -287,8 +312,6 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 initial_font_size=initial_font_size,
                 min_font_size=min_font_size,
             )
-
-            draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], fill=band_color)
 
             line_heights = []
             for ln in lines:
