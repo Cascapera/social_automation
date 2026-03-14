@@ -870,8 +870,10 @@ def finalizar_auto_cut_task(
         return
 
     style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
-    # Shorts: subir legendas 10% do frame para não ficarem atrás dos botões do YouTube
-    style["margin_v"] = style.get("margin_v", 20) + int(1920 * 0.10)  # 1920 = altura típica vertical
+    # Shorts: legendas na parte inferior (acima dos botões do YouTube), não no topo
+    # MarginV = distância da borda inferior. ~120-150px mantém na área inferior visível.
+    style["position"] = "bottom"
+    style["margin_v"] = style.get("margin_v", 140)
     vert_mode = vertical_mode or "zoom_crop"
     bg_color = (background_color or "#000000").strip()
     link_text = (custom_text or "").strip()

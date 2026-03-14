@@ -316,10 +316,10 @@ def reformat_video_vertical(
                 inputs += ["-i", str(logo_path)]
                 logo_idx = next_idx
                 next_idx += 1
-                # Logo centralizado entre topo do frame e topo do vídeo (~140px)
+                # Logo canto sup esquerdo: 80x80 px, opacidade 80%, 40px margem topo e esquerda
                 filter_parts.append(
-                    f"[{logo_idx}:v]scale=-1:200,format=rgba[logo];"
-                    f"{current}[logo]overlay=(W-w)/2:140:format=auto[v1]"
+                    f"[{logo_idx}:v]scale=80:80:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=0.8[logo];"
+                    f"{current}[logo]overlay=40:40:format=auto[v1]"
                 )
                 current = "[v1]"
 
