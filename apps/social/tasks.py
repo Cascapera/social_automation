@@ -12,7 +12,7 @@ from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
-from apps.brands.models import Factory, BrandYouTubeCredential
+from apps.brands.models import Brand, Factory, BrandSocialAccount, BrandYouTubeCredential
 from apps.jobs.models import (
     ScheduledPost,
     FactoryPostingSchedule,
@@ -552,6 +552,86 @@ def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str
 
 
 UPLOAD_INTERVAL_SECONDS = 60  # 1 vídeo por minuto na fila de envio
+THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer após último vídeo antes de subir capas
+
+
+@shared_task
+def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None = None):
+    """
+    Sobe capas dos vídeos YouTube de uma brand após todos os vídeos terem sido publicados.
+    Chamado após o último vídeo da brand (check_scheduled_posts_task agenda com countdown).
+    Retry: 60s entre tentativas, máx 2 retries (3 tentativas no total) por vídeo.
+    post_ids: IDs dos posts da batch (opcional; se vazio, usa todos DONE da brand).
+    """
+    try:
+        brand = Brand.objects.get(id=brand_id)
+    except Brand.DoesNotExist:
+        logger.warning("[THUMB] Brand %s não encontrada para upload de capas", brand_id)
+        return {"brand_id": brand_id, "uploaded": 0, "skipped": 0, "errors": 0}
+
+    qs = ScheduledPost.objects.filter(
+        auto_cut_corte__isnull=False,
+    ).select_related("auto_cut_corte", "social_account", "factory_schedule")
+    if post_ids:
+        qs = qs.filter(id__in=post_ids)
+    else:
+        qs = qs.filter(
+            status="DONE",
+        ).filter(
+            Q(platforms__contains=["YT"]) | Q(platforms__contains=["YTB"]),
+        ).filter(Q(external_ids__has_key="YT") | Q(external_ids__has_key="YTB"))
+
+    posts = list(qs.order_by("scheduled_at", "id"))
+    to_upload = []
+    for p in posts:
+        b = _resolve_post_target_brand(p)
+        if b and b.id == brand_id:
+            if getattr(p.auto_cut_corte, "thumbnail", None):
+                video_id = str((p.external_ids or {}).get("YT") or (p.external_ids or {}).get("YTB") or "")
+                if video_id:
+                    to_upload.append((p, video_id))
+
+    if not to_upload:
+        return {"brand_id": brand_id, "uploaded": 0, "skipped": 0, "errors": 0}
+
+    account = BrandSocialAccount.objects.filter(
+        brand=brand,
+        platform__in=["YT", "YTB"],
+    ).order_by("id").first()
+    creds_list = _list_ordered_youtube_credentials(brand)
+    cred = creds_list[0] if creds_list else None
+    if not account and not cred:
+        logger.warning("[THUMB] Brand %s sem conta/credencial YouTube", brand_id)
+        return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
+
+    from apps.social.publishers import get_publisher
+    from apps.social.services.youtube_credentials import get_credentials
+    from googleapiclient.discovery import build
+
+    publisher = get_publisher("YT")
+    if not publisher:
+        return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
+
+    token_holder = cred if cred else account
+    if not token_holder.access_token and not token_holder.refresh_token:
+        logger.warning("[THUMB] Brand %s: conta/credencial sem tokens", brand_id)
+        return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
+
+    acc = account or SimpleNamespace(brand=brand, platform="YT", channel_id="")
+    creds = get_credentials(acc, youtube_credential=cred if cred else None)
+    youtube = build("youtube", "v3", credentials=creds)
+
+    uploaded = 0
+    errors = 0
+    for post, video_id in to_upload:
+        try:
+            if publisher.upload_thumbnail_for_post(youtube, video_id, post):
+                uploaded += 1
+        except Exception as e:
+            errors += 1
+            logger.warning("[THUMB] Falha ao subir capa video_id=%s: %s", video_id, e)
+
+    return {"brand_id": brand_id, "uploaded": uploaded, "skipped": len(to_upload) - uploaded - errors, "errors": errors}
 
 
 @shared_task
@@ -593,6 +673,7 @@ def check_scheduled_posts_task():
             "social_account__brand",
             "auto_cut_corte",
             "auto_cut_corte__analysis",
+            "factory_schedule",
         )
         .order_by("social_account__brand_id", "scheduled_at", "id")
     )
@@ -600,6 +681,30 @@ def check_scheduled_posts_task():
     for i, p in enumerate(posts):
         countdown = i * UPLOAD_INTERVAL_SECONDS
         post_to_platforms_task.apply_async(args=[p.id], countdown=countdown)
+
+    # Thumbnails: agendadas após último vídeo de cada brand (upload_thumbnails_after_batch_task
+    # é chamada ao concluir cada post; aqui garantimos o batch para posts do check).
+    brand_to_last_index: dict[int, int] = {}
+    brand_to_post_ids: dict[int, list[int]] = {}
+    for i, p in enumerate(posts):
+        brand = _resolve_post_target_brand(p)
+        if not brand:
+            continue
+        has_thumb = (
+            getattr(p, "auto_cut_corte_id", None)
+            and getattr(p.auto_cut_corte, "thumbnail", None)
+        )
+        if has_thumb and _platforms_are_youtube_only(p.platforms):
+            brand_to_last_index[brand.id] = i
+            brand_to_post_ids.setdefault(brand.id, []).append(p.id)
+    for brand_id, last_i in brand_to_last_index.items():
+        countdown = (last_i + 1) * UPLOAD_INTERVAL_SECONDS + THUMBNAIL_BATCH_DELAY_SEC
+        post_ids = brand_to_post_ids.get(brand_id, [])
+        upload_thumbnails_after_batch_task.apply_async(
+            args=[brand_id],
+            kwargs={"post_ids": post_ids},
+            countdown=countdown,
+        )
 
     return {
         "checked_due": due_posts.count(),
@@ -958,6 +1063,7 @@ def post_to_platforms_task(self, scheduled_post_id: int):
             "auto_cut_corte",
             "auto_cut_corte__analysis",
             "auto_cut_corte__suggestion",
+            "factory_schedule",
         ).get(id=scheduled_post_id)
     except ScheduledPost.DoesNotExist:
         return {"error": "ScheduledPost não encontrado"}
@@ -1343,4 +1449,16 @@ def post_to_platforms_task(self, scheduled_post_id: int):
     except Exception:
         pass
     _sync_factory_posting_schedule(post)
+
+    # Para posts manuais (retry, run_scheduled_posts_now): agenda upload de capa
+    if post.status == "DONE" and _platforms_are_youtube_only(post.platforms):
+        brand = _resolve_post_target_brand(post)
+        if brand and post.auto_cut_corte_id and getattr(post.auto_cut_corte, "thumbnail", None):
+            video_id = str((post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or "")
+            if video_id:
+                upload_thumbnails_after_batch_task.apply_async(
+                    args=[brand.id],
+                    kwargs={"post_ids": [post.id]},
+                    countdown=THUMBNAIL_BATCH_DELAY_SEC,
+                )
     return {"status": post.status, "errors": errors}

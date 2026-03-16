@@ -334,6 +334,13 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 cursor_y += ln_h + line_spacing
 
             img.save(out_path, format="JPEG", quality=92, optimize=True)
+            # YouTube limita thumbnail a 2MB; reduz qualidade se necessário.
+            YT_THUMB_MAX_BYTES = 2 * 1024 * 1024
+            if out_path.stat().st_size > YT_THUMB_MAX_BYTES:
+                for q in (85, 75, 65):
+                    img.save(out_path, format="JPEG", quality=q, optimize=True)
+                    if out_path.stat().st_size <= YT_THUMB_MAX_BYTES:
+                        break
 
             # Substitui thumbnail antiga, se existir.
             try:

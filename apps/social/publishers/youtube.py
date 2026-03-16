@@ -1,4 +1,5 @@
 """Publisher para YouTube (videos longos e Shorts)."""
+import logging
 import random
 import re
 import time
@@ -10,6 +11,8 @@ from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
@@ -130,17 +133,10 @@ class YouTubePublisher(BasePublisher):
                 retriable=True,
             ) from e
         video_id = response.get("id")
-        # Thumbnail é opcional: se existir no corte, tentamos aplicar.
-        thumb_warning = ""
-        try:
-            self._set_thumbnail_if_present(youtube, video_id, post)
-        except YouTubePublishError as e:
-            thumb_warning = str(e)
+        # Thumbnail é enviada em lote após todos os vídeos da brand (upload_thumbnails_after_batch_task).
         result = {"video_id": video_id, "platform": account.platform}
         if youtube_credential is not None:
             result["youtube_credential_id"] = youtube_credential.id
-        if thumb_warning:
-            result["warning"] = thumb_warning
         return result
 
     def _build_description(self, post: ScheduledPost | None) -> str:
@@ -198,34 +194,60 @@ class YouTubePublisher(BasePublisher):
             return f"{auto_part}\n\n\n{brand_extra}"[:5000]
         return auto_part[:5000]
 
-    def _set_thumbnail_if_present(self, youtube, video_id: str | None, post: ScheduledPost | None) -> None:
-        if not video_id or not post or not getattr(post, "auto_cut_corte_id", None):
-            return
+    THUMBNAIL_MAX_SIZE_BYTES = 2 * 1024 * 1024  # 2MB
+    THUMBNAIL_RETRY_DELAY_SEC = 60
+    THUMBNAIL_MAX_RETRIES = 2  # 3 tentativas no total
+
+    def upload_thumbnail_for_post(
+        self, youtube, video_id: str, post: ScheduledPost
+    ) -> bool:
+        """
+        Envia thumbnail para vídeo YouTube. Usado por upload_thumbnails_after_batch_task.
+        Retorna True se enviou, False se não há thumbnail, levanta exceção em erro.
+        """
+        if not video_id or not getattr(post, "auto_cut_corte_id", None):
+            return False
         corte = getattr(post, "auto_cut_corte", None)
         if not corte or not getattr(corte, "thumbnail", None):
-            return
+            return False
         thumb_path = Path(corte.thumbnail.path)
         if not thumb_path.exists():
             raise YouTubePublishError(
                 f"Thumbnail não encontrada: {thumb_path}",
                 retriable=False,
             )
-        is_short = (getattr(corte, "format", "") or "").lower() == "vertical"
-        media = MediaFileUpload(str(thumb_path), mimetype="image/jpeg", resumable=False)
-        try:
-            youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
-        except HttpError as e:
-            err = self._http_error_to_publish_error(e)
-            ctx = " (Short)" if is_short else ""
-            # Não falha o upload do vídeo por erro de thumbnail, mas devolve rastreabilidade.
-            raise YouTubePublishError(
-                f"Thumbnail{ctx} falhou: {err}",
-                status_code=err.status_code,
-                reason=err.reason,
-                retriable=err.retriable,
-            ) from e
-        except Exception as e:
-            raise YouTubePublishError(f"Thumbnail falhou: {e}", retriable=False) from e
+        size_bytes = thumb_path.stat().st_size
+        if size_bytes > self.THUMBNAIL_MAX_SIZE_BYTES:
+            logger.warning(
+                "[YT] Thumbnail %.1fMB excede 2MB (corte=%s)",
+                size_bytes / (1024 * 1024),
+                getattr(corte, "id", "?"),
+            )
+        for attempt in range(self.THUMBNAIL_MAX_RETRIES + 1):
+            media = MediaFileUpload(str(thumb_path), mimetype="image/jpeg", resumable=False)
+            try:
+                youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
+                logger.info("[YT] Thumbnail aplicada (video_id=%s)", video_id)
+                return True
+            except HttpError as e:
+                if attempt < self.THUMBNAIL_MAX_RETRIES:
+                    logger.info(
+                        "[YT] Thumbnail falhou (tentativa %d/%d), aguardando %ds: %s",
+                        attempt + 1,
+                        self.THUMBNAIL_MAX_RETRIES + 1,
+                        self.THUMBNAIL_RETRY_DELAY_SEC,
+                        e,
+                    )
+                    time.sleep(self.THUMBNAIL_RETRY_DELAY_SEC)
+                    continue
+                err = self._http_error_to_publish_error(e)
+                raise YouTubePublishError(
+                    f"Thumbnail falhou após {self.THUMBNAIL_MAX_RETRIES + 1} tentativas: {err}",
+                    status_code=err.status_code,
+                    reason=err.reason,
+                    retriable=err.retriable,
+                ) from e
+        return False
 
     def _build_language_data(self, post: ScheduledPost | None) -> dict:
         """
