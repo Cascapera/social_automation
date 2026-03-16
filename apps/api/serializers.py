@@ -171,10 +171,31 @@ class BrandSocialAccountSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "brand", "platform", "channel_id", "account_name", "created_at"]
 
 
+def _needs_reconnection(last_error: str) -> bool:
+    """Indica se o erro exige refazer a conexão OAuth."""
+    if not last_error:
+        return False
+    msg = (last_error or "").lower()
+    keywords = [
+        "invalid_grant",
+        "token_expired",
+        "unauthorized_client",
+        "refresh_token",
+        "reconecte",
+        "sem refresh_token",
+        "sem tokens",
+        "credencial ignorada",
+        "oauth não configurado",
+        "oauth nao configurado",
+    ]
+    return any(k in msg for k in keywords)
+
+
 class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
     client_secret = serializers.CharField(required=False, allow_blank=True, write_only=True)
     client_secret_configured = serializers.SerializerMethodField(read_only=True)
     is_connected = serializers.SerializerMethodField(read_only=True)
+    needs_reconnection = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = BrandYouTubeCredential
@@ -193,6 +214,7 @@ class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
             "account_name",
             "quota_exceeded_until",
             "last_error",
+            "needs_reconnection",
             "is_connected",
             "created_at",
             "updated_at",
@@ -202,6 +224,7 @@ class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
             "account_name",
             "quota_exceeded_until",
             "last_error",
+            "needs_reconnection",
             "is_connected",
             "created_at",
             "updated_at",
@@ -212,6 +235,9 @@ class BrandYouTubeCredentialSerializer(serializers.ModelSerializer):
 
     def get_is_connected(self, obj):
         return bool((obj.refresh_token or "").strip() and (obj.channel_id or "").strip())
+
+    def get_needs_reconnection(self, obj):
+        return _needs_reconnection(getattr(obj, "last_error", "") or "")
 
     def validate_order_index(self, value):
         if value is None:

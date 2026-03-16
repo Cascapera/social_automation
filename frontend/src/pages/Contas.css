@@ -201,3 +201,50 @@
   border-radius: 4px;
   cursor: pointer;
 }
+
+/* Log de erros das credenciais */
+.credential-errors-block {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border, #ddd);
+}
+
+.credential-errors-block h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+  color: var(--text-muted, #666);
+}
+
+.credential-error-card {
+  background: rgba(179, 116, 0, 0.08);
+  border: 1px solid rgba(179, 116, 0, 0.4);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.credential-error-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.credential-error-badge {
+  font-size: 0.8rem;
+  color: var(--text-muted, #666);
+}
+
+.credential-error-msg {
+  font-size: 0.9rem;
+  color: var(--text, #333);
+  word-break: break-word;
+}
+
+.credential-error-warn {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #b37400;
+  font-weight: 500;
+}

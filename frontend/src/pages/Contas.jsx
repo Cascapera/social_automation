@@ -226,6 +226,33 @@ export default function Contas() {
           </p>
         )}
 
+        {youtubeCredentials.some((c) => (c.last_error || '').trim()) && (
+          <div className="credential-errors-block">
+            <h3>Log de erros (última postagem)</h3>
+            <p className="section-desc">
+              Erros ocorridos ao publicar. O sistema tentou as outras credenciais automaticamente.
+            </p>
+            {youtubeCredentials
+              .filter((c) => (c.last_error || '').trim())
+              .map((cred) => (
+                <div key={cred.id} className="credential-error-card">
+                  <div className="credential-error-head">
+                    <strong>{cred.label || `API #${cred.order_index}`}</strong>
+                    <span className="credential-error-badge">
+                      {cred.account_name || cred.channel_id || 'Canal'}
+                    </span>
+                  </div>
+                  <div className="credential-error-msg">{cred.last_error}</div>
+                  {cred.needs_reconnection && (
+                    <div className="credential-error-warn">
+                      ⚠️ Necessário refazer conexão para o próximo ciclo de postagem.
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        )}
+
       </section>
 
       {chooseChannel && (

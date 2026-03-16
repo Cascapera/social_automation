@@ -1128,7 +1128,9 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                 continue
 
             published = False
-            hard_failed = False
+            last_exception = None
+            last_is_retriable = False
+            last_reason = ""
             for yt_cred in available_credentials:
                 try:
                     result = publisher.publish(
@@ -1154,6 +1156,9 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                     reason = str(getattr(e, "reason", "") or "").strip()
                     is_retriable = bool(getattr(e, "retriable", False))
                     msg = str(e)
+                    last_exception = e
+                    last_is_retriable = is_retriable
+                    last_reason = reason
                     if not is_retriable and (
                         "sem tokens" in msg.lower()
                         or "oauth do youtube não configurado" in msg.lower()
@@ -1168,21 +1173,26 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                         yt_cred.last_error = f"quotaExceeded: {e}"
                         yt_cred.save(update_fields=["quota_exceeded_until", "last_error", "updated_at"])
                         continue
-                    if is_retriable:
-                        retryable_errors.append(
-                            {
-                                "message": f"{platform}: {e}",
-                                "retry_after_seconds": getattr(e, "retry_after_seconds", None),
-                                "reason": reason,
-                            }
-                        )
-                    else:
-                        errors.append(f"{platform}: {e}")
-                    hard_failed = True
-                    break
+                    # Qualquer outro erro: salva na credencial e tenta a próxima
+                    yt_cred.last_error = f"{reason or 'erro'}: {msg}"[:500]
+                    yt_cred.save(update_fields=["last_error", "updated_at"])
+                    continue
 
-            if published or hard_failed:
+            if published:
                 continue
+            # Todas as credenciais falharam: agenda retry ou marca erro
+            if last_exception is not None:
+                if last_is_retriable:
+                    retryable_errors.append(
+                        {
+                            "message": f"{platform}: {last_exception}",
+                            "retry_after_seconds": getattr(last_exception, "retry_after_seconds", None),
+                            "reason": last_reason,
+                        }
+                    )
+                else:
+                    errors.append(f"{platform}: {last_exception}")
+            continue
 
             next_available_at = min(
                 [cred.quota_exceeded_until for cred in ordered_youtube_credentials if cred.quota_exceeded_until]
