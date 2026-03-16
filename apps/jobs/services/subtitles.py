@@ -10,7 +10,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-from apps.jobs.services.ffmpeg import run_cmd
+from apps.jobs.services.ffmpeg import ffprobe_video_info, run_cmd
 
 # Fonte com suporte a emojis (Windows). Linux: Noto Color Emoji. macOS: Apple Color Emoji
 DEFAULT_FONT_EMOJI = "Segoe UI Emoji"
@@ -309,8 +309,23 @@ def build_ffmpeg_force_style(style: dict | None) -> str:
     )
 
 
+# Resolução padrão do ASS quando SRT é convertido (libass usa 384x288)
+ASS_DEFAULT_PLAYRES_Y = 288
+
+
 def burn_subtitles(video_path: Path, srt_path: Path, output_path: Path, style: dict | None = None) -> None:
     """Queima legendas no vídeo usando FFmpeg."""
+    style = dict(style or {})
+    # MarginV no ASS usa coordenadas da resolução padrão (288px altura).
+    # Escalar para a altura real do vídeo evita legenda no meio em shorts (1080x1920).
+    try:
+        info = ffprobe_video_info(video_path)
+        video_h = info.get("height") or 1080
+        margin_desired = style.get("margin_v", 140)
+        margin_ass = max(10, int(margin_desired * ASS_DEFAULT_PLAYRES_Y / video_h))
+        style["margin_v"] = margin_ass
+    except Exception:
+        pass  # mantém style original em caso de erro
     force_style = build_ffmpeg_force_style(style)
     # Path para FFmpeg: no Windows, usar / e escapar :
     srt_str = str(srt_path.resolve()).replace("\\", "/")
