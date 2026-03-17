@@ -1341,6 +1341,9 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         thumbnail_stroke_color = (request.data.get("thumbnail_stroke_color") or "#FFEBDC").strip()
         shorts_target_raw = request.data.get("shorts_target", 12)
         longs_target_raw = request.data.get("longs_target", 3)
+        vertical_mode = (request.data.get("vertical_mode") or "zoom_crop").strip().lower()
+        if vertical_mode not in ("zoom_crop", "frame_center"):
+            vertical_mode = "zoom_crop"
         if prompt_version not in ("viral", "educational", "viral_en", "educational_en", "viral_translate"):
             prompt_version = "viral"
         if thumbnail_font not in ("anton", "bebas", "montserrat", "impact"):
@@ -1408,6 +1411,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             thumbnail_stroke_color=thumbnail_stroke_color.upper(),
             shorts_target=shorts_target,
             longs_target=longs_target,
+            vertical_mode=vertical_mode,
         )
         analysis.save()
 
@@ -1428,6 +1432,48 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
 
         serializer = AutoCutAnalysisSerializer(analysis, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="upload-ready-cuts")
+    def upload_ready_cuts(self, request):
+        """
+        Upload de cortes prontos: vídeos já editados.
+        Aceita files[] (múltiplos) e brand_id. Cria 1 job por arquivo com is_ready_cuts=True.
+        """
+        files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        brand_id = request.data.get("brand") or request.POST.get("brand")
+        vertical_mode = (request.data.get("vertical_mode") or request.POST.get("vertical_mode") or "zoom_crop").strip().lower()
+        if vertical_mode not in ("zoom_crop", "frame_center"):
+            vertical_mode = "zoom_crop"
+        if not brand_id:
+            return Response(
+                {"error": "Informe brand_id (obrigatório)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not files:
+            return Response(
+                {"error": "Envie pelo menos um arquivo de vídeo (files ou file)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from apps.auto_cuts.models import AutoCutAnalysis
+        from apps.auto_cuts.tasks import analyze_auto_cuts_task
+
+        created = []
+        for i, file_obj in enumerate(files):
+            name = getattr(file_obj, "name", "") or f"Corte pronto {i + 1}"
+            job_name = Path(name).stem if name else f"Corte pronto {i + 1}"
+            analysis = AutoCutAnalysis(
+                user=request.user,
+                brand_id=brand_id,
+                target_brand_id=brand_id,
+                file=file_obj,
+                name=job_name,
+                is_ready_cuts=True,
+                vertical_mode=vertical_mode,
+            )
+            analysis.save()
+            analyze_auto_cuts_task.delay(analysis.id)
+            created.append(AutoCutAnalysisSerializer(analysis, context={"request": request}).data)
+        return Response({"created": created, "count": len(created)}, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="reset-stuck")
     def reset_stuck(self, request):

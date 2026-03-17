@@ -140,6 +140,17 @@ class AutoCutAnalysis(models.Model):
         help_text="Segmentos Whisper [{start, end, text}]",
     )
     error = models.TextField(blank=True, default="")
+    is_ready_cuts = models.BooleanField(
+        default=False,
+        help_text="Vídeo(s) já editados: transcreve, LLM retorna só metadata (title, virality, thumbnail), finaliza. Sem extração de segmentos.",
+    )
+    vertical_mode = models.CharField(
+        max_length=20,
+        choices=[("zoom_crop", "Zoom e corte"), ("frame_center", "Enquadrar e centralizar")],
+        default="zoom_crop",
+        blank=True,
+        help_text="Modo de reenquadramento vertical para shorts (16:9 → 9:16). Zoom preenche a tela; Enquadrar adiciona bordas e logo.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

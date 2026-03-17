@@ -26,7 +26,7 @@ from apps.auto_cuts.services.video_chunks import (
     cleanup_cortes_processo,
     get_chunk_boundaries,
 )
-from apps.auto_cuts.services.grok import analyze_chunks_in_one_request
+from apps.auto_cuts.services.grok import analyze_chunks_in_one_request, analyze_ready_cut_metadata
 
 # Vídeos maiores que isso usam transcrição por chunks (evita crash de memória)
 CHUNKED_TRANSCRIPTION_THRESHOLD_SEC = 10 * 60  # 10 min
@@ -329,6 +329,106 @@ def _is_factory_processing_paused(analysis) -> bool:
     return bool(factory and getattr(factory, "processing_paused", False))
 
 
+def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> None:
+    """
+    Fluxo para cortes prontos: vídeo já editado.
+    Transcreve, chama LLM para metadata (título, thumbnail), copia vídeo sem extrair,
+    gera thumbnail e finaliza.
+    """
+    import shutil
+    from apps.auto_cuts.models import AutoCutSuggestion
+    from apps.jobs.services.ffmpeg import seconds_to_tc
+
+    analysis.status = "analyzing"
+    analysis.progress_message = "Analisando metadata com IA..."
+    analysis.progress = 20
+    analysis.save(update_fields=["status", "progress_message", "progress"])
+
+    transcript = analysis.transcript or ""
+    metadata = analyze_ready_cut_metadata(transcript, duration_sec)
+    title = metadata.get("title") or "Vídeo"
+    # LLM retorna 1-10; normalizamos para 0-100 (escala usada no resto do sistema)
+    raw_score = metadata.get("virality_score") or 5
+    virality_score = max(0, min(100, int(float(raw_score)) * 10)) if raw_score is not None else 50
+    raw_data = {
+        "thumbnail_moment_timestamp": metadata.get("thumbnail_moment_timestamp") or "00:00",
+        "thumbnail_text": metadata.get("thumbnail_text") or "Vídeo",
+    }
+
+    analysis.progress_message = "Criando corte e thumbnail..."
+    analysis.progress = 70
+    analysis.save(update_fields=["progress_message", "progress"])
+
+    video_path = Path(analysis.video_file.path)
+    media_root = Path(settings.MEDIA_ROOT)
+    cortes_dir = media_root / "auto_cuts" / "cortes"
+    cortes_dir.mkdir(parents=True, exist_ok=True)
+
+    AutoCutSuggestion.objects.filter(analysis=analysis).delete()
+    AutoCutCorte = __import__("apps.auto_cuts.models", fromlist=["AutoCutCorte"]).AutoCutCorte
+    from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
+
+    end_tc = seconds_to_tc(duration_sec)
+    sug = AutoCutSuggestion.objects.create(
+        analysis=analysis,
+        cut_type="short",
+        start_tc="00:00",
+        end_tc=end_tc,
+        title=title,
+        reason="",
+        hook="",
+        virality_score=virality_score,
+        theme_category="",
+        source_asset_id=f"analysis:{analysis.id}",
+        rank=1,
+        duration_seconds=duration_sec,
+        raw_data=raw_data,
+    )
+
+    out_path = cortes_dir / f"job_{analysis.id}_sug_{sug.id}.mp4"
+    shutil.copy(video_path, out_path)
+
+    transcript_segments = analysis.transcript_segments or []
+    subtitle_segments = [
+        {"start": s.get("start", 0), "end": s.get("end", 0), "text": (s.get("text") or "").strip()}
+        for s in transcript_segments
+        if (s.get("text") or "").strip()
+    ]
+
+    corte = AutoCutCorte.objects.create(
+        analysis=analysis,
+        suggestion=sug,
+        format="vertical",
+        needs_subtitle=True,
+        user_wants_finalize=True,
+        is_finalized=False,
+        subtitle_segments=subtitle_segments,
+    )
+    with open(out_path, "rb") as f:
+        corte.file.save(out_path.name, File(f), save=True)
+
+    target_brand = _resolve_target_brand_for_suggestion(analysis, sug)
+    generate_auto_thumbnail(corte, target_brand=target_brand)
+
+    analysis.status = "done"
+    analysis.progress_message = "Concluído"
+    analysis.progress = 100
+    analysis.save(update_fields=["status", "progress_message", "progress"])
+
+    vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip() or None
+    if not vert_mode:
+        brand = getattr(analysis, "brand", None)
+        vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
+    finalizar_auto_cut_task.run(
+        analysis.id,
+        vertical_mode=vert_mode,
+        horizontal_insert_logo=True,
+        horizontal_logo_x=20,
+        horizontal_logo_y=20,
+    )
+    logger.info("[FLUXO] Ready cuts concluído com sucesso.")
+
+
 def _is_brand_only(analysis) -> bool:
     """True quando target_brand está definido ou a brand não tem factory (conteúdo exclusivo da marca)."""
     if getattr(analysis, "target_brand_id", None):
@@ -491,6 +591,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             analysis.status = "error"
             analysis.error = "Transcrição vazia."
             analysis.save(update_fields=["status", "error"])
+            return
+
+        # Fluxo "cortes prontos": vídeo já editado, só precisa de metadata (título, thumbnail)
+        if getattr(analysis, "is_ready_cuts", False):
+            _process_ready_cuts_flow(analysis, duration_sec, segments)
             return
 
         logger.info("[FLUXO] Iniciando chunk_transcript (%d segmentos)...", len(segments))
@@ -836,8 +941,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             return
         # Finaliza no mesmo fluxo para garantir que o job seja concluído
         # (cortes finalizados + inventário) antes do próximo job pesado.
-        brand = getattr(analysis, "brand", None)
-        vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
+        vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip() or None
+        if not vert_mode:
+            brand = getattr(analysis, "brand", None)
+            vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
         finalizar_auto_cut_task.run(
             analysis.id,
             vertical_mode=vert_mode,

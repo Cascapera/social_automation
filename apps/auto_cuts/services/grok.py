@@ -960,3 +960,54 @@ def analyze_chunks_in_one_request(
     )
     _save_grok_response_json(parsed, analysis_id=analysis_id)
     return parsed
+
+
+READY_CUT_SYSTEM_PROMPT = """Você é um editor de conteúdo para redes sociais. Receberá a transcrição de um vídeo curto já editado (corte pronto).
+
+Sua tarefa: retornar APENAS metadados para publicação:
+- virality_score: 1-10 (potencial de viralização)
+- title: título chamativo para YouTube/Shorts (45-100 caracteres, 1-3 emojis)
+- thumbnail_moment_timestamp: timestamp no formato MM:SS do melhor momento para capa (ex: "00:15")
+- thumbnail_text: 2-4 palavras curtas para a capa (ex: "SEGREDO REVELADO")
+
+Responda SOMENTE com JSON válido, sem markdown:
+{"virality_score": 8, "title": "Título com emoji 🎯", "thumbnail_moment_timestamp": "00:12", "thumbnail_text": "MOMENTO CHAVE"}"""
+
+
+def analyze_ready_cut_metadata(
+    transcript: str,
+    duration_seconds: float,
+    api_key: str | None = None,
+) -> dict:
+    """
+    Analisa vídeo já editado (corte pronto). Retorna apenas:
+    virality_score, title, thumbnail_moment_timestamp, thumbnail_text.
+    """
+    if not (transcript or "").strip():
+        return {
+            "virality_score": 5,
+            "title": "Vídeo",
+            "thumbnail_moment_timestamp": "00:00",
+            "thumbnail_text": "Vídeo",
+        }
+    duration_str = f"{int(duration_seconds // 60)}min {int(duration_seconds % 60)}s"
+    user = f"""Transcrição do vídeo (duração: {duration_str}):
+
+{transcript[:8000]}
+
+Retorne JSON com: virality_score (1-10), title, thumbnail_moment_timestamp (MM:SS), thumbnail_text (2-4 palavras)."""
+    content = call_grok_chat(READY_CUT_SYSTEM_PROMPT, user, api_key)
+    parsed = _extract_json(content)
+    if not isinstance(parsed, dict):
+        return {
+            "virality_score": 5,
+            "title": "Vídeo",
+            "thumbnail_moment_timestamp": "00:00",
+            "thumbnail_text": "Vídeo",
+        }
+    return {
+        "virality_score": max(1, min(10, int(parsed.get("virality_score") or 5))),
+        "title": (parsed.get("title") or "Vídeo")[:200],
+        "thumbnail_moment_timestamp": (parsed.get("thumbnail_moment_timestamp") or "00:00").strip()[:16],
+        "thumbnail_text": (parsed.get("thumbnail_text") or "Vídeo")[:80],
+    }

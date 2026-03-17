@@ -613,6 +613,28 @@ export async function deleteStuckAutoCuts(brandId) {
   return apiRequest(url, { method: 'POST' })
 }
 
+export async function createReadyCutsAnalysis({ files, brandId, verticalMode = 'zoom_crop' }) {
+  const formData = new FormData()
+  if (files?.length) {
+    for (const f of files) formData.append('files', f)
+  } else if (files?.[0]) {
+    formData.append('file', files[0])
+  }
+  if (brandId) formData.append('brand', brandId)
+  formData.append('vertical_mode', verticalMode || 'zoom_crop')
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/auto-cuts/upload-ready-cuts/`, {
+    method: 'POST',
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    body: formData,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || err.detail || `Erro ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function createAutoCutAnalysis({
   file,
   sourceId,
@@ -630,6 +652,7 @@ export async function createAutoCutAnalysis({
   thumbnailStrokeColor,
   shortsTarget,
   longsTarget,
+  verticalMode = 'zoom_crop',
 }) {
   const formData = new FormData()
   if (file) formData.append('file', file)
@@ -638,6 +661,7 @@ export async function createAutoCutAnalysis({
   if (brandId) formData.append('brand', brandId)
   if (targetBrandId) formData.append('target_brand', targetBrandId)
   formData.append('distribution_mode', distributionMode || 'theme')
+  formData.append('vertical_mode', verticalMode || 'zoom_crop')
   if (name) formData.append('name', name)
   if (assunto) formData.append('assunto', assunto)
   if (convidados) formData.append('convidados', convidados)

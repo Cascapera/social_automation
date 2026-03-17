@@ -4,6 +4,7 @@ import {
   getAutoCutAnalyses,
   getAutoCutAnalysis,
   createAutoCutAnalysis,
+  createReadyCutsAnalysis,
   getFactory,
   updateFactory,
   getSources,
@@ -109,6 +110,10 @@ export default function CortesAutomaticos() {
   const [thumbnailModal, setThumbnailModal] = useState(null)
   const [factoryInfo, setFactoryInfo] = useState(null)
   const [togglingFactoryProcessing, setTogglingFactoryProcessing] = useState(false)
+  const [readyCutsFiles, setReadyCutsFiles] = useState([])
+  const [readyCutsBrandId, setReadyCutsBrandId] = useState('')
+  const [creatingReadyCuts, setCreatingReadyCuts] = useState(false)
+  const [jobVerticalMode, setJobVerticalMode] = useState('zoom_crop')
 
   const selectedAnalysis = analyses.find((a) => a.id === expandedId)
   const factoryBrands = viewMode === 'factory' && factoryId
@@ -335,6 +340,7 @@ export default function CortesAutomaticos() {
         thumbnailStrokeColor: effectiveThumbnailStrokeColor || undefined,
         shortsTarget,
         longsTarget,
+        verticalMode: jobVerticalMode,
       })
       setAnalyses((prev) => [a, ...prev])
       setExpandedId(a.id)
@@ -356,6 +362,32 @@ export default function CortesAutomaticos() {
       setError(e.message)
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function handleUploadReadyCuts(e) {
+    e.preventDefault()
+    const effectiveBrandId = viewMode === 'factory' ? readyCutsBrandId : activeBrandId
+    if (!effectiveBrandId) {
+      setError(viewMode === 'factory' ? 'Selecione uma Brand da factory.' : 'Selecione uma marca no menu à esquerda.')
+      return
+    }
+    if (!readyCutsFiles?.length) {
+      setError('Selecione pelo menos um arquivo de vídeo.')
+      return
+    }
+    setError('')
+    setCreatingReadyCuts(true)
+    try {
+      const { created } = await createReadyCutsAnalysis({ files: readyCutsFiles, brandId: effectiveBrandId, verticalMode: jobVerticalMode })
+      setAnalyses((prev) => [...created, ...prev])
+      if (created?.[0]?.id) setExpandedId(created[0].id)
+      setReadyCutsFiles([])
+      loadAnalysesForView()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreatingReadyCuts(false)
     }
   }
 
@@ -674,6 +706,57 @@ export default function CortesAutomaticos() {
         </section>
       )}
 
+      {((viewMode === 'factory' && factoryId) || (viewMode === 'brand' && brandId && !selectedBrand?.factory)) && (
+        <section className="section">
+          <h2>Upload cortes prontos</h2>
+          <p className="form-hint" style={{ marginBottom: 12 }}>
+            Vídeos já editados: envie os arquivos e a IA gera título, thumbnail e legenda automaticamente.
+          </p>
+          <form onSubmit={handleUploadReadyCuts} className="auto-cut-form">
+            <div className="form-group">
+              <label>Arquivos de vídeo</label>
+              <input
+                type="file"
+                accept="video/*"
+                multiple
+                onChange={(e) => setReadyCutsFiles(Array.from(e.target.files || []))}
+              />
+              {readyCutsFiles?.length > 0 && (
+                <span className="form-hint">{readyCutsFiles.length} arquivo(s) selecionado(s)</span>
+              )}
+            </div>
+            {viewMode === 'factory' && factoryId && (
+              <div className="form-group">
+                <label>Brand de destino</label>
+                <select
+                  value={readyCutsBrandId}
+                  onChange={(e) => setReadyCutsBrandId(e.target.value)}
+                >
+                  <option value="">Selecione uma brand</option>
+                  {factoryBrands.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name || `Brand #${b.id}`}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="form-group">
+              <label>Formato final dos shorts</label>
+              <select
+                value={jobVerticalMode}
+                onChange={(e) => setJobVerticalMode(e.target.value)}
+              >
+                <option value="zoom_crop">Zoom e corte</option>
+                <option value="frame_center">Enquadrar e centralizar</option>
+              </select>
+              <span className="form-hint">Zoom: preenche a tela. Enquadrar: vídeo centralizado com bordas e logo.</span>
+            </div>
+            <button type="submit" disabled={creatingReadyCuts || !readyCutsFiles?.length || (viewMode === 'factory' && !readyCutsBrandId)}>
+              {creatingReadyCuts ? 'Enviando...' : 'Enviar cortes prontos'}
+            </button>
+          </form>
+        </section>
+      )}
+
       <section className="section">
         <h2>Gerar cortes</h2>
         <form onSubmit={handleGenerate} className="auto-cut-form">
@@ -782,6 +865,17 @@ export default function CortesAutomaticos() {
               <option value="viral_translate">Viral Translate - EN to PT</option>
             </select>
             <span className="form-hint">PT: transcrição e títulos em português. EN: transcrição e títulos em inglês. Viral Translate: vídeo em EN, legendas em PT.</span>
+          </div>
+          <div className="form-group">
+            <label>Formato final dos shorts</label>
+            <select
+              value={jobVerticalMode}
+              onChange={(e) => setJobVerticalMode(e.target.value)}
+            >
+              <option value="zoom_crop">Zoom e corte</option>
+              <option value="frame_center">Enquadrar e centralizar</option>
+            </select>
+            <span className="form-hint">Zoom: preenche a tela. Enquadrar: vídeo centralizado com bordas e logo.</span>
           </div>
           {viewMode === 'factory' ? (
             <div className="form-group">
