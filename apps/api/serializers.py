@@ -51,6 +51,7 @@ class FactorySerializer(serializers.ModelSerializer):
             "auto_fetch_longs_target",
             "auto_fetch_min_duration_minutes",
             "auto_fetch_min_views",
+            "send_thumbnail",
             "has_youtube_check_credential",
             "created_at",
             "updated_at",
@@ -120,6 +121,12 @@ class BrandSerializer(serializers.ModelSerializer):
             "short_slot_times",
             "long_slot_times",
             "vertical_mode",
+            "upload_post_tiktok_enabled",
+            "upload_post_tiktok_extra_description",
+            "upload_post_x_enabled",
+            "upload_post_x_extra_description",
+            "upload_post_instagram_enabled",
+            "upload_post_instagram_extra_description",
         ]
         extra_kwargs = {"slug": {"required": False}}
 

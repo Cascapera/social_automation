@@ -164,6 +164,8 @@ export default function Agendamento() {
   const [factoryWeekSchedules, setFactoryWeekSchedules] = useState([])
   const [dailyScheduleStartTime, setDailyScheduleStartTime] = useState('11:00')
   const [savingDailyScheduleTime, setSavingDailyScheduleTime] = useState(false)
+  const [sendThumbnail, setSendThumbnail] = useState(false)
+  const [savingSendThumbnail, setSavingSendThumbnail] = useState(false)
 
   useEffect(() => {
     if (brandId) {
@@ -199,6 +201,7 @@ export default function Agendamento() {
         const f = await getFactory(factoryId)
         setFactoryInfo(f)
         setDailyScheduleStartTime((f?.daily_schedule_start_time || '19:00').toString().slice(0, 5))
+        setSendThumbnail(!!f?.send_thumbnail)
       } catch {
         setFactoryInfo(null)
       }
@@ -222,6 +225,7 @@ export default function Agendamento() {
       const f = await getFactory(factoryId)
       setFactoryInfo(f)
       setDailyScheduleStartTime((f?.daily_schedule_start_time || '19:00').toString().slice(0, 5))
+      setSendThumbnail(!!f?.send_thumbnail)
     } catch {
       setFactoryInfo(null)
     }
@@ -444,6 +448,23 @@ export default function Agendamento() {
     }
   }
 
+  async function handleToggleSendThumbnail() {
+    if (!factoryInfo?.id || savingSendThumbnail) return
+    const newVal = !sendThumbnail
+    setSendThumbnail(newVal)
+    setSavingSendThumbnail(true)
+    setError('')
+    try {
+      const updated = await updateFactory(factoryInfo.id, { send_thumbnail: newVal })
+      setFactoryInfo(updated)
+    } catch (e) {
+      setSendThumbnail(!newVal)
+      setError(e.message || 'Erro ao salvar.')
+    } finally {
+      setSavingSendThumbnail(false)
+    }
+  }
+
   const statusLabel = { PENDING: 'Pendente', POSTING: 'Postando', DONE: 'Postado', FAILED: 'Falhou' }
   const platformLabels = (arr) => (arr || []).map((p) => PLATFORMS.find((x) => x.id === p)?.label || p).join(', ')
 
@@ -636,6 +657,24 @@ export default function Agendamento() {
               </div>
             )}
           </div>
+          <div className="factory-send-thumbnail">
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={sendThumbnail}
+                onChange={handleToggleSendThumbnail}
+                disabled={savingSendThumbnail}
+              />
+              <span className="slider" />
+            </label>
+            <span className="switch-label">
+              Enviar thumbnail (Sim/Não) — {sendThumbnail ? 'Sim' : 'Não'}
+            </span>
+            {savingSendThumbnail && <span className="saving-hint">Salvando...</span>}
+          </div>
+          <p className="form-hint factory-thumbnail-hint">
+            Capas customizadas para Shorts no YouTube. Longos continuam enviando thumbnail junto com o vídeo. Desative se houver excesso de envio (quota). Por padrão: Não.
+          </p>
           <div className="factory-daily-schedule-time">
             <label htmlFor="daily-schedule-start">Horário fixo para agendar o dia seguinte:</label>
             <input

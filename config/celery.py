@@ -27,4 +27,9 @@ app.conf.beat_schedule = {
         "task": "apps.jobs.tasks_auto_fetch.check_and_fetch_new_videos_task",
         "schedule": 900.0,  # a cada 15 min
     },
+    # Limpeza de mídias de vídeos já postados (cortes, job output, análise).
+    "cleanup-posted-media": {
+        "task": "apps.social.tasks.cleanup_posted_media_task",
+        "schedule": crontab(minute=0, hour="*/4"),  # a cada 4 horas
+    },
 }

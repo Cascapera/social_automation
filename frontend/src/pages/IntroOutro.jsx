@@ -115,6 +115,14 @@ export default function IntroOutro() {
   const [editLongSlotTimes, setEditLongSlotTimes] = useState([])
   const [editVerticalMode, setEditVerticalMode] = useState('zoom_crop')
   const [newLongSlotTime, setNewLongSlotTime] = useState('20:00')
+  // Upload-Post (TikTok, X, Instagram)
+  const [uploadPostTiktokEnabled, setUploadPostTiktokEnabled] = useState(false)
+  const [uploadPostTiktokExtra, setUploadPostTiktokExtra] = useState('')
+  const [uploadPostXEnabled, setUploadPostXEnabled] = useState(false)
+  const [uploadPostXExtra, setUploadPostXExtra] = useState('')
+  const [uploadPostInstagramEnabled, setUploadPostInstagramEnabled] = useState(false)
+  const [uploadPostInstagramExtra, setUploadPostInstagramExtra] = useState('')
+  const [savingUploadPost, setSavingUploadPost] = useState(false)
   const [youtubeCredentials, setYoutubeCredentials] = useState([])
   const [youtubeCredentialSecrets, setYoutubeCredentialSecrets] = useState({})
   const [loadingYoutubeCredentials, setLoadingYoutubeCredentials] = useState(false)
@@ -178,6 +186,12 @@ export default function IntroOutro() {
     setEditShortSlotTimes(Array.isArray(selected?.short_slot_times) ? selected.short_slot_times : [])
     setEditLongSlotTimes(Array.isArray(selected?.long_slot_times) ? selected.long_slot_times : [])
     setEditVerticalMode(selected?.vertical_mode || 'zoom_crop')
+    setUploadPostTiktokEnabled(!!selected?.upload_post_tiktok_enabled)
+    setUploadPostTiktokExtra(selected?.upload_post_tiktok_extra_description || '')
+    setUploadPostXEnabled(!!selected?.upload_post_x_enabled)
+    setUploadPostXExtra(selected?.upload_post_x_extra_description || '')
+    setUploadPostInstagramEnabled(!!selected?.upload_post_instagram_enabled)
+    setUploadPostInstagramExtra(selected?.upload_post_instagram_extra_description || '')
   }, [brandId, brands])
 
   async function handleAdd(e) {
@@ -399,6 +413,29 @@ export default function IntroOutro() {
       setError(e.message)
     } finally {
       setSavingYoutubeCredentialId(null)
+    }
+  }
+
+  async function handleSaveUploadPost(e) {
+    e.preventDefault()
+    if (!brandId) return
+    setSavingUploadPost(true)
+    setError('')
+    try {
+      await updateBrand(brandId, {
+        upload_post_tiktok_enabled: uploadPostTiktokEnabled,
+        upload_post_tiktok_extra_description: uploadPostTiktokExtra || '',
+        upload_post_x_enabled: uploadPostXEnabled,
+        upload_post_x_extra_description: uploadPostXExtra || '',
+        upload_post_instagram_enabled: uploadPostInstagramEnabled,
+        upload_post_instagram_extra_description: uploadPostInstagramExtra || '',
+      })
+      const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
+      await refreshBrands(fetcher)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingUploadPost(false)
     }
   }
 
@@ -735,6 +772,83 @@ export default function IntroOutro() {
               <button type="submit" disabled={savingYoutubeDescription}>
                 {savingYoutubeDescription ? 'Salvando...' : 'Salvar texto da descrição'}
               </button>
+            </form>
+          </div>
+
+          <div className="add-form">
+            <h2>Upload-Post (TikTok, X, Instagram)</h2>
+            <p className="form-hint">
+              Envia vídeos também para outras redes via Upload-Post.com. Conecte o perfil <code>brand_{brandId}</code> no painel do Upload-Post. Descrição = texto da LLM + texto extra abaixo (se preenchido).
+            </p>
+            <form onSubmit={handleSaveUploadPost} className="brand-create-form">
+              <div className="upload-post-block">
+                <div className="form-row" style={{ alignItems: 'center', gap: 12 }}>
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={uploadPostTiktokEnabled}
+                      onChange={(e) => setUploadPostTiktokEnabled(e.target.checked)}
+                    />
+                    TikTok
+                  </label>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <textarea
+                      rows={2}
+                      value={uploadPostTiktokExtra}
+                      onChange={(e) => setUploadPostTiktokExtra(e.target.value)}
+                      placeholder="Texto extra na descrição (opcional). Vazio = só o que a LLM retornar."
+                      disabled={!uploadPostTiktokEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="upload-post-block">
+                <div className="form-row" style={{ alignItems: 'center', gap: 12 }}>
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={uploadPostXEnabled}
+                      onChange={(e) => setUploadPostXEnabled(e.target.checked)}
+                    />
+                    X (Twitter)
+                  </label>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <textarea
+                      rows={2}
+                      value={uploadPostXExtra}
+                      onChange={(e) => setUploadPostXExtra(e.target.value)}
+                      placeholder="Texto extra na descrição (opcional). Vazio = só o que a LLM retornar."
+                      disabled={!uploadPostXEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="upload-post-block">
+                <div className="form-row" style={{ alignItems: 'center', gap: 12 }}>
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={uploadPostInstagramEnabled}
+                      onChange={(e) => setUploadPostInstagramEnabled(e.target.checked)}
+                    />
+                    Instagram
+                  </label>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <textarea
+                      rows={2}
+                      value={uploadPostInstagramExtra}
+                      onChange={(e) => setUploadPostInstagramExtra(e.target.value)}
+                      placeholder="Texto extra na descrição (opcional). Vazio = só o que a LLM retornar."
+                      disabled={!uploadPostInstagramEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="form-actions-row">
+                <button type="submit" disabled={savingUploadPost}>
+                  {savingUploadPost ? 'Salvando...' : 'Salvar Upload-Post'}
+                </button>
+              </div>
             </form>
           </div>
 

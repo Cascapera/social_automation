@@ -76,6 +76,10 @@ class Factory(models.Model):
         default=0,
         help_text="Mínimo de visualizações. 0 = sem filtro. Ex: 10000 para só vídeos com 10k+ views.",
     )
+    send_thumbnail = models.BooleanField(
+        default=False,
+        help_text="Quando ativo, envia capas customizadas para Shorts no YouTube. Desative se houver excesso de envio (quota).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -180,6 +184,34 @@ class Brand(models.Model):
         choices=[("zoom_crop", "Zoom e corte"), ("frame_center", "Enquadrar e centralizar")],
         default="zoom_crop",
         help_text="Modo de reenquadramento vertical para shorts (16:9 → 9:16). Zoom preenche a tela; Enquadrar adiciona bordas e logo.",
+    )
+    # Upload-Post: outras redes (TikTok, X, Instagram) via API unificada
+    upload_post_tiktok_enabled = models.BooleanField(
+        default=False,
+        help_text="Se ativo, envia vídeos também para TikTok via Upload-Post (perfil = brand_{id}).",
+    )
+    upload_post_tiktok_extra_description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Texto extra na descrição do TikTok. Se vazio, usa só o que a LLM retornar.",
+    )
+    upload_post_x_enabled = models.BooleanField(
+        default=False,
+        help_text="Se ativo, envia vídeos também para X (Twitter) via Upload-Post.",
+    )
+    upload_post_x_extra_description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Texto extra na descrição do X. Se vazio, usa só o que a LLM retornar.",
+    )
+    upload_post_instagram_enabled = models.BooleanField(
+        default=False,
+        help_text="Se ativo, envia vídeos também para Instagram via Upload-Post.",
+    )
+    upload_post_instagram_extra_description = models.TextField(
+        blank=True,
+        default="",
+        help_text="Texto extra na descrição do Instagram. Se vazio, usa só o que a LLM retornar.",
     )
 
     class Meta:

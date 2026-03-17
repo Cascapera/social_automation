@@ -197,6 +197,7 @@ CELERY_TASK_ROUTES = {
     "apps.social.tasks.post_to_platforms_task": {"queue": "publish"},
     "apps.social.tasks.reconcile_youtube_schedules_task": {"queue": "publish"},
     "apps.social.tasks.upload_thumbnails_after_batch_task": {"queue": "publish"},
+    "apps.social.tasks.cleanup_posted_media_task": {"queue": "processing"},
     # Processamento pesado fica na fila padrão de processamento
     "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": "processing"},
     "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": "processing"},

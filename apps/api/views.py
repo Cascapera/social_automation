@@ -1374,28 +1374,8 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Verifica se vídeo YouTube já foi processado (evita duplicata manual/auto)
-        if youtube_url:
-            from apps.auto_cuts.services.youtube_fetch import extract_video_id
-            from apps.brands.models import ProcessedYoutubeVideo
-
-            video_id = extract_video_id(youtube_url)
-            if video_id:
-                factory = None
-                if brand_id:
-                    try:
-                        brand = Brand.objects.get(id=brand_id)
-                        factory = getattr(brand, "factory", None)
-                    except Brand.DoesNotExist:
-                        pass
-                if factory and ProcessedYoutubeVideo.objects.filter(
-                    factory=factory,
-                    youtube_video_id=video_id,
-                ).exists():
-                    return Response(
-                        {"error": "Este vídeo já foi processado nesta factory. Evite duplicatas."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+        # Bloqueio de duplicata: só na busca automática (tasks_auto_fetch).
+        # Processamento manual pode reprocessar o mesmo vídeo quantas vezes quiser.
 
         # Nome do job: usuário informou, nome do vídeo, ou "Job N"
         if name and name.strip():

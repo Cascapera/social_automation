@@ -4,6 +4,7 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, time
 from datetime import timezone as dt_timezone
+from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,9 @@ from apps.jobs.models import (
     FactoryPostingAttemptLog,
     FactoryScheduleRun,
     PostedVideoLog,
+    VideoInventoryItem,
+    Job,
+    RenderOutput,
 )
 from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
 
@@ -562,12 +566,16 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     Chamado após o último vídeo da brand (check_scheduled_posts_task agenda com countdown).
     Retry: 60s entre tentativas, máx 2 retries (3 tentativas no total) por vídeo.
     post_ids: IDs dos posts da batch (opcional; se vazio, usa todos DONE da brand).
+    Para Shorts (YT): só envia se factory.send_thumbnail ativo. Para longos (YTB): sempre envia.
     """
     try:
-        brand = Brand.objects.get(id=brand_id)
+        brand = Brand.objects.select_related("factory").get(id=brand_id)
     except Brand.DoesNotExist:
         logger.warning("[THUMB] Brand %s não encontrada para upload de capas", brand_id)
         return {"brand_id": brand_id, "uploaded": 0, "skipped": 0, "errors": 0}
+
+    factory = getattr(brand, "factory", None)
+    send_thumbnail_shorts = factory and getattr(factory, "send_thumbnail", False)
 
     qs = ScheduledPost.objects.filter(
         auto_cut_corte__isnull=False,
@@ -587,6 +595,10 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
         b = _resolve_post_target_brand(p)
         if b and b.id == brand_id:
             if getattr(p.auto_cut_corte, "thumbnail", None):
+                platforms = p.platforms or []
+                is_short = "YT" in platforms and "YTB" not in platforms
+                if is_short and not send_thumbnail_shorts:
+                    continue
                 video_id = str((p.external_ids or {}).get("YT") or (p.external_ids or {}).get("YTB") or "")
                 if video_id:
                     to_upload.append((p, video_id))
@@ -694,9 +706,16 @@ def check_scheduled_posts_task():
             getattr(p, "auto_cut_corte_id", None)
             and getattr(p.auto_cut_corte, "thumbnail", None)
         )
-        if has_thumb and _platforms_are_youtube_only(p.platforms):
-            brand_to_last_index[brand.id] = i
-            brand_to_post_ids.setdefault(brand.id, []).append(p.id)
+        if not has_thumb or not _platforms_are_youtube_only(p.platforms):
+            continue
+        platforms = p.platforms or []
+        is_short = "YT" in platforms and "YTB" not in platforms
+        factory = getattr(brand, "factory", None)
+        send_thumb = factory and getattr(factory, "send_thumbnail", False)
+        if is_short and not send_thumb:
+            continue
+        brand_to_last_index[brand.id] = i
+        brand_to_post_ids.setdefault(brand.id, []).append(p.id)
     for brand_id, last_i in brand_to_last_index.items():
         countdown = (last_i + 1) * UPLOAD_INTERVAL_SECONDS + THUMBNAIL_BATCH_DELAY_SEC
         post_ids = brand_to_post_ids.get(brand_id, [])
@@ -1420,6 +1439,61 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                 "retry_scheduled_in_seconds": delay,
                 "errors": [item["message"] for item in retryable_errors],
             }
+    # Upload-Post (TikTok, X, Instagram): apenas para Shorts (YT). Longos (YTB) não vão para Upload-Post.
+    upload_post_platforms = []
+    is_short = "YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])
+    if not errors and brand and video_path and is_short:
+        if getattr(brand, "upload_post_tiktok_enabled", False):
+            upload_post_platforms.append("TIKTOK")
+        if getattr(brand, "upload_post_x_enabled", False):
+            upload_post_platforms.append("X")
+        if getattr(brand, "upload_post_instagram_enabled", False):
+            upload_post_platforms.append("INSTAGRAM")
+    if not upload_post_platforms and not errors and brand:
+        logger.info(
+            "[UploadPost] Pulado: brand_%s platforms=%s is_short=%s tiktok=%s x=%s insta=%s",
+            brand.id,
+            post.platforms,
+            is_short,
+            getattr(brand, "upload_post_tiktok_enabled", False),
+            getattr(brand, "upload_post_x_enabled", False),
+            getattr(brand, "upload_post_instagram_enabled", False),
+        )
+    if upload_post_platforms:
+        try:
+            from apps.social.publishers.upload_post import publish_to_upload_post
+
+            title = (post.title or "").strip() or "Vídeo"
+            desc_by_platform = {}
+            for p in upload_post_platforms:
+                extra = ""
+                if p == "TIKTOK":
+                    extra = (getattr(brand, "upload_post_tiktok_extra_description", "") or "").strip()
+                elif p == "X":
+                    extra = (getattr(brand, "upload_post_x_extra_description", "") or "").strip()
+                elif p == "INSTAGRAM":
+                    extra = (getattr(brand, "upload_post_instagram_extra_description", "") or "").strip()
+                desc_by_platform[p] = f"{title}\n\n{extra}".strip() if extra else title
+            tz_name = "America/Sao_Paulo"
+            if getattr(brand, "factory_id", None) and getattr(brand, "factory", None):
+                tz_name = (brand.factory.timezone or "").strip() or tz_name
+            result = publish_to_upload_post(
+                video_path=video_path,
+                brand_id=brand.id,
+                platforms=upload_post_platforms,
+                title=title,
+                description_by_platform=desc_by_platform,
+                scheduled_at=post.scheduled_at,
+                timezone_name=tz_name,
+            )
+            if result.get("success"):
+                logger.info("[UploadPost] Enviado para %s (brand_%s)", upload_post_platforms, brand.id)
+            else:
+                warnings.append(f"Upload-Post: {result.get('error', 'erro')}")
+        except Exception as e:
+            logger.warning("[UploadPost] Falha: %s", e)
+            warnings.append(f"Upload-Post: {e}")
+
     if errors:
         post.status = "FAILED"
         all_errors = errors + warnings
@@ -1453,7 +1527,12 @@ def post_to_platforms_task(self, scheduled_post_id: int):
     # Para posts manuais (retry, run_scheduled_posts_now): agenda upload de capa
     if post.status == "DONE" and _platforms_are_youtube_only(post.platforms):
         brand = _resolve_post_target_brand(post)
-        if brand and post.auto_cut_corte_id and getattr(post.auto_cut_corte, "thumbnail", None):
+        platforms = post.platforms or []
+        is_short = "YT" in platforms and "YTB" not in platforms
+        factory = getattr(brand, "factory", None) if brand else None
+        send_thumb = factory and getattr(factory, "send_thumbnail", False)
+        qualifies = (is_short and send_thumb) or (not is_short)
+        if qualifies and brand and post.auto_cut_corte_id and getattr(post.auto_cut_corte, "thumbnail", None):
             video_id = str((post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or "")
             if video_id:
                 upload_thumbnails_after_batch_task.apply_async(
@@ -1462,3 +1541,152 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                     countdown=THUMBNAIL_BATCH_DELAY_SEC,
                 )
     return {"status": post.status, "errors": errors}
+
+
+@shared_task
+def cleanup_posted_media_task():
+    """
+    Limpa mídias de vídeos já postados para economizar espaço.
+    Roda a cada 4 horas.
+    - Cortes (AutoCutCorte): apaga file e thumbnail de cortes postados (não disponíveis/agendados)
+    - Job output: apaga arquivo de jobs finalizados cujos posts já foram concluídos
+    - AutoCutAnalysis: apaga vídeo original (upload) de análises finalizadas
+    Não apaga Jobs, nem vídeos disponíveis ou agendados.
+    """
+    from apps.auto_cuts.models import AutoCutCorte, AutoCutAnalysis
+
+    summary = {"cortes_cleaned": 0, "job_outputs_cleaned": 0, "analysis_files_cleaned": 0, "errors": []}
+
+    # 1) Cortes postados: IDs de cortes que têm pelo menos um ScheduledPost DONE
+    posted_corte_ids = set(
+        ScheduledPost.objects.filter(
+            status="DONE",
+            auto_cut_corte_id__isnull=False,
+        ).values_list("auto_cut_corte_id", flat=True)
+    )
+
+    # Excluir cortes que ainda estão disponíveis ou agendados no inventário
+    excluded_inventory = set(
+        VideoInventoryItem.objects.filter(
+            status__in=["AVAILABLE", "SCHEDULED"],
+            auto_cut_corte_id__isnull=False,
+        ).values_list("auto_cut_corte_id", flat=True)
+    )
+    posted_corte_ids -= excluded_inventory
+
+    # Excluir cortes que têm posts pendentes ou em postagem
+    active_corte_ids = set(
+        ScheduledPost.objects.filter(
+            status__in=["PENDING", "POSTING"],
+            auto_cut_corte_id__isnull=False,
+        ).values_list("auto_cut_corte_id", flat=True)
+    )
+    posted_corte_ids -= active_corte_ids
+
+    for corte in AutoCutCorte.objects.filter(id__in=posted_corte_ids):
+        try:
+            changed = False
+            if corte.file:
+                try:
+                    fp = Path(corte.file.path) if corte.file.name else None
+                except Exception:
+                    fp = None
+                try:
+                    corte.file.delete(save=False)
+                except Exception as e:
+                    logger.warning("[CLEANUP] Falha ao deletar file do corte %s: %s", corte.id, e)
+                else:
+                    if fp and fp.exists():
+                        try:
+                            fp.unlink()
+                        except Exception:
+                            pass
+                    corte.file = None
+                    changed = True
+                    summary["cortes_cleaned"] += 1
+            if getattr(corte, "thumbnail", None) and corte.thumbnail:
+                try:
+                    tfp = Path(corte.thumbnail.path) if corte.thumbnail.name else None
+                except Exception:
+                    tfp = None
+                try:
+                    corte.thumbnail.delete(save=False)
+                except Exception as e:
+                    logger.warning("[CLEANUP] Falha ao deletar thumbnail do corte %s: %s", corte.id, e)
+                else:
+                    if tfp and tfp.exists():
+                        try:
+                            tfp.unlink()
+                        except Exception:
+                            pass
+                    corte.thumbnail = None
+                    changed = True
+            if changed:
+                corte.save(update_fields=["file", "thumbnail"])
+        except Exception as e:
+            logger.exception("[CLEANUP] Erro ao limpar corte %s", corte.id)
+            summary["errors"].append(f"corte_{corte.id}: {e}")
+
+    # 2) Job output (vídeo final): jobs DONE cujos posts já foram concluídos
+    done_jobs = Job.objects.filter(status="DONE").select_related("output")
+    for job in done_jobs:
+        try:
+            output = job.output
+        except Exception:
+            output = None
+        if not output or not output.file:
+            continue
+        has_pending = ScheduledPost.objects.filter(
+            job_id=job.id,
+            status__in=["PENDING", "POSTING"],
+        ).exists()
+        if has_pending:
+            continue
+        try:
+            fp = Path(output.file.path) if output.file.name else None
+            output.file.delete(save=True)
+            if fp and fp.exists():
+                try:
+                    fp.unlink()
+                except Exception:
+                    pass
+            summary["job_outputs_cleaned"] += 1
+        except Exception as e:
+            logger.warning("[CLEANUP] Falha ao deletar output do job %s: %s", job.id, e)
+            summary["errors"].append(f"job_{job.id}: {e}")
+
+    # 3) AutoCutAnalysis: vídeo original (upload direto) de análises finalizadas
+    for analysis in AutoCutAnalysis.objects.filter(status="done"):
+        if not analysis.file or not analysis.file.name:
+            continue
+        # Só apaga se não houver cortes ainda disponíveis/agendados desta análise
+        cortes_from_analysis = AutoCutCorte.objects.filter(analysis=analysis).values_list("id", flat=True)
+        has_available_or_scheduled = VideoInventoryItem.objects.filter(
+            auto_cut_corte_id__in=cortes_from_analysis,
+            status__in=["AVAILABLE", "SCHEDULED"],
+        ).exists()
+        if has_available_or_scheduled:
+            continue
+        try:
+            fp = Path(analysis.file.path) if analysis.file.name else None
+            analysis.file.delete(save=False)
+            if fp and fp.exists():
+                try:
+                    fp.unlink()
+                except Exception:
+                    pass
+            analysis.file = None
+            analysis.save(update_fields=["file"])
+            summary["analysis_files_cleaned"] += 1
+        except Exception as e:
+            logger.warning("[CLEANUP] Falha ao deletar file da análise %s: %s", analysis.id, e)
+            summary["errors"].append(f"analysis_{analysis.id}: {e}")
+
+    if any(v > 0 for k, v in summary.items() if k != "errors" and isinstance(v, int)):
+        logger.info(
+            "[CLEANUP] Concluído: cortes=%s job_outputs=%s analysis_files=%s",
+            summary["cortes_cleaned"],
+            summary["job_outputs_cleaned"],
+            summary["analysis_files_cleaned"],
+        )
+    return summary

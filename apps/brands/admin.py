@@ -28,9 +28,32 @@ class FactoryAdmin(admin.ModelAdmin):
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "factory", "theme_category")
+    list_display = ("brand_id_display", "name", "slug", "factory", "theme_category")
     list_filter = ("factory", "theme_category")
     prepopulated_fields = {"slug": ("name",)}
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "factory", "theme_category")}),
+        ("YouTube", {"fields": ("youtube_made_for_kids", "youtube_description_extra", "youtube_client_id", "youtube_client_secret", "youtube_redirect_uri")}),
+        ("Thumbnails", {"fields": ("thumbnail_font", "thumbnail_band_color", "thumbnail_text_color", "thumbnail_effect_color")}),
+        ("Agendamento", {"fields": ("short_slot_times", "long_slot_times", "vertical_mode")}),
+        (
+            "Upload-Post (TikTok, X, Instagram)",
+            {
+                "fields": (
+                    "upload_post_tiktok_enabled",
+                    "upload_post_tiktok_extra_description",
+                    "upload_post_x_enabled",
+                    "upload_post_x_extra_description",
+                    "upload_post_instagram_enabled",
+                    "upload_post_instagram_extra_description",
+                ),
+            },
+        ),
+    )
+
+    @admin.display(description="ID")
+    def brand_id_display(self, obj):
+        return f"brand_{obj.id}" if obj.id else "-"
 
 @admin.register(BrandAsset)
 class BrandAssetAdmin(admin.ModelAdmin):

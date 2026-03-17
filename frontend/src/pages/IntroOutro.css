@@ -295,6 +295,39 @@
   border: 1px solid var(--border);
 }
 
+.upload-post-block {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 0.75rem;
+}
+
+.upload-post-block .form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 120px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
+.upload-post-block .form-group textarea {
+  min-height: 60px;
+}
+
 @media (max-width: 900px) {
   .add-form {
     max-width: 100%;

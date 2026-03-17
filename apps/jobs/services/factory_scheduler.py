@@ -165,17 +165,12 @@ def generate_daily_schedule_for_factory(
             slot_times=short_slot_times,
             now_local=now_local,
         ) if short_slot_times else []
-        long_slots = _build_slots_from_fixed_times(
-            brand=brand,
-            day=local_day,
-            factory_tz=factory.timezone,
-            slot_times=long_slot_times,
-            now_local=now_local,
-        ) if long_slot_times else []
+        # Por enquanto: apenas Shorts via auto post. Longos não são agendados automaticamente.
+        # long_slots = _build_slots_from_fixed_times(...)  # desabilitado
         for dt in short_slots:
             plans.append(SlotPlan(brand=brand, video_type="SHORT", scheduled_at=dt))
-        for dt in long_slots:
-            plans.append(SlotPlan(brand=brand, video_type="LONG", scheduled_at=dt))
+        # for dt in long_slots:
+        #     plans.append(SlotPlan(brand=brand, video_type="LONG", scheduled_at=dt))
         plans.sort(key=lambda p: p.scheduled_at)
 
         # Evita duplicar slots já planejados no mesmo dia (permite reruns intradiários).
