@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from celery import shared_task
+from django.conf import settings
 from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
@@ -1543,6 +1544,99 @@ def post_to_platforms_task(self, scheduled_post_id: int):
     return {"status": post.status, "errors": errors}
 
 
+def _normalize_media_path(path: str) -> str:
+    """Normaliza path para comparação (forward slashes, sem prefixo)."""
+    if not path or not path.strip():
+        return ""
+    return path.replace("\\", "/").strip().lstrip("/")
+
+
+def _get_referenced_media_paths() -> set:
+    """
+    Coleta todos os caminhos de arquivos referenciados no banco.
+    Retorna set de paths relativos a MEDIA_ROOT, normalizados.
+    """
+    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
+    from apps.brands.models import BrandAsset
+    from apps.cuts.models import Cut
+    from apps.mediahub.models import SourceVideo
+
+    refs = set()
+    # AutoCutAnalysis.file
+    for name in AutoCutAnalysis.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
+    # AutoCutCorte.file e thumbnail (values_list retorna path string)
+    for file_path, thumb_path in AutoCutCorte.objects.values_list("file", "thumbnail"):
+        for name in (file_path, thumb_path):
+            if name:
+                refs.add(_normalize_media_path(str(name)))
+    # RenderOutput.file (exports/)
+    for name in RenderOutput.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
+    # SourceVideo.file
+    for name in SourceVideo.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
+    # BrandAsset.file
+    for name in BrandAsset.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
+    # Cut.file
+    for name in Cut.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
+    return refs
+
+
+def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
+    """
+    Remove arquivos físicos em storage/media que não têm registro no banco.
+    Pastas: auto_cuts/sources, auto_cuts/cortes, auto_cuts/thumbnails,
+            sources, exports, cuts, brands/assets.
+    Se dry_run=True, apenas lista os órfãos sem deletar.
+    """
+    media_root = Path(settings.MEDIA_ROOT)
+    if not media_root.exists():
+        return {"orphans_deleted": 0, "orphans_found": [], "errors": []}
+
+    refs = _get_referenced_media_paths()
+    folders = [
+        "auto_cuts/sources",
+        "auto_cuts/cortes",
+        "auto_cuts/thumbnails",
+        "sources",
+        "exports",
+        "cuts",
+        "brands/assets",
+    ]
+    deleted = 0
+    orphans_found = []
+    errors = []
+    for folder in folders:
+        folder_path = media_root / folder.replace("/", os.sep)
+        if not folder_path.exists() or not folder_path.is_dir():
+            continue
+        try:
+            for f in folder_path.rglob("*"):
+                if not f.is_file():
+                    continue
+                try:
+                    rel = str(f.relative_to(media_root)).replace("\\", "/")
+                    if rel not in refs:
+                        orphans_found.append(rel)
+                        if not dry_run:
+                            f.unlink()
+                            deleted += 1
+                            logger.info("[CLEANUP] Órfão removido: %s", rel)
+                except Exception as e:
+                    errors.append(f"orphan_{f}: {e}")
+        except Exception as e:
+            errors.append(f"folder_{folder}: {e}")
+    return {"orphans_deleted": deleted, "orphans_found": orphans_found, "errors": errors}
+
+
 @shared_task
 def cleanup_posted_media_task():
     """
@@ -1551,11 +1645,18 @@ def cleanup_posted_media_task():
     - Cortes (AutoCutCorte): apaga file e thumbnail de cortes postados (não disponíveis/agendados)
     - Job output: apaga arquivo de jobs finalizados cujos posts já foram concluídos
     - AutoCutAnalysis: apaga vídeo original (upload) de análises finalizadas
+    - Arquivos órfãos: apaga arquivos físicos em storage/media sem registro no banco
     Não apaga Jobs, nem vídeos disponíveis ou agendados.
     """
     from apps.auto_cuts.models import AutoCutCorte, AutoCutAnalysis
 
-    summary = {"cortes_cleaned": 0, "job_outputs_cleaned": 0, "analysis_files_cleaned": 0, "errors": []}
+    summary = {
+        "cortes_cleaned": 0,
+        "job_outputs_cleaned": 0,
+        "analysis_files_cleaned": 0,
+        "orphans_deleted": 0,
+        "errors": [],
+    }
 
     # 1) Cortes postados: IDs de cortes que têm pelo menos um ScheduledPost DONE
     posted_corte_ids = set(
@@ -1682,11 +1783,17 @@ def cleanup_posted_media_task():
             logger.warning("[CLEANUP] Falha ao deletar file da análise %s: %s", analysis.id, e)
             summary["errors"].append(f"analysis_{analysis.id}: {e}")
 
+    # 4) Arquivos órfãos: físicos em storage/media sem registro no banco
+    orphan_result = _cleanup_orphan_media_files()
+    summary["orphans_deleted"] = orphan_result["orphans_deleted"]
+    summary["errors"].extend(orphan_result.get("errors", []))
+
     if any(v > 0 for k, v in summary.items() if k != "errors" and isinstance(v, int)):
         logger.info(
-            "[CLEANUP] Concluído: cortes=%s job_outputs=%s analysis_files=%s",
+            "[CLEANUP] Concluído: cortes=%s job_outputs=%s analysis_files=%s orphans=%s",
             summary["cortes_cleaned"],
             summary["job_outputs_cleaned"],
             summary["analysis_files_cleaned"],
+            summary["orphans_deleted"],
         )
     return summary
