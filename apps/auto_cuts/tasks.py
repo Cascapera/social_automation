@@ -1018,9 +1018,9 @@ def finalizar_auto_cut_task(
     text_font = 28 if font_size_text is None else max(12, min(72, int(font_size_text)))
     title_clr = (title_color or "#FFFFFF").strip()
     text_clr = (text_color or "#FFFFFF").strip()
-    horiz_logo = bool(horizontal_insert_logo)
-    horiz_logo_x = max(0, min(2000, int(horizontal_logo_x or 0)))
-    horiz_logo_y = max(0, min(1200, int(horizontal_logo_y or 0)))
+    # Logo como marca d'água: canto sup esq, 40px margem, 80% opacidade
+    horiz_logo_x = max(0, min(2000, int(horizontal_logo_x or 40)))
+    horiz_logo_y = max(0, min(1200, int(horizontal_logo_y or 40)))
     overlay_pos = (overlay_position or "bottom_right").strip() or "bottom_right"
     overlay_m = max(0, min(100, int(overlay_margin or 24)))
     overlay_h = max(20, min(400, int(overlay_height or 120)))
@@ -1121,7 +1121,7 @@ def finalizar_auto_cut_task(
                             reformat_out,
                             vert_mode,
                             background_color=bg_color,
-                            logo_path=logo_path if vert_mode == "frame_center" else None,
+                            logo_path=logo_path,
                             title=(corte.suggestion.title or "").strip() if vert_mode == "frame_center" else "",
                             custom_text=link_text if vert_mode == "frame_center" else "",
                             font_size_title=title_font,
@@ -1168,8 +1168,8 @@ def finalizar_auto_cut_task(
                 except Exception as e:
                     logger.exception("Erro ao aplicar animação overlay corte %s: %s", corte.id, e)
 
-            # 3. Inserir logo em cortes horizontais (se solicitado)
-            if corte.format == "horizontal" and horiz_logo and logo_path and logo_path.exists():
+            # 3. Marca d'água: logo em todos os vídeos (shorts e longs), canto sup esq, 80% opacidade
+            if corte.format == "horizontal" and logo_path and logo_path.exists():
                 if work_path.exists():
                     try:
                         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1181,6 +1181,7 @@ def finalizar_auto_cut_task(
                                 x=horiz_logo_x,
                                 y=horiz_logo_y,
                                 logo_height=80,
+                                opacity=0.8,
                                 use_gpu=False,
                             )
                             corte.file.delete(save=False)

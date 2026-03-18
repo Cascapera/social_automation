@@ -1566,11 +1566,12 @@ def _get_referenced_media_paths() -> set:
     for name in AutoCutAnalysis.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
         if name:
             refs.add(_normalize_media_path(name))
-    # AutoCutCorte.file e thumbnail (values_list retorna path string)
-    for file_path, thumb_path in AutoCutCorte.objects.values_list("file", "thumbnail"):
-        for name in (file_path, thumb_path):
-            if name:
-                refs.add(_normalize_media_path(str(name)))
+    # AutoCutCorte.file e thumbnail (usar .name para garantir path correto)
+    for corte in AutoCutCorte.objects.only("file", "thumbnail").iterator():
+        if corte.file and getattr(corte.file, "name", None):
+            refs.add(_normalize_media_path(corte.file.name))
+        if corte.thumbnail and getattr(corte.thumbnail, "name", None):
+            refs.add(_normalize_media_path(corte.thumbnail.name))
     # RenderOutput.file (exports/)
     for name in RenderOutput.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
         if name:
@@ -1666,10 +1667,11 @@ def cleanup_posted_media_task():
         ).values_list("auto_cut_corte_id", flat=True)
     )
 
-    # Excluir cortes que ainda estão disponíveis ou agendados no inventário
+    # Excluir cortes que ainda NÃO foram postados (inventário: disponível, agendado, postando ou falhou)
+    # Só deleta quando inventário está POSTED ou não existe (post direto sem factory)
     excluded_inventory = set(
         VideoInventoryItem.objects.filter(
-            status__in=["AVAILABLE", "SCHEDULED"],
+            status__in=["AVAILABLE", "SCHEDULED", "POSTING", "FAILED"],
             auto_cut_corte_id__isnull=False,
         ).values_list("auto_cut_corte_id", flat=True)
     )
@@ -1684,7 +1686,7 @@ def cleanup_posted_media_task():
     )
     posted_corte_ids -= active_corte_ids
 
-    for corte in AutoCutCorte.objects.filter(id__in=posted_corte_ids):
+    for corte in AutoCutCorte.objects.filter(id__in=posted_corte_ids).select_related("suggestion"):
         try:
             changed = False
             if corte.file:

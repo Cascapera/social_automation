@@ -58,15 +58,17 @@ def overlay_logo(
     x: int,
     y: int,
     logo_height: int = 80,
+    opacity: float = 0.8,
     use_gpu: bool = False,
 ) -> None:
-    """Sobrepoe logo no vídeo em posição x,y (px do topo-esquerda)."""
+    """Sobrepoe logo no vídeo em posição x,y (px do topo-esquerda). Opacidade 0-1 (0.8 = 80%)."""
+    aa = max(0.0, min(1.0, float(opacity)))
     cmd = [
         settings.FFMPEG_BIN, "-y",
         "-i", str(input_path),
         "-i", str(logo_path),
         "-filter_complex",
-        f"[1:v]scale=-1:{logo_height},format=rgba[logo];"
+        f"[1:v]scale=-1:{logo_height},format=rgba,colorchannelmixer=aa={aa}[logo];"
         f"[0:v][logo]overlay={x}:{y}:format=auto",
         *video_encode_args(use_gpu),
         *audio_encode_args(input_path),

@@ -364,8 +364,17 @@ def reformat_video_vertical(
             else:
                 filter_parts.append("[v0]scale=iw:ih[vout]")
         else:
-            # zoom_crop: passa vídeo sem alteração
-            filter_parts.append("[v0]scale=iw:ih[vout]")
+            # zoom_crop: marca d'água logo canto sup esquerdo (80% opacidade)
+            if logo_path and logo_path.exists():
+                inputs += ["-i", str(logo_path)]
+                logo_idx = next_idx
+                next_idx += 1
+                filter_parts.append(
+                    f"[{logo_idx}:v]scale=80:80:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=0.8[logo];"
+                    f"{current}[logo]overlay=40:40:format=auto[v1]"
+                )
+                current = "[v1]"
+            filter_parts.append(f"{current}scale=iw:ih[vout]")
 
         filter_complex = ";".join(filter_parts)
 
