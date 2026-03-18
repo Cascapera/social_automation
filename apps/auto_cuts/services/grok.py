@@ -109,8 +109,8 @@ FORMATO DE SCORE:
 - virality_score em percentual de 0 a 100 (sem símbolo %, valor inteiro)
 
 REGRAS DE TÍTULO E THUMBNAIL:
-- suggested_title deve ser chamativo para clique e conter 1–3 emojis relevantes.
-- suggested_title deve ter entre 45 e 100 caracteres (evite títulos curtos/genéricos).
+- suggested_title e title_suggestion: OBRIGATÓRIO incluir 1–3 emojis relevantes em TODOS os títulos (shorts e longs). Emojis aumentam engajamento e CTR.
+- suggested_title deve ser chamativo para clique e ter entre 45 e 100 caracteres (evite títulos curtos/genéricos).
 - thumbnail_text deve ser curto (2–4 palavras), forte, direto, sem frase longa.
 - Use o texto curto em thumbnail_text, não em suggested_title.
 
@@ -138,7 +138,7 @@ CRITÉRIOS EDUCACIONAIS – SHORTS 2–3 MIN (120–180 seg):
 - Gancho inicial: pergunta ou promessa de aprendizado nos primeiros 5s
 - Sem cortes no meio de ideias: sempre concluir o raciocínio
 - Temas: finanças, carreira, tecnologia, produtividade, investimentos
-- Títulos informativos e profissionais (pode usar emojis moderados)
+- Títulos informativos e profissionais: OBRIGATÓRIO incluir 1–3 emojis em todos os títulos (shorts e longs). Emojis aumentam engajamento.
 - Evite polêmica gratuita; foque em valor educativo
 - Dê preferência a palavras que aumentam CTR (segredo, verdade, revelado, estratégia, como funciona, análise, detalhe, aprenda, guia, dica, truque, hack, novo, explicação simples, caso real, etc.).
 - NUNCA use palavras proibidas; use as substituições (ex: assassinato→caso chocante, drogas→substâncias, guerra→conflito). Evite: estupro, terrorismo, extremismo, racismo, ódio.
@@ -202,7 +202,8 @@ Para cada clipe (short ou longo), inclua:
 - thumbnail_text (2–4 palavras fortes)
 
 Regras adicionais:
-- suggested_title: 45–100 caracteres com 1–3 emojis.
+- suggested_title e title_suggestion: OBRIGATÓRIO 1–3 emojis em TODOS os títulos (shorts e longs). Nunca retorne título sem emoji.
+- suggested_title: 45–100 caracteres com 1–3 emojis relevantes.
 - thumbnail_text: 2–4 palavras (máx. 28 caracteres), caixa alta preferencial.
 
 Responda SOMENTE com JSON válido:
@@ -218,7 +219,7 @@ Responda SOMENTE com JSON válido:
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
-      "suggested_title": "Título forte",
+      "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "PALAVRA FORTE"
     }}
@@ -234,7 +235,7 @@ Responda SOMENTE com JSON válido:
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
-      "suggested_title": "Título forte",
+      "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "PALAVRA FORTE"
     }}
@@ -250,13 +251,13 @@ Responda SOMENTE com JSON válido:
       "emotion_type": "inspiring",
       "main_topic": "estratégia de crescimento",
       "hook_sentence": "frase mais impactante",
-      "suggested_title": "Título forte",
+      "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "GANHO RÁPIDO",
       "start": "MM:SS",
       "end": "MM:SS",
       "duration_min": 12,
-      "title_suggestion": "Título forte",
+      "title_suggestion": "Título forte 🎯",
       "reason": "por que viraliza"
     }}
   ]
@@ -280,7 +281,7 @@ Tarefas (responda em UMA ÚNICA resposta JSON):
 
 2. FINAL_LONG_CUTS: Monte 1–3 cortes longos (20–40 min) combinando blocos narrativos com fluxo natural. Sugira título informativo para cada um.
 
-Títulos devem ser informativos e profissionais. Evite sensacionalismo.
+Títulos: informativos e profissionais. OBRIGATÓRIO incluir 1–3 emojis em todos (title e title_suggestion). Evite sensacionalismo.
 Inclua obrigatoriamente para cada corte:
 - thumbnail_moment_timestamp (timestamp real dentro do próprio corte)
 - thumbnail_text (2–4 palavras curtas para a capa)
@@ -294,7 +295,7 @@ Responda SOMENTE com JSON válido:
       "end": "MM:SS",
       "duration": 150,
       "hook": "frase inicial",
-      "title": "Título informativo",
+      "title": "Título informativo 📚",
       "reason": "valor didático",
       "virality_score": 9,
       "theme_category": "BUSINESS_MONEY",
@@ -307,7 +308,7 @@ Responda SOMENTE com JSON válido:
       "start": "MM:SS",
       "end": "MM:SS",
       "duration_min": 18,
-      "title_suggestion": "Título informativo",
+      "title_suggestion": "Título informativo 📚",
       "reason": "valor didático",
       "theme_category": "STORIES_CURIOSITIES",
       "thumbnail_moment_timestamp": "MM:SS",
@@ -348,8 +349,8 @@ SCORING FORMAT:
 - virality_score must be an integer from 0 to 100 (no % symbol)
 
 TITLE + THUMBNAIL RULES:
-- suggested_title must be clickworthy and include 1–3 relevant emojis.
-- suggested_title must be 45–100 characters (avoid short/generic titles).
+- suggested_title and title_suggestion: REQUIRED to include 1–3 relevant emojis in ALL titles (shorts and longs). Emojis boost engagement and CTR.
+- suggested_title must be clickworthy and 45–100 characters (avoid short/generic titles).
 - thumbnail_text must be short (2–4 words), punchy, and not a full sentence.
 - Keep short text in thumbnail_text, not in suggested_title.
 
@@ -401,7 +402,8 @@ For each clip (short or long), include:
 - thumbnail_text (2–4 powerful words)
 
 Additional rules:
-- suggested_title: 45–100 characters with 1–3 emojis.
+- suggested_title and title_suggestion: REQUIRED 1–3 emojis in ALL titles (shorts and longs). Never return a title without emojis.
+- suggested_title: 45–100 characters with 1–3 relevant emojis.
 - thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
 - All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) MUST be in English.
 
@@ -418,7 +420,7 @@ Respond ONLY with valid JSON:
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
-      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE"
     }}
@@ -434,7 +436,7 @@ Respond ONLY with valid JSON:
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
-      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE"
     }}
@@ -450,13 +452,13 @@ Respond ONLY with valid JSON:
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
-      "suggested_title": "The Decision That Changed His Career",
+      "suggested_title": "The Decision That Changed His Career 🎯",
       "thumbnail_moment_timestamp": "00:47:02",
       "thumbnail_text": "ONE DECISION",
       "start": "MM:SS",
       "end": "MM:SS",
       "duration_min": 11.5,
-      "title_suggestion": "The Decision That Changed His Career",
+      "title_suggestion": "The Decision That Changed His Career 🎯",
       "reason": "why it goes viral"
     }}
   ]
@@ -513,7 +515,8 @@ For each clip (short or long), include:
 - subtitle_segments_pt (REQUIRED): array of {{"start": float, "end": float, "text": "PT translation"}}
 
 Additional rules:
-- suggested_title: 45–100 characters with 1–3 emojis.
+- suggested_title and title_suggestion: REQUIRED 1–3 emojis in ALL titles (shorts and longs). Never return a title without emojis.
+- suggested_title: 45–100 characters with 1–3 relevant emojis.
 - thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
 
 Respond ONLY with valid JSON:
@@ -529,7 +532,7 @@ Respond ONLY with valid JSON:
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
-      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE",
       "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
@@ -546,7 +549,7 @@ Respond ONLY with valid JSON:
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
-      "suggested_title": "He Got Fired In The Most Embarrassing Way",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE",
       "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
@@ -563,13 +566,13 @@ Respond ONLY with valid JSON:
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
-      "suggested_title": "The Decision That Changed His Career",
+      "suggested_title": "The Decision That Changed His Career 🎯",
       "thumbnail_moment_timestamp": "00:47:02",
       "thumbnail_text": "ONE DECISION",
       "start": "MM:SS",
       "end": "MM:SS",
       "duration_min": 11.5,
-      "title_suggestion": "The Decision That Changed His Career",
+      "title_suggestion": "The Decision That Changed His Career 🎯",
       "reason": "why it goes viral",
       "subtitle_segments_pt": [{{"start": 2530.0, "end": 2535.2, "text": "Uma decisão mudou tudo na minha carreira"}}]
     }}
@@ -590,7 +593,7 @@ EDUCATIONAL CRITERIA – SHORTS 2–3 MIN (120–180 sec):
 - Initial hook: question or learning promise in first 5s
 - No cuts in the middle of ideas: always complete the reasoning
 - Topics: finance, career, technology, productivity, investments
-- Informative, professional titles (moderate emojis OK)
+- Informative, professional titles: REQUIRED to include 1–3 relevant emojis in all titles (shorts and longs). Emojis boost engagement.
 - Avoid gratuitous controversy; focus on educational value
 - Prefer CTR-boosting words (secret, truth, strategy, how it works, analysis, detail, learn, guide, tip, trick, hack, new, simple explanation, real case, etc.).
 - NEVER use forbidden words; use substitutions (e.g. murder→shocking case, drugs→substances, war→conflict). Avoid: rape, terrorism, extremism, racism, hate.
@@ -633,7 +636,7 @@ Tasks (respond in ONE JSON response):
 
 2. FINAL_LONG_CUTS: Assemble 1–3 long cuts (20–40 min) combining narrative blocks with natural flow. Suggest informative title for each.
 
-Titles must be informative and professional. Avoid sensationalism.
+Titles: informative and professional. REQUIRED to include 1–3 emojis in all (title and title_suggestion). Avoid sensationalism.
 All text (title, title_suggestion, thumbnail_text, hook, reason, etc.) MUST be in English.
 For every cut, include:
 - thumbnail_moment_timestamp (real timestamp inside the cut)
@@ -648,7 +651,7 @@ Respond ONLY with valid JSON:
       "end": "MM:SS",
       "duration": 150,
       "hook": "opening phrase",
-      "title": "Informative title",
+      "title": "Informative title 📚",
       "reason": "didactic value",
       "virality_score": 9,
       "theme_category": "BUSINESS_MONEY",
@@ -661,7 +664,7 @@ Respond ONLY with valid JSON:
       "start": "MM:SS",
       "end": "MM:SS",
       "duration_min": 18,
-      "title_suggestion": "Informative title",
+      "title_suggestion": "Informative title 📚",
       "reason": "didactic value",
       "theme_category": "STORIES_CURIOSITIES",
       "thumbnail_moment_timestamp": "MM:SS",
@@ -966,7 +969,7 @@ READY_CUT_SYSTEM_PROMPT = """Você é um editor de conteúdo para redes sociais.
 
 Sua tarefa: retornar APENAS metadados para publicação:
 - virality_score: 1-10 (potencial de viralização)
-- title: título chamativo para YouTube/Shorts (45-100 caracteres, 1-3 emojis)
+- title: título chamativo para YouTube/Shorts (45-100 caracteres). OBRIGATÓRIO incluir 1-3 emojis - aumenta engajamento.
 - thumbnail_moment_timestamp: timestamp no formato MM:SS do melhor momento para capa (ex: "00:15")
 - thumbnail_text: 2-4 palavras curtas para a capa (ex: "SEGREDO REVELADO")
 
@@ -995,7 +998,7 @@ def analyze_ready_cut_metadata(
 
 {transcript[:8000]}
 
-Retorne JSON com: virality_score (1-10), title, thumbnail_moment_timestamp (MM:SS), thumbnail_text (2-4 palavras)."""
+Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnail_moment_timestamp (MM:SS), thumbnail_text (2-4 palavras)."""
     content = call_grok_chat(READY_CUT_SYSTEM_PROMPT, user, api_key)
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):

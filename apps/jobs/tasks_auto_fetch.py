@@ -140,6 +140,17 @@ def check_and_fetch_new_videos_task() -> dict:
                 results["skipped"].append(f"{factory.name}: estoque OK (total={total})")
                 continue
 
+            # Se buscou hoje e não achou nada: só tenta de novo amanhã (evita loop e excede cota API)
+            last_empty = getattr(factory, "auto_fetch_last_empty_at", None)
+            if last_empty:
+                last_empty_date = last_empty.date() if hasattr(last_empty, "date") else last_empty
+                today = timezone.now().date()
+                if last_empty_date >= today:
+                    results["skipped"].append(
+                        f"{factory.name}: busca vazia hoje, próxima tentativa amanhã"
+                    )
+                    continue
+
             channels_to_try = _get_search_channels_ordered(factory, target_brand_id=target_brand_id)
             if not channels_to_try:
                 results["skipped"].append(f"{factory.name}: sem canais de busca ativos")
@@ -196,6 +207,9 @@ def check_and_fetch_new_videos_task() -> dict:
                 results["skipped"].append(
                     f"{factory.name}: nenhum vídeo novo em {channels_tried} canal(is) tentado(s)"
                 )
+                # Marca para não buscar de novo até amanhã (evita loop e excede cota API)
+                factory.auto_fetch_last_empty_at = timezone.now()
+                factory.save(update_fields=["auto_fetch_last_empty_at", "updated_at"])
                 continue
 
             youtube_url = video_to_process.get("url") or f"https://www.youtube.com/watch?v={video_to_process.get('video_id')}"
@@ -236,6 +250,10 @@ def check_and_fetch_new_videos_task() -> dict:
             )
             analyze_auto_cuts_task.delay(analysis.id)
             results["jobs_created"] += 1
+            # Limpa last_empty para permitir nova busca na próxima execução
+            if getattr(factory, "auto_fetch_last_empty_at", None):
+                factory.auto_fetch_last_empty_at = None
+                factory.save(update_fields=["auto_fetch_last_empty_at", "updated_at"])
             logger.info(
                 "[AUTO_FETCH] Factory %s: criada analysis %s para %s",
                 factory.name,

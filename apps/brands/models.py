@@ -76,6 +76,11 @@ class Factory(models.Model):
         default=0,
         help_text="Mínimo de visualizações. 0 = sem filtro. Ex: 10000 para só vídeos com 10k+ views.",
     )
+    auto_fetch_last_empty_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Quando a busca automática não encontrou nenhum vídeo novo. Evita tentativas repetidas até o dia seguinte (protege cota da API YouTube).",
+    )
     send_thumbnail = models.BooleanField(
         default=False,
         help_text="Quando ativo, envia capas customizadas para Shorts no YouTube. Desative se houver excesso de envio (quota).",
