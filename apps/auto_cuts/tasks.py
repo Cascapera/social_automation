@@ -1180,7 +1180,7 @@ def finalizar_auto_cut_task(
                                 logo_path,
                                 x=horiz_logo_x,
                                 y=horiz_logo_y,
-                                logo_height=80,
+                                logo_height=160,
                                 opacity=0.8,
                                 use_gpu=False,
                             )

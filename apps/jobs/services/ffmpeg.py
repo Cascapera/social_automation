@@ -57,7 +57,7 @@ def overlay_logo(
     logo_path: Path,
     x: int,
     y: int,
-    logo_height: int = 80,
+    logo_height: int = 160,
     opacity: float = 0.8,
     use_gpu: bool = False,
 ) -> None:
