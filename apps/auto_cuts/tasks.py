@@ -912,12 +912,12 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     if text:
                         subtitle_segments.append({"start": new_start, "end": new_end, "text": text})
 
-            # Shorts (vertical) têm legendas queimadas por padrão
+            # Shorts e longs: legendas queimadas por padrão
             corte = AutoCutCorte.objects.create(
                 analysis=analysis,
                 suggestion=sug,
                 format=fmt,
-                needs_subtitle=(fmt == "vertical"),
+                needs_subtitle=True,
                 # Fluxo factory-first: cortes já entram para finalização automática.
                 user_wants_finalize=True,
                 is_finalized=False,
