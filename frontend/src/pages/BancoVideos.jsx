@@ -316,9 +316,9 @@ export default function BancoVideos() {
                       <tr>
                         <th>Brand</th>
                         <th>Tipo</th>
-                        <th>Título</th>
+                        <th className="banco-titulo">Título</th>
                         <th>Score</th>
-                        <th className="banco-fonte">Fonte</th>
+                        <th className="banco-fonte">Nome da fonte</th>
                         <th>Status</th>
                         <th>Erro</th>
                         <th>Ações</th>
@@ -329,9 +329,13 @@ export default function BancoVideos() {
                         <tr key={item.id}>
                           <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
-                          <td className="banco-title">{item.title || '-'}</td>
+                          <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
-                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>{item.source_display_name || item.source_asset_id || '-'}</td>
+                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>
+                            {item.source_display_name || item.source_asset_id
+                              ? `(${item.source_display_name || item.source_asset_id})`
+                              : '-'}
+                          </td>
                           <td>{statusDisplay(item)}</td>
                           <td className="banco-error">{item.last_error || '-'}</td>
                           <td>
@@ -398,9 +402,9 @@ export default function BancoVideos() {
                       <tr>
                         <th>Brand</th>
                         <th>Tipo</th>
-                        <th>Título</th>
+                        <th className="banco-titulo">Título</th>
                         <th>Score</th>
-                        <th className="banco-fonte">Fonte</th>
+                        <th className="banco-fonte">Nome da fonte</th>
                         <th>Postado em</th>
                       </tr>
                     </thead>
@@ -409,9 +413,13 @@ export default function BancoVideos() {
                         <tr key={item.id}>
                           <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
-                          <td className="banco-title">{item.title || '-'}</td>
+                          <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
-                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>{item.source_display_name || item.source_asset_id || '-'}</td>
+                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>
+                            {item.source_display_name || item.source_asset_id
+                              ? `(${item.source_display_name || item.source_asset_id})`
+                              : '-'}
+                          </td>
                           <td>{formatDate(item.posted_at)}</td>
                         </tr>
                       ))}

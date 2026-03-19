@@ -647,26 +647,25 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
         return None
 
     def get_source_display_name(self, obj):
-        """Nome do vídeo original (source, YouTube URL ou arquivo) para exibir na coluna Fonte."""
+        """Nome do vídeo original (o mesmo que aparece nos jobs) para exibir na coluna Nome da fonte."""
         corte = getattr(obj, "auto_cut_corte", None)
         if not corte:
             return (obj.source_asset_id or "").strip() or "-"
         analysis = getattr(corte, "analysis", None)
         if not analysis:
             return (obj.source_asset_id or "").strip() or "-"
+        # Prioridade: analysis.name (nome do job) > source.title > filename > source_asset_id
+        name = (getattr(analysis, "name", None) or "").strip()
+        if name:
+            return name
         if getattr(analysis, "source_id", None) and getattr(analysis, "source", None):
             title = (getattr(analysis.source, "title", None) or "").strip()
             if title:
                 return title
-        url = (getattr(analysis, "youtube_url", None) or "").strip()
-        if url:
-            return url
         f = getattr(analysis, "file", None)
         if f and getattr(f, "name", None):
-            return f.name
-        name = (getattr(analysis, "name", None) or "").strip()
-        if name:
-            return name
+            stem = f.name.rsplit(".", 1)[0] if "." in f.name else f.name
+            return stem or f.name
         return (obj.source_asset_id or "").strip() or "-"
 
 

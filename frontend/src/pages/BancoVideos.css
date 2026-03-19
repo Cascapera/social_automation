@@ -68,12 +68,15 @@
   font-weight: 600;
 }
 
-.banco-title {
-  min-width: 220px;
+.banco-titulo {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .banco-fonte {
-  max-width: 140px;
+  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
