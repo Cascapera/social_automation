@@ -206,6 +206,7 @@ CELERY_TASK_DEFAULT_QUEUE = "processing"
 CELERY_TASK_ROUTES = {
     # Fila dedicada para publicação/agendamento (não deve ficar bloqueada por transcrição/render)
     "apps.social.tasks.check_scheduled_posts_task": {"queue": "publish"},
+    "apps.social.tasks.process_brand_posting_queue_task": {"queue": "publish"},
     "apps.social.tasks.generate_daily_factory_schedules_task": {"queue": "publish"},
     "apps.social.tasks.post_to_platforms_task": {"queue": "publish"},
     "apps.social.tasks.reconcile_youtube_schedules_task": {"queue": "publish"},

@@ -558,6 +558,8 @@ def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str
 
 UPLOAD_INTERVAL_SECONDS = 60  # 1 vídeo por minuto na fila de envio
 THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer após último vídeo antes de subir capas
+UPLOAD_POST_RETRY_COUNT = 2  # Máximo de retentativas para Upload Post
+UPLOAD_POST_RETRY_DELAY_SEC = 10  # Segundos entre retentativas
 
 
 @shared_task
@@ -647,19 +649,156 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     return {"brand_id": brand_id, "uploaded": uploaded, "skipped": len(to_upload) - uploaded - errors, "errors": errors}
 
 
+def _build_upload_post_platforms(brand, post) -> list[str]:
+    """Retorna lista de plataformas para Upload Post quando habilitado na brand."""
+    platforms: list[str] = []
+    post_platforms = post.platforms or []
+    is_short = "YT" in post_platforms and "YTB" not in post_platforms
+    is_long = "YTB" in post_platforms
+    is_youtube = "YT" in post_platforms or "YTB" in post_platforms
+
+    # Shorts: TikTok, X, Instagram (Reels) + YouTube quando habilitados
+    if is_short:
+        if getattr(brand, "upload_post_tiktok_enabled", False):
+            platforms.append("TIKTOK")
+        if getattr(brand, "upload_post_x_enabled", False):
+            platforms.append("X")
+        if getattr(brand, "upload_post_instagram_enabled", False):
+            platforms.append("INSTAGRAM")
+    # Longos: apenas YouTube (TikTok/Instagram têm limite de duração)
+    if is_youtube and getattr(brand, "upload_post_youtube_enabled", False):
+        platforms.append("YOUTUBE")
+    return platforms
+
+
+@shared_task
+def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noqa: C901
+    """
+    Processa uma fila de posts de uma brand em sequência.
+    Logs estruturados para observabilidade.
+    """
+    try:
+        brand = Brand.objects.select_related("factory").get(id=brand_id)
+    except Brand.DoesNotExist:
+        logger.warning("[POSTING] Brand %s não encontrada", brand_id)
+        return {"brand_id": brand_id, "posted": 0, "errors": 1}
+
+    brand_slug = getattr(brand, "slug", "") or f"brand_{brand_id}"
+    queue_size = len(post_ids)
+    logger.info(
+        "[POSTING] Iniciando postagem das mídias da brand_%s (%s)",
+        brand_id,
+        brand_slug,
+    )
+    logger.info("[POSTING] Fila de vídeos da brand (%s)", queue_size)
+
+    posted_count = 0
+    error_count = 0
+    error_details: list[dict] = []  # [{post_id, errors, error}]
+    remaining = queue_size
+
+    for post_id in post_ids:
+        logger.info("[POSTING] Enviando para upload post")
+        try:
+            # Chamada direta: não usar apply()/get() dentro de task (causa deadlock no Celery)
+            result = _run_post_to_platforms(post_id)
+        except Exception as e:
+            error_count += 1
+            err_msg = str(e)
+            logger.warning("[POSTING] Erro ao processar post %s: %s", post_id, err_msg)
+            error_details.append({"post_id": post_id, "errors": [err_msg], "error": err_msg})
+            remaining -= 1
+            logger.info("[POSTING] Fila de vídeos da brand atualizada (%s)", remaining)
+            continue
+
+        if isinstance(result, dict):
+            if str(result.get("status", "")).upper() == "DONE":
+                conf_id = ""
+                ext_ids = result.get("external_ids") or {}
+                for k in ("YT", "YTB", "upload_post_request_id"):
+                    if ext_ids.get(k):
+                        conf_id = str(ext_ids[k])
+                        break
+                logger.info(
+                    "[POSTING] Recebido confirmação da postagem e agendamento (id %s)",
+                    conf_id or "ok",
+                )
+                posted_count += 1
+            elif result.get("skipped"):
+                logger.info("[POSTING] Post %s ignorado: %s", post_id, result.get("skipped"))
+            else:
+                error_count += 1
+                errs = result.get("errors")
+                err = result.get("error", "erro desconhecido")
+                if isinstance(errs, list):
+                    err_list = [str(e) for e in errs]
+                elif errs:
+                    err_list = [str(errs)]
+                else:
+                    err_list = [str(err)] if err else ["erro desconhecido"]
+                logger.warning(
+                    "[POSTING] Post %s falhou: %s",
+                    post_id,
+                    err_list,
+                )
+                error_details.append({"post_id": post_id, "errors": err_list, "error": err})
+
+        remaining -= 1
+        if remaining > 0:
+            logger.info("[POSTING] Fila de vídeos da brand atualizada (%s)", remaining)
+
+    if error_count > 0:
+        logger.info(
+            "[POSTING] Brand_%s (%s) = %s vídeos postados - %s error(s)",
+            brand_id,
+            brand_slug,
+            posted_count,
+            error_count,
+        )
+        for ed in error_details:
+            logger.error(
+                "[POSTING] Erro post_id=%s (YouTube API / Upload Post): %s",
+                ed["post_id"],
+                ed.get("errors") or ed.get("error", "?"),
+            )
+    else:
+        logger.info(
+            "[POSTING] Brand_%s (%s) = %s vídeos postados",
+            brand_id,
+            brand_slug,
+            posted_count,
+        )
+    return {
+        "brand_id": brand_id,
+        "posted": posted_count,
+        "total": queue_size,
+        "error_count": error_count,
+        "error_details": error_details,
+    }
+
+
 @shared_task
 def check_scheduled_posts_task():
     """
     Roda a cada minuto via Beat.
     - Pega posts PENDING (scheduled_at <= now ou YouTube antecipado).
-    - Ordena brand por brand: processa toda a brand 1, depois brand 2, etc.
-    - Enfileira com 1 vídeo por minuto (countdown 0, 60, 120...) para aliviar a API.
+    - Agrupa por brand e processa cada brand em sequência.
+    - Logs estruturados para observabilidade.
     """
     now = timezone.now()
+    # Marca orphan posts (sem origem) como FAILED para não poluir a fila
+    ScheduledPost.objects.filter(
+        status="PENDING",
+    ).filter(job_id__isnull=True, auto_cut_corte_id__isnull=True).update(
+        status="FAILED",
+        error="ScheduledPost sem origem (job/corte)",
+    )
+    # Ignora posts sem origem — não enfileira para evitar falhas em loop
+    has_origin = Q(job_id__isnull=False) | Q(auto_cut_corte_id__isnull=False)
     due_posts = ScheduledPost.objects.filter(
         status="PENDING",
         scheduled_at__lte=now,
-    ).select_related("job", "job__brand", "social_account").order_by(
+    ).filter(has_origin).select_related("job", "job__brand", "social_account").order_by(
         "social_account__brand_id",
         "scheduled_at",
         "id",
@@ -668,7 +807,7 @@ def check_scheduled_posts_task():
     future_candidates = ScheduledPost.objects.filter(
         status="PENDING",
         scheduled_at__gt=now + timedelta(seconds=30),
-    ).select_related("job", "job__brand", "social_account")
+    ).filter(has_origin).select_related("job", "job__brand", "social_account")
     post_ids = {post.id for post in due_posts}
     for post in future_candidates:
         if _platforms_are_youtube_only(post.platforms):
@@ -690,13 +829,34 @@ def check_scheduled_posts_task():
         )
         .order_by("social_account__brand_id", "scheduled_at", "id")
     )
-    # Brand por brand, 1 vídeo por minuto
-    for i, p in enumerate(posts):
-        countdown = i * UPLOAD_INTERVAL_SECONDS
-        post_to_platforms_task.apply_async(args=[p.id], countdown=countdown)
 
-    # Thumbnails: agendadas após último vídeo de cada brand (upload_thumbnails_after_batch_task
-    # é chamada ao concluir cada post; aqui garantimos o batch para posts do check).
+    # Agrupa por brand
+    brand_to_posts: dict[int, list] = {}
+    for p in posts:
+        brand = _resolve_post_target_brand(p)
+        bid = brand.id if brand else 0
+        brand_to_posts.setdefault(bid, []).append(p.id)
+
+    total_brands = len([b for b in brand_to_posts if b > 0])
+    total_videos = len(post_ids_list)
+    logger.info(
+        "[POSTING] Iniciando ciclo de postagem (total de brands %s e total de vídeos %s)",
+        total_brands,
+        total_videos,
+    )
+
+    # Processa cada brand em sequência (countdown para escalonar)
+    countdown = 0
+    for brand_id, pids in sorted(brand_to_posts.items()):
+        if brand_id <= 0:
+            continue
+        process_brand_posting_queue_task.apply_async(
+            args=[brand_id, pids],
+            countdown=countdown,
+        )
+        countdown += UPLOAD_INTERVAL_SECONDS * len(pids)
+
+    # Thumbnails: agendadas após último vídeo de cada brand
     brand_to_last_index: dict[int, int] = {}
     brand_to_post_ids: dict[int, list[int]] = {}
     for i, p in enumerate(posts):
@@ -717,18 +877,18 @@ def check_scheduled_posts_task():
             continue
         brand_to_last_index[brand.id] = i
         brand_to_post_ids.setdefault(brand.id, []).append(p.id)
-    for brand_id, last_i in brand_to_last_index.items():
+    for bid, last_i in brand_to_last_index.items():
         countdown = (last_i + 1) * UPLOAD_INTERVAL_SECONDS + THUMBNAIL_BATCH_DELAY_SEC
-        post_ids = brand_to_post_ids.get(brand_id, [])
         upload_thumbnails_after_batch_task.apply_async(
-            args=[brand_id],
-            kwargs={"post_ids": post_ids},
+            args=[bid],
+            kwargs={"post_ids": brand_to_post_ids.get(bid, [])},
             countdown=countdown,
         )
 
     return {
         "checked_due": due_posts.count(),
         "queued": len(post_ids_list),
+        "brands": total_brands,
     }
 
 
@@ -1072,9 +1232,11 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
     return summary
 
 
-@shared_task(bind=True)
-def post_to_platforms_task(self, scheduled_post_id: int):
-    """Publica um ScheduledPost nas plataformas configuradas."""
+def _run_post_to_platforms(scheduled_post_id: int) -> dict:
+    """
+    Lógica de postagem (chamada direta ou via task).
+    Não usar post_to_platforms_task.apply() de dentro de outra task (causa deadlock).
+    """
     try:
         post = ScheduledPost.objects.select_related(
             "job",
@@ -1154,6 +1316,7 @@ def post_to_platforms_task(self, scheduled_post_id: int):
     external_ids = dict(post.external_ids or {})
     upload_fingerprint = ""
     social_account_changed = False
+    upload_post_youtube_ok = False  # Preenchido se YouTube postado via Upload Post
     # Hash do arquivo para deduplicação por canal/plataforma.
     try:
         hasher = hashlib.sha256()
@@ -1164,7 +1327,113 @@ def post_to_platforms_task(self, scheduled_post_id: int):
     except Exception:
         upload_fingerprint = ""
 
+    # Upload-Post (preferência): TikTok, X, Instagram, YouTube quando habilitado na brand.
+    # Curtos e longos. Retry 2x com 10s. Fallback para YouTube API se falhar.
+    upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
+    if not errors and brand and video_path and upload_post_platforms:
+        import time as _time
+        from apps.social.publishers.upload_post import (
+            publish_to_upload_post,
+            UploadPostPublishError,
+        )
+
+        title = (post.title or "").strip() or "Vídeo"
+        desc_by_platform = {}
+        for p in upload_post_platforms:
+            extra = ""
+            if p == "TIKTOK":
+                extra = (getattr(brand, "upload_post_tiktok_extra_description", "") or "").strip()
+            elif p == "X":
+                extra = (getattr(brand, "upload_post_x_extra_description", "") or "").strip()
+            elif p == "INSTAGRAM":
+                extra = (getattr(brand, "upload_post_instagram_extra_description", "") or "").strip()
+            elif p == "YOUTUBE":
+                extra = (getattr(brand, "youtube_description_extra", "") or "").strip()
+            desc_by_platform[p] = f"{title}\n\n{extra}".strip() if extra else title
+        tz_name = "America/Sao_Paulo"
+        if getattr(brand, "factory_id", None) and getattr(brand, "factory", None):
+            tz_name = (brand.factory.timezone or "").strip() or tz_name
+
+        up_success = False
+        last_up_error = None
+        for attempt in range(UPLOAD_POST_RETRY_COUNT + 1):
+            try:
+                result = publish_to_upload_post(
+                    video_path=video_path,
+                    brand_id=brand.id,
+                    platforms=upload_post_platforms,
+                    title=title,
+                    description_by_platform=desc_by_platform,
+                    scheduled_at=post.scheduled_at,
+                    timezone_name=tz_name,
+                )
+                if result.get("success"):
+                    up_success = True
+                    logger.info(
+                        "[UploadPost] Recebido confirmação da postagem e agendamento (id %s)",
+                        result.get("request_id") or "ok",
+                    )
+                    yt_platform = "YT" if ("YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])) else "YTB"
+                    UPLOAD_POST_TO_PLATFORM = {
+                        "tiktok": "TT",
+                        "x": "X",
+                        "instagram": "IG",
+                        "youtube": yt_platform,
+                    }
+                    up_results = (result.get("data") or {}).get("results") or {}
+                    for up_platform, platform_code in UPLOAD_POST_TO_PLATFORM.items():
+                        plat_data = up_results.get(up_platform)
+                        if plat_data and plat_data.get("success"):
+                            vid = plat_data.get("video_id") or plat_data.get("publish_id")
+                            if vid:
+                                external_ids[platform_code] = str(vid)
+                                if up_platform == "youtube":
+                                    upload_post_youtube_ok = True
+                    if result.get("request_id"):
+                        external_ids["upload_post_request_id"] = str(result["request_id"])
+                    # Com async_upload=true, YouTube pode vir sem video_id ainda (processando). Evita fallback duplicado.
+                    if "YOUTUBE" in upload_post_platforms and result.get("request_id"):
+                        upload_post_youtube_ok = True
+                    break
+                last_up_error = result.get("error", "erro")
+            except UploadPostPublishError as e:
+                last_up_error = str(e)
+                if attempt < UPLOAD_POST_RETRY_COUNT:
+                    logger.warning(
+                        "[UploadPost] Erro (tentativa %s/%s), retry em %s segundos: %s",
+                        attempt + 1,
+                        UPLOAD_POST_RETRY_COUNT + 1,
+                        UPLOAD_POST_RETRY_DELAY_SEC,
+                        last_up_error,
+                    )
+                    _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
+                else:
+                    logger.warning("[UploadPost] Falha após %s tentativas: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                    if "YOUTUBE" in upload_post_platforms:
+                        logger.info("[UploadPost] Fallback para YouTube API")
+            except Exception as e:
+                last_up_error = str(e)
+                if attempt < UPLOAD_POST_RETRY_COUNT:
+                    logger.warning(
+                        "[UploadPost] Erro (tentativa %s/%s), retry em %s segundos: %s",
+                        attempt + 1,
+                        UPLOAD_POST_RETRY_COUNT + 1,
+                        UPLOAD_POST_RETRY_DELAY_SEC,
+                        last_up_error,
+                    )
+                    _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
+                else:
+                    logger.warning("[UploadPost] Falha após %s tentativas: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                    if "YOUTUBE" in upload_post_platforms:
+                        logger.info("[UploadPost] Fallback para YouTube API")
+
+        if not up_success and last_up_error and "YOUTUBE" not in upload_post_platforms:
+            warnings.append(f"Upload-Post: {last_up_error}")
+
     for platform in post.platforms:
+        # Se YouTube já foi postado via Upload Post, pular API
+        if platform in ("YT", "YTB") and upload_post_youtube_ok and external_ids.get(platform):
+            continue
         account = post.social_account
         if not account or account.platform != platform:
             from apps.brands.models import BrandSocialAccount
@@ -1440,61 +1709,6 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                 "retry_scheduled_in_seconds": delay,
                 "errors": [item["message"] for item in retryable_errors],
             }
-    # Upload-Post (TikTok, X, Instagram): apenas para Shorts (YT). Longos (YTB) não vão para Upload-Post.
-    upload_post_platforms = []
-    is_short = "YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])
-    if not errors and brand and video_path and is_short:
-        if getattr(brand, "upload_post_tiktok_enabled", False):
-            upload_post_platforms.append("TIKTOK")
-        if getattr(brand, "upload_post_x_enabled", False):
-            upload_post_platforms.append("X")
-        if getattr(brand, "upload_post_instagram_enabled", False):
-            upload_post_platforms.append("INSTAGRAM")
-    if not upload_post_platforms and not errors and brand:
-        logger.info(
-            "[UploadPost] Pulado: brand_%s platforms=%s is_short=%s tiktok=%s x=%s insta=%s",
-            brand.id,
-            post.platforms,
-            is_short,
-            getattr(brand, "upload_post_tiktok_enabled", False),
-            getattr(brand, "upload_post_x_enabled", False),
-            getattr(brand, "upload_post_instagram_enabled", False),
-        )
-    if upload_post_platforms:
-        try:
-            from apps.social.publishers.upload_post import publish_to_upload_post
-
-            title = (post.title or "").strip() or "Vídeo"
-            desc_by_platform = {}
-            for p in upload_post_platforms:
-                extra = ""
-                if p == "TIKTOK":
-                    extra = (getattr(brand, "upload_post_tiktok_extra_description", "") or "").strip()
-                elif p == "X":
-                    extra = (getattr(brand, "upload_post_x_extra_description", "") or "").strip()
-                elif p == "INSTAGRAM":
-                    extra = (getattr(brand, "upload_post_instagram_extra_description", "") or "").strip()
-                desc_by_platform[p] = f"{title}\n\n{extra}".strip() if extra else title
-            tz_name = "America/Sao_Paulo"
-            if getattr(brand, "factory_id", None) and getattr(brand, "factory", None):
-                tz_name = (brand.factory.timezone or "").strip() or tz_name
-            result = publish_to_upload_post(
-                video_path=video_path,
-                brand_id=brand.id,
-                platforms=upload_post_platforms,
-                title=title,
-                description_by_platform=desc_by_platform,
-                scheduled_at=post.scheduled_at,
-                timezone_name=tz_name,
-            )
-            if result.get("success"):
-                logger.info("[UploadPost] Enviado para %s (brand_%s)", upload_post_platforms, brand.id)
-            else:
-                warnings.append(f"Upload-Post: {result.get('error', 'erro')}")
-        except Exception as e:
-            logger.warning("[UploadPost] Falha: %s", e)
-            warnings.append(f"Upload-Post: {e}")
-
     if errors:
         post.status = "FAILED"
         all_errors = errors + warnings
@@ -1541,7 +1755,18 @@ def post_to_platforms_task(self, scheduled_post_id: int):
                     kwargs={"post_ids": [post.id]},
                     countdown=THUMBNAIL_BATCH_DELAY_SEC,
                 )
-    return {"status": post.status, "errors": errors}
+    return {
+        "status": post.status,
+        "errors": errors,
+        "error": post.error or ("; ".join(errors) if errors else ""),
+        "external_ids": external_ids,
+    }
+
+
+@shared_task
+def post_to_platforms_task(scheduled_post_id: int):
+    """Publica um ScheduledPost nas plataformas configuradas."""
+    return _run_post_to_platforms(scheduled_post_id)
 
 
 def _normalize_media_path(path: str) -> str:

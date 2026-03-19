@@ -127,6 +127,7 @@ class BrandSerializer(serializers.ModelSerializer):
             "upload_post_x_extra_description",
             "upload_post_instagram_enabled",
             "upload_post_instagram_extra_description",
+            "upload_post_youtube_enabled",
         ]
         extra_kwargs = {"slug": {"required": False}}
 

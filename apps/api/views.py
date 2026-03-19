@@ -1288,6 +1288,14 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
         safe_title = "".join(c for c in (inventory.title or f"video_{inventory.id}") if c not in r'\/:*?"<>|').strip() or f"video_{inventory.id}"
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            # Txt com título e descrição para postagem manual
+            txt_lines = [
+                f"Título: {inventory.title or '(vazio)'}",
+                "",
+                "Descrição:",
+                inventory.description or "(vazio)",
+            ]
+            zf.writestr(f"{safe_title}_descricao.txt", "\n".join(txt_lines).encode("utf-8"))
             if has_video:
                 try:
                     fp = Path(corte.file.path)

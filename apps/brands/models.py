@@ -218,6 +218,10 @@ class Brand(models.Model):
         default="",
         help_text="Texto extra na descrição do Instagram. Se vazio, usa só o que a LLM retornar.",
     )
+    upload_post_youtube_enabled = models.BooleanField(
+        default=False,
+        help_text="Se ativo, envia vídeos para YouTube via Upload-Post (preferência). Se inativo, usa YouTube API/OAuth direto.",
+    )
 
     class Meta:
         constraints = [

@@ -92,7 +92,7 @@ services:
         condition: service_started
     networks:
       - app
-    command: celery -A config worker -l INFO -P solo -Q publish
+    command: celery -A config worker -l INFO -P solo -Q publish --heartbeat-interval=300
 
   beat:
     build: .

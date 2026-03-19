@@ -122,6 +122,7 @@ export default function IntroOutro() {
   const [uploadPostXExtra, setUploadPostXExtra] = useState('')
   const [uploadPostInstagramEnabled, setUploadPostInstagramEnabled] = useState(false)
   const [uploadPostInstagramExtra, setUploadPostInstagramExtra] = useState('')
+  const [uploadPostYoutubeEnabled, setUploadPostYoutubeEnabled] = useState(false)
   const [savingUploadPost, setSavingUploadPost] = useState(false)
   const [youtubeCredentials, setYoutubeCredentials] = useState([])
   const [youtubeCredentialSecrets, setYoutubeCredentialSecrets] = useState({})
@@ -192,6 +193,7 @@ export default function IntroOutro() {
     setUploadPostXExtra(selected?.upload_post_x_extra_description || '')
     setUploadPostInstagramEnabled(!!selected?.upload_post_instagram_enabled)
     setUploadPostInstagramExtra(selected?.upload_post_instagram_extra_description || '')
+    setUploadPostYoutubeEnabled(!!selected?.upload_post_youtube_enabled)
   }, [brandId, brands])
 
   async function handleAdd(e) {
@@ -429,6 +431,7 @@ export default function IntroOutro() {
         upload_post_x_extra_description: uploadPostXExtra || '',
         upload_post_instagram_enabled: uploadPostInstagramEnabled,
         upload_post_instagram_extra_description: uploadPostInstagramExtra || '',
+        upload_post_youtube_enabled: uploadPostYoutubeEnabled,
       })
       const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
       await refreshBrands(fetcher)
@@ -842,6 +845,18 @@ export default function IntroOutro() {
                       disabled={!uploadPostInstagramEnabled}
                     />
                   </div>
+                </div>
+              </div>
+              <div className="upload-post-block">
+                <div className="form-row" style={{ alignItems: 'center', gap: 12 }}>
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={uploadPostYoutubeEnabled}
+                      onChange={(e) => setUploadPostYoutubeEnabled(e.target.checked)}
+                    />
+                    YouTube (via Upload-Post, preferência sobre API direta)
+                  </label>
                 </div>
               </div>
               <div className="form-actions-row">

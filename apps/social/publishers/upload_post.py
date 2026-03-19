@@ -15,6 +15,7 @@ PLATFORM_MAP = {
     "TIKTOK": "tiktok",
     "X": "x",  # Upload-Post usa "x", não "twitter"
     "INSTAGRAM": "instagram",
+    "YOUTUBE": "youtube",
 }
 
 
@@ -90,6 +91,8 @@ def publish_to_upload_post(
                 logger.info("[UploadPost] Agendado para %s (timezone=%s)", scheduled_date_str, timezone_name)
             for pc in platform_codes:
                 form_data.append(("platform[]", pc))
+            # async_upload=true: retorna rápido com request_id, processa em background. Evita 504/499 em vídeos grandes.
+            form_data.append(("async_upload", "true"))
             resp = requests.post(
                 UPLOAD_POST_API_URL,
                 headers=headers,

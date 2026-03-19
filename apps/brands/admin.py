@@ -37,7 +37,7 @@ class BrandAdmin(admin.ModelAdmin):
         ("Thumbnails", {"fields": ("thumbnail_font", "thumbnail_band_color", "thumbnail_text_color", "thumbnail_effect_color")}),
         ("Agendamento", {"fields": ("short_slot_times", "long_slot_times", "vertical_mode")}),
         (
-            "Upload-Post (TikTok, X, Instagram)",
+            "Upload-Post (TikTok, X, Instagram, YouTube)",
             {
                 "fields": (
                     "upload_post_tiktok_enabled",
@@ -46,6 +46,7 @@ class BrandAdmin(admin.ModelAdmin):
                     "upload_post_x_extra_description",
                     "upload_post_instagram_enabled",
                     "upload_post_instagram_extra_description",
+                    "upload_post_youtube_enabled",
                 ),
             },
         ),
