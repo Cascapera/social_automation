@@ -21,6 +21,7 @@ from apps.brands.models import BrandSocialAccount, BrandYouTubeCredential
 from apps.jobs.models import ScheduledPost
 from apps.social.publishers.base import BasePublisher
 from apps.social.services.youtube_credentials import get_credentials
+from apps.social.services.youtube_description import build_youtube_description
 
 RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
 MAX_RETRIES = 10
@@ -140,59 +141,25 @@ class YouTubePublisher(BasePublisher):
         return result
 
     def _build_description(self, post: ScheduledPost | None) -> str:
-        """Monta descrição final para YouTube."""
+        """Monta descrição final para YouTube (mesmo formato do download de mídias)."""
         if not post:
             return ""
-        # Fluxo padrão (jobs manuais)
         if not getattr(post, "auto_cut_corte_id", None):
             return (post.description or "")[:5000]
-
         corte = getattr(post, "auto_cut_corte", None)
-        analysis = getattr(corte, "analysis", None) if corte else None
-        if not analysis:
-            return (post.description or "")[:5000]
-
-        video_name = (
-            (analysis.name or "").strip()
-            or ((analysis.source.title or "").strip() if getattr(analysis, "source", None) else "")
+        brand = None
+        if getattr(post, "social_account", None):
+            brand = getattr(post.social_account, "brand", None)
+        if not brand and getattr(post, "job", None):
+            brand = getattr(post.job, "brand", None)
+        if not brand and getattr(post, "factory_schedule", None):
+            brand = getattr(post.factory_schedule, "brand", None)
+        return build_youtube_description(
+            corte=corte,
+            brand=brand,
+            title=post.title,
+            description_override=post.description,
         )
-        if not video_name and getattr(analysis, "file", None) and analysis.file.name:
-            video_name = Path(analysis.file.name).stem
-        if not video_name:
-            video_name = "Vídeo original"
-
-        convidados = (analysis.convidados or "").strip() or "-"
-        prompt_version = (getattr(analysis, "prompt_version", "") or "").strip().lower()
-        is_en = prompt_version.endswith("_en")
-
-        if is_en:
-            lines = [
-                f"🎙️ Clip from live: {video_name}",
-                "",
-                f"Guest: {convidados}",
-            ]
-            full_episode_label = "📺 Full episode:"
-        else:
-            lines = [
-                f"🎙️ Corte da live: {video_name}",
-                "",
-                f"Convidado: {convidados}",
-            ]
-            full_episode_label = "📺 Episódio completo:"
-
-        youtube_url = (analysis.youtube_url or "").strip()
-        if youtube_url:
-            lines.extend(["", full_episode_label, youtube_url])
-
-        auto_part = "\n".join(lines).strip()
-        brand_extra = ""
-        if getattr(analysis, "brand", None):
-            brand_extra = (analysis.brand.youtube_description_extra or "").strip()
-
-        if brand_extra:
-            # Duas linhas de separação entre parte automática e parte editável da marca.
-            return f"{auto_part}\n\n\n{brand_extra}"[:5000]
-        return auto_part[:5000]
 
     THUMBNAIL_MAX_SIZE_BYTES = 2 * 1024 * 1024  # 2MB
     THUMBNAIL_RETRY_DELAY_SEC = 60

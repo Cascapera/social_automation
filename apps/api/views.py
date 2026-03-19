@@ -30,6 +30,7 @@ from apps.jobs.models import (
 )
 from apps.jobs.tasks import process_job, generate_subtitles_task, burn_subtitles_task
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte
+from apps.social.services.youtube_description import build_youtube_description
 from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
 from django.conf import settings
 from apps.jobs.services.subtitles import align_edited_to_original_words
@@ -1286,14 +1287,23 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         safe_title = "".join(c for c in (inventory.title or f"video_{inventory.id}") if c not in r'\/:*?"<>|').strip() or f"video_{inventory.id}"
+        # Descrição igual à usada na postagem (referência do vídeo original + texto extra da brand)
+        full_description = build_youtube_description(
+            corte=corte,
+            brand=getattr(inventory, "brand", None),
+            title=inventory.title,
+            description_override=inventory.description,
+        )
+        final_title = (inventory.title or "").strip() or "Vídeo"
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            # Txt com título e descrição para postagem manual
+            # Txt com título e descrição prontos para copiar e colar no YouTube
             txt_lines = [
-                f"Título: {inventory.title or '(vazio)'}",
+                "=== TÍTULO (copie para o campo Título) ===",
+                final_title,
                 "",
-                "Descrição:",
-                inventory.description or "(vazio)",
+                "=== DESCRIÇÃO (copie e cole no YouTube) ===",
+                full_description,
             ]
             zf.writestr(f"{safe_title}_descricao.txt", "\n".join(txt_lines).encode("utf-8"))
             if has_video:
