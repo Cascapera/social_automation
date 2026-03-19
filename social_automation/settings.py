@@ -31,11 +31,24 @@ DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 
 
 
-ALLOWED_HOSTS = (
-    ["localhost", "127.0.0.1"]
-    if DEBUG
-    else [h.strip() for h in (os.getenv("ALLOWED_HOSTS", "") or "").split(",") if h.strip()]
-)
+def _get_allowed_hosts():
+    if not DEBUG:
+        return [h.strip() for h in (os.getenv("ALLOWED_HOSTS", "") or "").split(",") if h.strip()]
+    hosts = ["localhost", "127.0.0.1"]
+    # Permite acesso pela rede quando FRONTEND_URL aponta para IP (ex: http://192.168.1.100:5173)
+    try:
+        from urllib.parse import urlparse
+        frontend = (os.getenv("FRONTEND_URL") or "").strip()
+        if frontend:
+            parsed = urlparse(frontend)
+            if parsed.hostname and parsed.hostname not in hosts:
+                hosts.append(parsed.hostname)
+    except Exception:
+        pass
+    return hosts
+
+
+ALLOWED_HOSTS = _get_allowed_hosts()
 
 
 # Application definition
@@ -230,10 +243,12 @@ SIMPLE_JWT = {
 }
 
 # CORS - React em desenvolvimento roda em localhost:5173
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+# Para acesso de outro PC na rede: defina FRONTEND_URL=http://SEU_IP:5173 no .env
+_cors_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+_frontend_url = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+if _frontend_url and _frontend_url not in _cors_origins:
+    _cors_origins.append(_frontend_url)
+CORS_ALLOWED_ORIGINS = _cors_origins
 
 # Reduz ruído no Celery: libs Google (file_cache, Refreshing credentials) em WARNING
 LOGGING = {

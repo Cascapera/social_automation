@@ -1,5 +1,7 @@
+import io
 import os
 import re
+import zipfile
 from pathlib import Path
 from datetime import timedelta
 
@@ -1256,6 +1258,128 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 "scheduled_post_id": post.id,
                 "scheduled_for": next_try,
                 "queued_immediately": queued_immediately,
+            }
+        )
+
+    @action(detail=True, methods=["get"], url_path="download-media")
+    def download_media(self, request, pk=None):
+        """
+        Baixa vídeo (mp4) e thumbnail em um único arquivo ZIP para postagem manual.
+        """
+        inventory = self.get_object()
+        if inventory.status == "POSTED":
+            return Response(
+                {"error": "Vídeo já postado. Mídias podem ter sido removidas."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        corte = getattr(inventory, "auto_cut_corte", None)
+        if not corte:
+            return Response(
+                {"error": "Item sem corte vinculado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        has_video = corte.file and corte.file.name
+        has_thumb = corte.thumbnail and corte.thumbnail.name
+        if not has_video and not has_thumb:
+            return Response(
+                {"error": "Nenhuma mídia disponível para download."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        safe_title = "".join(c for c in (inventory.title or f"video_{inventory.id}") if c not in r'\/:*?"<>|').strip() or f"video_{inventory.id}"
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            if has_video:
+                try:
+                    fp = Path(corte.file.path)
+                    if fp.exists():
+                        ext = fp.suffix.lower() if fp.suffix else ".mp4"
+                        zf.write(fp, arcname=f"{safe_title}{ext}")
+                except Exception:
+                    pass
+            if has_thumb:
+                try:
+                    fp = Path(corte.thumbnail.path)
+                    if fp.exists():
+                        ext = fp.suffix.lower() if fp.suffix else ".jpg"
+                        zf.write(fp, arcname=f"{safe_title}_thumb{ext}")
+                except Exception:
+                    pass
+        zip_buffer.seek(0)
+        filename = f"{safe_title}_midias.zip"
+        response = FileResponse(zip_buffer, as_attachment=True, filename=filename)
+        response["Content-Type"] = "application/zip"
+        return response
+
+    @action(detail=True, methods=["post"], url_path="mark-posted")
+    def mark_posted(self, request, pk=None):
+        """
+        Marca item como postado manualmente: move para vídeos postados e remove mídias locais.
+        """
+        inventory = self.get_object()
+        if inventory.status == "POSTED":
+            return Response(
+                {"error": "Este vídeo já está marcado como postado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        schedules = list(
+            FactoryPostingSchedule.objects.select_related("scheduled_post")
+            .filter(inventory_item=inventory)
+            .order_by("id")
+        )
+        scheduled_post_ids = [s.scheduled_post_id for s in schedules if getattr(s, "scheduled_post_id", None)]
+        now = timezone.now()
+        deleted_files = 0
+        deleted_thumbnails = 0
+        with transaction.atomic():
+            corte = getattr(inventory, "auto_cut_corte", None)
+            if corte and getattr(corte, "file", None):
+                try:
+                    corte.file.delete(save=False)
+                    deleted_files += 1
+                except Exception:
+                    pass
+            if corte and getattr(corte, "thumbnail", None):
+                try:
+                    corte.thumbnail.delete(save=False)
+                    deleted_thumbnails += 1
+                except Exception:
+                    pass
+            for post_id in scheduled_post_ids:
+                post = ScheduledPost.objects.filter(id=post_id).first()
+                if post:
+                    post.status = "DONE"
+                    post.posted_at = post.posted_at or now
+                    post.error = ""
+                    post.save(update_fields=["status", "posted_at", "error", "updated_at"])
+            for s in schedules:
+                s.status = "DONE"
+                s.save(update_fields=["status", "updated_at"])
+            inventory.status = "POSTED"
+            inventory.posted_at = now
+            inventory.last_error = ""
+            inventory.save(update_fields=["status", "posted_at", "last_error", "updated_at"])
+            factory = inventory.factory
+            brand = inventory.brand
+            if factory and brand and not PostedVideoLog.objects.filter(
+                inventory_item=inventory,
+                external_platform="MANUAL",
+                external_video_id="manual",
+            ).exists():
+                PostedVideoLog.objects.create(
+                    factory=factory,
+                    brand=brand,
+                    inventory_item=inventory,
+                    external_platform="MANUAL",
+                    external_video_id="manual",
+                    posted_at=now,
+                    metadata_snapshot={"manual_post": True},
+                )
+        return Response(
+            {
+                "ok": True,
+                "inventory_item_id": inventory.id,
+                "deleted_media_files": deleted_files,
+                "deleted_media_thumbnails": deleted_thumbnails,
             }
         )
 

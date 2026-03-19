@@ -293,9 +293,7 @@ class CutSerializer(serializers.ModelSerializer):
 
     def get_file_url(self, obj):
         if obj.file:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.file.url)
+            # Usa URL relativa para funcionar quando acessado de outro PC na rede
             return obj.file.url
         return None
 
@@ -399,9 +397,6 @@ class JobSerializer(serializers.ModelSerializer):
         try:
             out = obj.output
             if out and out.file:
-                request = self.context.get("request")
-                if request:
-                    return request.build_absolute_uri(out.file.url)
                 return out.file.url
         except (RenderOutput.DoesNotExist, AttributeError):
             pass
@@ -532,17 +527,11 @@ class AutoCutCorteSerializer(serializers.ModelSerializer):
 
     def get_file_url(self, obj):
         if obj.file:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.file.url)
             return obj.file.url
         return None
 
     def get_thumbnail_url(self, obj):
         if obj.thumbnail:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.thumbnail.url)
             return obj.thumbnail.url
         return None
 

@@ -176,6 +176,37 @@ export async function retryAwaitingInventoryItem(id, payload = {}) {
   })
 }
 
+export async function downloadInventoryMedia(id, title = '') {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/video-inventory/${id}/download-media/`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `Erro ${res.status}`)
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition')
+  let filename = (title || `video_${id}`).replace(/[/\\:*?"<>|]/g, '').trim() || `video_${id}`
+  if (!filename.toLowerCase().endsWith('.zip')) filename = `${filename}_midias.zip`
+  if (disposition) {
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i) || disposition.match(/filename=["']?([^"';]+)["']?/i)
+    if (match) filename = match[1].trim()
+  }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function markInventoryPosted(id) {
+  return apiRequest(`/video-inventory/${id}/mark-posted/`, {
+    method: 'POST',
+  })
+}
+
 export async function createBrand(nameOrPayload) {
   const payload = typeof nameOrPayload === 'string'
     ? { name: nameOrPayload.trim() }

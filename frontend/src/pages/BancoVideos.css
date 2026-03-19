@@ -72,6 +72,13 @@
   min-width: 220px;
 }
 
+.banco-fonte {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .banco-error {
   color: #fca5a5;
   min-width: 180px;
@@ -128,4 +135,26 @@
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.btn-download {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border-color: var(--accent, #3b82f6);
+}
+
+.btn-download:hover:not(:disabled) {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.btn-posted {
+  background: #22c55e;
+  color: #fff;
+  border-color: #22c55e;
+}
+
+.btn-posted:hover:not(:disabled) {
+  background: #16a34a;
+  border-color: #16a34a;
 }

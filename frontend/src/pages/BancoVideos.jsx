@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useBrand } from '../context/BrandContext'
-import { getVideoInventory, removeAwaitingInventoryItem, retryAwaitingInventoryItem } from '../api'
+import { getVideoInventory, removeAwaitingInventoryItem, retryAwaitingInventoryItem, downloadInventoryMedia, markInventoryPosted } from '../api'
 import './BancoVideos.css'
 
 const STATUS_LABEL = {
@@ -69,6 +69,8 @@ export default function BancoVideos() {
   const [error, setError] = useState('')
   const [removingId, setRemovingId] = useState(null)
   const [retryingId, setRetryingId] = useState(null)
+  const [downloadingId, setDownloadingId] = useState(null)
+  const [markingPostedId, setMarkingPostedId] = useState(null)
   const [retryModalItem, setRetryModalItem] = useState(null)
   const [retryScheduledAt, setRetryScheduledAt] = useState('')
 
@@ -154,6 +156,40 @@ export default function BancoVideos() {
     setRetryModalItem(item)
     setRetryScheduledAt(initial || toDatetimeLocal(new Date()))
     setError('')
+  }
+
+  async function handleDownloadMedia(item) {
+    if (!item?.id) return
+    setError('')
+    setDownloadingId(item.id)
+    try {
+      await downloadInventoryMedia(item.id, item.title || `video_${item.id}`)
+    } catch (e) {
+      setError(e.message || 'Erro ao baixar mídias.')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  async function handleMarkPosted(item) {
+    if (!item?.id) return
+    if (!confirm('Marcar este vídeo como postado manualmente? O vídeo irá para "Vídeos Postados" e as mídias serão removidas.')) return
+    setError('')
+    setMarkingPostedId(item.id)
+    try {
+      await markInventoryPosted(item.id)
+      setItems((prev) =>
+        prev.map((x) =>
+          x.id === item.id
+            ? { ...x, status: 'POSTED', posted_at: new Date().toISOString() }
+            : x,
+        ),
+      )
+    } catch (e) {
+      setError(e.message || 'Erro ao marcar como postado.')
+    } finally {
+      setMarkingPostedId(null)
+    }
   }
 
   async function handleRetryPosting(item, scheduledAtValue) {
@@ -282,7 +318,7 @@ export default function BancoVideos() {
                         <th>Tipo</th>
                         <th>Título</th>
                         <th>Score</th>
-                        <th>Fonte</th>
+                        <th className="banco-fonte">Fonte</th>
                         <th>Status</th>
                         <th>Erro</th>
                         <th>Ações</th>
@@ -295,7 +331,7 @@ export default function BancoVideos() {
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
                           <td className="banco-title">{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
-                          <td>{item.source_display_name || item.source_asset_id || '-'}</td>
+                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>{item.source_display_name || item.source_asset_id || '-'}</td>
                           <td>{statusDisplay(item)}</td>
                           <td className="banco-error">{item.last_error || '-'}</td>
                           <td>
@@ -312,6 +348,26 @@ export default function BancoVideos() {
                                 : item.status === 'AVAILABLE'
                                   ? 'Agendar'
                                   : 'Tentar novamente'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-action btn-download"
+                              onClick={() => handleDownloadMedia(item)}
+                              disabled={downloadingId === item.id}
+                              title="Baixar vídeo e thumbnail em um ZIP para postagem manual"
+                              style={{ marginRight: 8 }}
+                            >
+                              {downloadingId === item.id ? 'Baixando...' : 'Download'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-action btn-posted"
+                              onClick={() => handleMarkPosted(item)}
+                              disabled={markingPostedId === item.id}
+                              title="Marcar como postado manualmente (move para postados e remove mídias)"
+                              style={{ marginRight: 8 }}
+                            >
+                              {markingPostedId === item.id ? 'Marcando...' : 'Postado'}
                             </button>
                             <button
                               type="button"
@@ -344,7 +400,7 @@ export default function BancoVideos() {
                         <th>Tipo</th>
                         <th>Título</th>
                         <th>Score</th>
-                        <th>Fonte</th>
+                        <th className="banco-fonte">Fonte</th>
                         <th>Postado em</th>
                       </tr>
                     </thead>
@@ -355,7 +411,7 @@ export default function BancoVideos() {
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
                           <td className="banco-title">{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
-                          <td>{item.source_display_name || item.source_asset_id || '-'}</td>
+                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>{item.source_display_name || item.source_asset_id || '-'}</td>
                           <td>{formatDate(item.posted_at)}</td>
                         </tr>
                       ))}
