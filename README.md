@@ -93,7 +93,7 @@ Produção de conteúdo em escala para **factories de vídeos** — empresas que
 - Análise de viralidade com **LLM** (Grok/OpenAI)
 - Sugestão de cortes curtos (Shorts) e longos (YouTube)
 - Thumbnails automáticas com fontes e cores customizáveis
-- Modos: viral, educacional, PT, EN, tradução EN→PT
+- Modos: viral, **viral longo** (shorts 90–160s), educacional, PT, EN, tradução EN→PT
 - Reenquadramento vertical: zoom/crop ou frame centralizado
 
 ### Jobs de Edição

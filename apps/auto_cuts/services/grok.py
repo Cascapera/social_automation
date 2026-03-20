@@ -130,6 +130,57 @@ IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes lon
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
+# Viral longo: mesmas características do viral clássico, porém shorts mais longos (90–160s) para narrativas mais completas
+SYSTEM_PROMPT_VIRAL_LONG = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
+
+Sua tarefa é identificar, ranquear e selecionar os melhores momentos para Shorts (formato estendido) e para cortes longos.
+
+Priorize momentos com:
+- reação emocional forte
+- humor
+- revelação surpreendente
+- opinião controversa
+- história pessoal
+- conselho poderoso
+- fala chocante
+- discussão/conflito
+- trechos que geram comentário/compartilhamento
+
+Evite:
+- trechos técnicos demais
+- partes dependentes de contexto externo
+- explicações lentas
+- abertura, cumprimentos e enrolação
+
+REGRAS DE DURAÇÃO:
+- Shorts (viral longo): 90–160 segundos — narrativa mais completa que o corte de 30–60s; gancho forte nos primeiros segundos e desenvolvimento até conclusão natural
+- Longos: 8–30 minutos
+
+FORMATO DE SCORE:
+- virality_score em percentual de 0 a 100 (sem símbolo %, valor inteiro)
+
+REGRAS DE TÍTULO E THUMBNAIL:
+- suggested_title e title_suggestion: OBRIGATÓRIO incluir 1–3 emojis relevantes em TODOS os títulos (shorts e longs). Emojis aumentam engajamento e CTR.
+- suggested_title deve ser chamativo para clique e ter entre 45 e 100 caracteres (evite títulos curtos/genéricos).
+- thumbnail_text deve ser curto (2–4 palavras), forte, direto, sem frase longa.
+- Use o texto curto em thumbnail_text, não em suggested_title.
+
+PALAVRAS QUE AUMENTAM CTR (dê preferência em títulos e thumbnail_text):
+segredo, verdade, revelado, ninguém fala, exposto, urgente, agora, aconteceu, entenda, explicado, polêmica, absurdo, insano, surreal, histórico, chocante, erro, alerta, atenção, descubra, estratégia, como funciona, bastidores, prova, análise, detalhe, especialistas, impactante, mudança, viral, imperdível, decisão, confirmado, quase ninguém percebeu, o que mudou, previsão, explicação simples, caso real, debate, discussão, reação, comentário, opinião, momento tenso, climão, flagrante, inesperado, surpresa, revelação, investigação, denúncia, bomba, exclusivo, acaba de sair, história real, grande erro, aprenda, guia, dica, truque, hack, novo, novidade, detalhe escondido, verdade chocante, sem filtro, sem censura, ponto crítico, momento decisivo, mudou tudo, inacreditável, impacto, explicação rápida, explicação completa, análise profunda, por trás, história completa, caso polêmico, debate quente, reação ao vivo, explodiu na internet, tendência, assunto do momento, todos estão falando, o que está acontecendo, explicado em minutos, vale a pena, não ignore, começou assim, terminou assim.
+
+PALAVRAS PROIBIDAS (substitua conforme indicado):
+porra→p@@ra, caralho→c@ralho, merda→m#rda, puta→pta, putaria→ptaria, arrombado→arr0mbado, bosta→b0sta, desgraçado→d3sgraçado, foda→f*da | assassinato→caso chocante, suicídio→história pesada, massacre→ataque brutal, tortura→caso extremo, execução→execuç@o | pornografia→conteúdo adulto, sexo explícito→conteúdo +18, orgia→situação íntima, prostituta→escândalo íntimo | cocaína/drogas/heroína/maconha→substâncias | arma/pistola/fuzil→equipamento ou objeto | guerra/violência→conflito | morte→caso extremo | crime brutal→caso chocante | ataque→incidente.
+NUNCA use: estupro, terrorismo, extremismo, racismo, ódio. Use termos genéricos ou alusivos.
+
+IMPORTANTE:
+- Use APENAS timestamps que aparecem na transcrição.
+- Não invente timestamps.
+- Não retorne texto fora do JSON.
+
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+
+IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
+
 SYSTEM_PROMPT_EDUCATIONAL = """Você é um editor especialista em conteúdo educacional e financeiro para Reels, TikTok, Shorts e YouTube. Analise transcrições com timestamps e identifique trechos com alto valor didático e explicativo. Priorize blocos completos que ensinam um conceito do início ao fim.
 
 CRITÉRIOS EDUCACIONAIS – SHORTS 2–3 MIN (120–180 seg):
@@ -230,6 +281,107 @@ Responda SOMENTE com JSON válido:
       "start_timestamp": "MM:SS",
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "COMEDY_HUMOR",
+      "emotion_type": "funny",
+      "main_topic": "história constrangedora no trabalho",
+      "hook_sentence": "frase mais impactante",
+      "suggested_title": "Título forte 🎯",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "PALAVRA FORTE"
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "MM:SS",
+      "end_timestamp": "MM:SS",
+      "duration_seconds": 720,
+      "virality_score": 88,
+      "theme_category": "BUSINESS_MONEY",
+      "emotion_type": "inspiring",
+      "main_topic": "estratégia de crescimento",
+      "hook_sentence": "frase mais impactante",
+      "suggested_title": "Título forte 🎯",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "GANHO RÁPIDO",
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 12,
+      "title_suggestion": "Título forte 🎯",
+      "reason": "por que viraliza"
+    }}
+  ]
+}}
+
+Regras finais:
+- candidate_shorts deve ter entre 30 e 50 itens.
+- final_long_cuts deve ter exatamente 10 itens.
+- ranked_shorts pode vir vazio ([]).
+- Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) em português brasileiro."""
+
+CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
+
+{chunks_block}
+
+---
+
+Tarefas (responda em UMA ÚNICA resposta JSON):
+
+REGRA CRÍTICA DE FORMATO:
+- A RAIZ da resposta DEVE ser um OBJETO JSON (dict), nunca uma lista.
+- Use exatamente as chaves de nível raiz: "candidate_shorts", "ranked_shorts", "final_long_cuts".
+- NUNCA retorne array na raiz.
+
+1. Gere entre 30 e 50 candidatos de shorts virais estendidos (90–160 segundos cada), todos com virality_score (0–100). Priorize momentos com narrativa coesa e gancho forte no início.
+2. Gere 10 candidatos de cortes longos (8–15 min), todos com virality_score (0–100).
+3. Não é obrigatório ordenar a saída. Apenas preencha corretamente as notas.
+4. O backend fará a seleção final dos melhores scores conforme a quantidade configurada no job.
+
+Para cada clipe (short ou longo), inclua:
+- clip_number
+- start_timestamp
+- end_timestamp
+- duration_seconds
+- virality_score (0..100)
+- theme_category (OBRIGATÓRIO: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE ou COMEDY_HUMOR)
+- emotion_type (funny/shocking/inspiring/controversial/story)
+- main_topic
+- suggested_title
+- hook_sentence
+- thumbnail_moment_timestamp
+- thumbnail_text (2–4 palavras fortes)
+
+Regras adicionais:
+- suggested_title e title_suggestion: OBRIGATÓRIO 1–3 emojis em TODOS os títulos (shorts e longs). Nunca retorne título sem emoji.
+- suggested_title: 45–100 caracteres com 1–3 emojis relevantes.
+- thumbnail_text: 2–4 palavras (máx. 28 caracteres), caixa alta preferencial.
+- Shorts: duração alvo 90–160 segundos (não use cortes de 30–60s neste modo).
+
+Responda SOMENTE com JSON válido:
+{{
+  "candidate_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "MM:SS",
+      "end_timestamp": "MM:SS",
+      "duration_seconds": 120,
+      "virality_score": 96,
+      "theme_category": "COMEDY_HUMOR",
+      "emotion_type": "funny",
+      "main_topic": "história constrangedora no trabalho",
+      "hook_sentence": "frase mais impactante",
+      "suggested_title": "Título forte 🎯",
+      "thumbnail_moment_timestamp": "MM:SS",
+      "thumbnail_text": "PALAVRA FORTE"
+    }}
+  ],
+  "ranked_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "MM:SS",
+      "end_timestamp": "MM:SS",
+      "duration_seconds": 120,
       "virality_score": 96,
       "theme_category": "COMEDY_HUMOR",
       "emotion_type": "funny",
@@ -431,6 +583,157 @@ Respond ONLY with valid JSON:
       "start_timestamp": "00:15:22",
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
+      "virality_score": 96,
+      "theme_category": "COMEDY_HUMOR",
+      "emotion_type": "funny",
+      "main_topic": "embarrassing story at work",
+      "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
+      "thumbnail_moment_timestamp": "00:15:34",
+      "thumbnail_text": "FIRED LIVE"
+    }}
+  ],
+  "final_long_cuts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:42:10",
+      "end_timestamp": "00:53:40",
+      "duration_seconds": 690,
+      "virality_score": 88,
+      "theme_category": "STORIES_CURIOSITIES",
+      "emotion_type": "inspiring",
+      "main_topic": "career turning point",
+      "hook_sentence": "One decision changed everything in my career.",
+      "suggested_title": "The Decision That Changed His Career 🎯",
+      "thumbnail_moment_timestamp": "00:47:02",
+      "thumbnail_text": "ONE DECISION",
+      "start": "MM:SS",
+      "end": "MM:SS",
+      "duration_min": 11.5,
+      "title_suggestion": "The Decision That Changed His Career 🎯",
+      "reason": "why it goes viral"
+    }}
+  ]
+}}
+
+Final constraints:
+- candidate_shorts must contain between 30 and 50 items.
+- final_long_cuts must contain exactly 10 items.
+- ranked_shorts may be empty ([])."""
+
+# Viral long (EN): same as viral_en but short clips 90–160 seconds
+SYSTEM_PROMPT_VIRAL_LONG_EN = """You are an expert social media editor specialized in identifying viral moments in long-form podcasts and interviews.
+
+Your goal is to identify, rank, and select the strongest clips for extended Shorts (90–160s) and longer cuts.
+
+Prioritize moments with:
+- strong emotional reactions
+- funny moments
+- surprising revelations
+- controversial opinions
+- personal stories
+- powerful advice
+- shocking statements
+- arguments/disagreements
+- moments that drive shares/comments
+
+Avoid moments that are:
+- too technical
+- context-dependent
+- slow explanations
+- introductions/greetings/filler
+
+DURATION RULES:
+- Shorts (viral long): 90–160 seconds — fuller narrative than 30–60s clips; strong hook early and natural payoff
+- Long cuts: 8–15 minutes
+
+SCORING FORMAT:
+- virality_score must be an integer from 0 to 100 (no % symbol)
+
+TITLE + THUMBNAIL RULES:
+- suggested_title and title_suggestion: REQUIRED to include 1–3 relevant emojis in ALL titles (shorts and longs). Emojis boost engagement and CTR.
+- suggested_title must be clickworthy and 45–100 characters (avoid short/generic titles).
+- thumbnail_text must be short (2–4 words), punchy, and not a full sentence.
+- Keep short text in thumbnail_text, not in suggested_title.
+
+CTR-BOOSTING WORDS (prefer in titles and thumbnail_text):
+secret, truth, revealed, nobody talks about, exposed, urgent, now, happened, understand, explained, controversial, absurd, insane, surreal, historic, shocking, mistake, alert, attention, discover, strategy, how it works, behind the scenes, proof, analysis, detail, experts, impactful, change, viral, unmissable, decision, confirmed, almost nobody noticed, what changed, prediction, simple explanation, real case, debate, discussion, reaction, comment, opinion, tense moment, climax, caught red-handed, unexpected, surprise, revelation, investigation, scandal, bombshell, exclusive, just out, real story, big mistake, learn, guide, tip, trick, hack, new, novelty, hidden detail, shocking truth, unfiltered, uncensored, critical point, decisive moment, changed everything, unbelievable, impact, quick explanation, full explanation, deep analysis, behind, full story, controversial case, heated debate, live reaction, exploded on the internet, trend, trending topic, everyone is talking about, what's happening, explained in minutes, worth it, don't ignore, started like this, ended like this.
+
+FORBIDDEN WORDS (use substitution): fuck→f*ck, shit→sh*t, asshole→@sshole, bitch→b*tch | murder→shocking case, suicide→heavy story, massacre→brutal attack, torture→extreme case, execution→executi0n | pornography→adult content, explicit sex→+18 content, orgy→intimate situation, prostitute→intimate scandal | cocaine/drugs/heroin/marijuana→substances | weapon/gun/rifle→equipment or object | war/violence→conflict | death→extreme case | brutal crime→shocking case | attack→incident.
+NEVER use: rape, terrorism, extremism, racism, hate. Use generic or allusive terms.
+
+IMPORTANT:
+- Use ONLY timestamps present in the transcript.
+- Do not invent timestamps.
+- Return valid JSON only.
+
+IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+
+LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
+
+CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG_EN = """{context_block}Video transcription divided into blocks (with timestamps):
+
+{chunks_block}
+
+---
+
+Tasks (respond in ONE JSON response):
+
+CRITICAL FORMAT RULE:
+- The response root MUST be a JSON OBJECT (dict), never a list.
+- Use exactly these top-level keys: "candidate_shorts", "ranked_shorts", "final_long_cuts".
+- NEVER return a root-level array.
+
+1) Generate 30–50 candidate extended viral short clips (90–160 seconds each), all with virality_score (0–100). Prefer cohesive stories with a strong hook.
+2) Generate 10 candidate long clips (8–15 minutes), all with virality_score (0–100).
+3) Ordering is optional. Focus on correct scoring and valid timestamps.
+4) Backend will pick final best scores using the job configured limits.
+
+For each clip (short or long), include:
+- clip_number
+- start_timestamp
+- end_timestamp
+- duration_seconds
+- virality_score (0..100)
+- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- emotion_type (funny / shocking / inspiring / controversial / story)
+- main_topic
+- suggested_title
+- hook_sentence
+- thumbnail_moment_timestamp
+- thumbnail_text (2–4 powerful words)
+
+Additional rules:
+- suggested_title and title_suggestion: REQUIRED 1–3 emojis in ALL titles (shorts and longs). Never return a title without emojis.
+- suggested_title: 45–100 characters with 1–3 relevant emojis.
+- thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
+- Shorts: target duration 90–160 seconds (do NOT use 30–60s clips in this mode).
+- All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) MUST be in English.
+
+Respond ONLY with valid JSON:
+{{
+  "candidate_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:15:22",
+      "end_timestamp": "00:17:22",
+      "duration_seconds": 120,
+      "virality_score": 96,
+      "theme_category": "COMEDY_HUMOR",
+      "emotion_type": "funny",
+      "main_topic": "embarrassing story at work",
+      "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
+      "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
+      "thumbnail_moment_timestamp": "00:15:34",
+      "thumbnail_text": "FIRED LIVE"
+    }}
+  ],
+  "ranked_shorts": [
+    {{
+      "clip_number": 1,
+      "start_timestamp": "00:15:22",
+      "end_timestamp": "00:17:22",
+      "duration_seconds": 120,
       "virality_score": 96,
       "theme_category": "COMEDY_HUMOR",
       "emotion_type": "funny",
@@ -741,7 +1044,7 @@ def _validate_minimum_items(
     if not isinstance(ranked_shorts, list):
         raise ValueError("Resposta inválida: ranked_shorts não é lista.")
 
-    if pv in ("viral", "viral_en", "viral_translate"):
+    if pv in ("viral", "viral_en", "viral_translate", "viral_long", "viral_long_en"):
         if not isinstance(candidate_shorts, list):
             raise ValueError("Resposta inválida: candidate_shorts ausente ou não é lista.")
 
@@ -913,7 +1216,7 @@ def analyze_chunks_in_one_request(
     """
     Analisa todos os chunks em uma única requisição.
     chunks: [{text, start_sec, end_sec, segments}, ...]
-    prompt_version: viral, educational, viral_en, educational_en, viral_translate
+    prompt_version: viral, viral_long, educational, viral_en, viral_long_en, educational_en, viral_translate
     brand_only: quando True, theme_category é opcional (conteúdo para uma única marca).
     analysis_id: opcional; se GROK_SAVE_RESPONSE_JSON=1, salva a resposta em JSON com este id no nome.
     Retorna JSON com ranked_shorts e final_long_cuts (economia de tokens).
@@ -921,21 +1224,35 @@ def analyze_chunks_in_one_request(
     if not chunks:
         raise ValueError("Nenhum chunk para analisar")
     pv = (prompt_version or "viral").strip().lower()
-    is_en = pv in ("viral_en", "educational_en", "viral_translate")
+    is_en = pv in ("viral_en", "educational_en", "viral_translate", "viral_long_en")
     is_educational = pv in ("educational", "educational_en")
     is_viral_translate = pv == "viral_translate"
+    is_viral_long = pv in ("viral_long", "viral_long_en")
     lang = "en" if is_en else "pt"
     if is_viral_translate:
         system_prompt = SYSTEM_PROMPT_VIRAL_TRANSLATE
         template = CHUNKS_PROMPT_TEMPLATE_VIRAL_TRANSLATE
+    elif is_educational:
+        system_prompt = SYSTEM_PROMPT_EDUCATIONAL_EN if is_en else SYSTEM_PROMPT_EDUCATIONAL
+        template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN if is_en else CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL
+    elif is_viral_long:
+        system_prompt = SYSTEM_PROMPT_VIRAL_LONG_EN if pv == "viral_long_en" else SYSTEM_PROMPT_VIRAL_LONG
+        template = (
+            CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG_EN if pv == "viral_long_en" else CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG
+        )
     elif is_en:
-        system_prompt = SYSTEM_PROMPT_EDUCATIONAL_EN if is_educational else SYSTEM_PROMPT_VIRAL_EN
-        template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN if is_educational else CHUNKS_PROMPT_TEMPLATE_VIRAL_EN
+        system_prompt = SYSTEM_PROMPT_VIRAL_EN
+        template = CHUNKS_PROMPT_TEMPLATE_VIRAL_EN
     else:
-        system_prompt = SYSTEM_PROMPT_EDUCATIONAL if is_educational else SYSTEM_PROMPT
-        template = CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL if is_educational else CHUNKS_PROMPT_TEMPLATE
+        system_prompt = SYSTEM_PROMPT
+        template = CHUNKS_PROMPT_TEMPLATE
+    mode_label = (
+        "educational"
+        if is_educational
+        else ("viral_translate" if is_viral_translate else ("viral_long" if is_viral_long else "viral"))
+    )
     logger.info("[FLUXO/Grok] Montando prompt (%s, %s) com %d chunks (~%d chars)...",
-        "educational" if is_educational else ("viral_translate" if is_viral_translate else "viral"), lang,
+        mode_label, lang,
         len(chunks), sum(len(c.get("text", "")) for c in chunks))
     context_block = _build_context_block(
         assunto,

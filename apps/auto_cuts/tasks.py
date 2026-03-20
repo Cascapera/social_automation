@@ -32,6 +32,9 @@ from apps.auto_cuts.services.grok import analyze_chunks_in_one_request, analyze_
 CHUNKED_TRANSCRIPTION_THRESHOLD_SEC = 10 * 60  # 10 min
 VIRAL_SHORT_MIN_SEC = 30
 VIRAL_SHORT_MAX_SEC = 60
+# Modo viral_long / viral_long_en: shorts estendidos (90–160s), mesma lógica viral
+VIRAL_LONG_SHORT_MIN_SEC = 90
+VIRAL_LONG_SHORT_MAX_SEC = 160
 VIRAL_LONG_MIN_SEC = 8 * 60
 VIRAL_LONG_MAX_SEC = 15 * 60
 EDUCATIONAL_SHORT_MAX_SEC = 180
@@ -469,7 +472,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
     youtube_url = (analysis.youtube_url or "").strip()
     pv = (analysis.prompt_version or "viral").strip().lower()
-    transcript_lang = "en" if pv in ("viral_en", "educational_en", "viral_translate") else "pt"
+    transcript_lang = "en" if pv in ("viral_en", "viral_long_en", "educational_en", "viral_translate") else "pt"
     analysis.status = "transcribing"
     analysis.progress_message = "Baixando vídeo do YouTube..." if youtube_url else "Transcrevendo vídeo..."
     analysis.progress = 2 if youtube_url else 5
@@ -488,7 +491,13 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             download_dir = media_root / "auto_cuts" / "sources"
             download_dir.mkdir(parents=True, exist_ok=True)
             out_path = download_dir / f"yt_{analysis_id}.mp4"
-            downloaded = download_youtube(youtube_url, out_path)
+            # Modos EN: forçar faixa de áudio em inglês no yt-dlp (PT: canais BR, sem forçar)
+            prefer_en_audio = pv in ("viral_en", "viral_long_en", "educational_en", "viral_translate")
+            downloaded = download_youtube(
+                youtube_url,
+                out_path,
+                preferred_audio_language="en" if prefer_en_audio else None,
+            )
             with open(downloaded, "rb") as f:
                 analysis.file.save(downloaded.name, File(f), save=True)
             # Mantém youtube_url para metadados de publicação (descrição/episódio completo).
@@ -696,7 +705,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
         suggestions_created = []
         rank = 0
-        is_viral_prompt = pv in ("viral", "viral_en", "viral_translate")
+        is_viral_prompt = pv in ("viral", "viral_en", "viral_translate", "viral_long", "viral_long_en")
         is_educational_prompt = pv in ("educational", "educational_en")
         shorts_limit = max(1, min(30, int(getattr(analysis, "shorts_target", 12) or 12)))
         longs_limit = max(1, min(10, int(getattr(analysis, "longs_target", 3) or 3)))
@@ -762,19 +771,23 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
             if is_viral_prompt:
                 raw_duration = end_sec - start_sec
-                if raw_duration < VIRAL_SHORT_MIN_SEC:
+                if pv in ("viral_long", "viral_long_en"):
+                    vmin, vmax = VIRAL_LONG_SHORT_MIN_SEC, VIRAL_LONG_SHORT_MAX_SEC
+                else:
+                    vmin, vmax = VIRAL_SHORT_MIN_SEC, VIRAL_SHORT_MAX_SEC
+                if raw_duration < vmin:
                     logger.info(
                         "[FLUXO] Short viral ignorado por duração < %ss: %.2fs (%s -> %s)",
-                        VIRAL_SHORT_MIN_SEC,
+                        vmin,
                         raw_duration,
                         start_tc,
                         end_tc,
                     )
                     continue
-                if raw_duration > VIRAL_SHORT_MAX_SEC:
-                    end_sec = start_sec + VIRAL_SHORT_MAX_SEC
+                if raw_duration > vmax:
+                    end_sec = start_sec + vmax
                     end_tc = seconds_to_tc(end_sec)
-                    raw_duration = VIRAL_SHORT_MAX_SEC
+                    raw_duration = vmax
                 duration_seconds = raw_duration
             elif is_educational_prompt:
                 raw_duration = end_sec - start_sec

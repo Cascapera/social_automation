@@ -85,13 +85,15 @@ class AutoCutAnalysis(models.Model):
         max_length=24,
         choices=[
             ("viral", "Viral (PT)"),
+            ("viral_long", "Viral longo (PT, shorts 90–160s)"),
             ("educational", "Educacional (PT)"),
             ("viral_en", "Viral (EN)"),
+            ("viral_long_en", "Viral longo (EN, shorts 90–160s)"),
             ("educational_en", "Educacional (EN)"),
             ("viral_translate", "Viral Translate - EN to PT"),
         ],
         default="viral",
-        help_text="Modelo de prompt e idioma: PT, EN ou EN→PT com legendas",
+        help_text="Modelo de prompt e idioma: PT, EN ou EN→PT com legendas; viral longo = shorts 90–160s",
     )
     THUMBNAIL_FONT_CHOICES = [
         ("anton", "Anton"),

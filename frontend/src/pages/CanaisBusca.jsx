@@ -356,8 +356,10 @@ export default function CanaisBusca() {
                 title="Usado em todos os jobs criados pela busca automática"
               >
                 <option value="viral">Viral (PT)</option>
+                <option value="viral_long">Viral longo (PT, 90–160s)</option>
                 <option value="educational">Educacional (PT)</option>
                 <option value="viral_en">Viral (EN)</option>
+                <option value="viral_long_en">Viral longo (EN, 90–160s)</option>
                 <option value="educational_en">Educacional (EN)</option>
                 <option value="viral_translate">Viral Translate (EN→PT)</option>
               </select>

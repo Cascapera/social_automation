@@ -860,8 +860,10 @@ export default function CortesAutomaticos() {
             >
               <option value="educational">Educacional (PT, shorts 2–3 min)</option>
               <option value="viral">Viral (PT, shorts 30–60 seg)</option>
+              <option value="viral_long">Viral longo (PT, shorts 90–160 seg)</option>
               <option value="educational_en">Educacional (EN, 2–3 min)</option>
               <option value="viral_en">Viral (EN, 30–60 seg)</option>
+              <option value="viral_long_en">Viral longo (EN, shorts 90–160 seg)</option>
               <option value="viral_translate">Viral Translate - EN to PT</option>
             </select>
             <span className="form-hint">PT: transcrição e títulos em português. EN: transcrição e títulos em inglês. Viral Translate: vídeo em EN, legendas em PT.</span>

@@ -1486,7 +1486,15 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         vertical_mode = (request.data.get("vertical_mode") or "zoom_crop").strip().lower()
         if vertical_mode not in ("zoom_crop", "frame_center"):
             vertical_mode = "zoom_crop"
-        if prompt_version not in ("viral", "educational", "viral_en", "educational_en", "viral_translate"):
+        if prompt_version not in (
+            "viral",
+            "viral_long",
+            "educational",
+            "viral_en",
+            "viral_long_en",
+            "educational_en",
+            "viral_translate",
+        ):
             prompt_version = "viral"
         if thumbnail_font not in ("anton", "bebas", "montserrat", "impact"):
             thumbnail_font = "impact"

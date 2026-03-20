@@ -7,10 +7,19 @@ import time
 logger = logging.getLogger(__name__)
 
 
-def download_youtube(url: str, output_path: Path) -> Path:
+def download_youtube(
+    url: str,
+    output_path: Path,
+    *,
+    preferred_audio_language: str | None = None,
+) -> Path:
     """
     Baixa vídeo do YouTube (ou suportados pelo yt-dlp) para o caminho indicado.
     Retorna o Path do arquivo baixado.
+
+    preferred_audio_language:
+        Quando "en", prioriza faixa de áudio em inglês (evita dublagem automática em outro idioma
+        quando o vídeo oferece várias faixas). Modos PT não precisam passar (canais BR).
     """
     import yt_dlp
 
@@ -20,14 +29,22 @@ def download_youtube(url: str, output_path: Path) -> Path:
     out_template = str(output_path.with_suffix("")) + ".%(ext)s"
 
     # Fallbacks para reduzir falhas de rede/CDN:
-    # 1) melhor qualidade (video+audio separados)
-    # 2) mp4 progressivo (costuma cair em outro host)
-    # 3) qualquer melhor disponivel
-    format_candidates = [
-        "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
-        "best[ext=mp4]",
-        "best",
-    ]
+    # Com EN: tenta primeiro áudio com idioma en (en, en-US, etc.) antes do melhor áudio genérico.
+    if (preferred_audio_language or "").strip().lower() == "en":
+        format_candidates = [
+            "bestvideo[ext=mp4]+bestaudio[language^=en]/bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+            "bestvideo[ext=mp4]+bestaudio[language=en]/bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+            "best[ext=mp4]",
+            "best",
+        ]
+        logger.info("[YTDLP] Preferindo faixa de áudio em inglês (modo análise EN)")
+    else:
+        format_candidates = [
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+            "best[ext=mp4]",
+            "best",
+        ]
     last_exc: Exception | None = None
 
     for idx, fmt in enumerate(format_candidates, start=1):

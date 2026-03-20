@@ -52,8 +52,10 @@ class Factory(models.Model):
         max_length=24,
         choices=[
             ("viral", "Viral (PT)"),
+            ("viral_long", "Viral longo (PT, shorts 90–160s)"),
             ("educational", "Educacional (PT)"),
             ("viral_en", "Viral (EN)"),
+            ("viral_long_en", "Viral longo (EN, shorts 90–160s)"),
             ("educational_en", "Educacional (EN)"),
             ("viral_translate", "Viral Translate - EN to PT"),
         ],
