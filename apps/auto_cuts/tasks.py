@@ -1008,9 +1008,9 @@ def finalizar_auto_cut_task(
 
     style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
     # Shorts: legendas na parte inferior (acima dos botões do YouTube), não no topo
-    # MarginV = distância da borda inferior. ~120-150px mantém na área inferior visível.
+    # MarginV = distância da borda inferior. 160px mantém ~20px acima da área dos botões.
     style["position"] = "bottom"
-    style["margin_v"] = style.get("margin_v", 140)
+    style["margin_v"] = style.get("margin_v", 160)
     vert_mode = vertical_mode or "zoom_crop"
     bg_color = (background_color or "#000000").strip()
     link_text = (custom_text or "").strip()
@@ -1025,31 +1025,35 @@ def finalizar_auto_cut_task(
     overlay_m = max(0, min(100, int(overlay_margin or 24)))
     overlay_h = max(20, min(400, int(overlay_height or 120)))
 
-    # Animação overlay (PNG/GIF com transparência)
-    animation_path = None
-    if overlay_animation_asset_id and analysis.brand_id:
+    def _logo_path_for_brand(brand):
+        """Retorna Path do logo da brand ou None."""
+        if not brand or not getattr(brand, "id", None):
+            return None
+        logo_asset = BrandAsset.objects.filter(
+            brand_id=brand.id, asset_type="LOGO"
+        ).first()
+        if logo_asset and logo_asset.file:
+            try:
+                return Path(logo_asset.file.path)
+            except Exception:
+                pass
+        return None
+
+    def _animation_path_for_brand(brand, asset_id):
+        """Retorna Path da animação overlay da brand ou None."""
+        if not brand or not asset_id:
+            return None
         anim_asset = BrandAsset.objects.filter(
-            id=overlay_animation_asset_id,
-            brand_id=analysis.brand_id,
+            id=asset_id,
+            brand_id=brand.id,
             asset_type="ANIMATION",
         ).first()
         if anim_asset and anim_asset.file:
             try:
-                animation_path = Path(anim_asset.file.path)
+                return Path(anim_asset.file.path)
             except Exception:
-                animation_path = None
-
-    # Logo da marca (para frame_center)
-    logo_path = None
-    if analysis.brand_id:
-        logo_asset = BrandAsset.objects.filter(
-            brand_id=analysis.brand_id, asset_type="LOGO"
-        ).first()
-        if logo_asset and logo_asset.file:
-            try:
-                logo_path = Path(logo_asset.file.path)
-            except Exception:
-                logo_path = None
+                pass
+        return None
 
     to_delete = list(AutoCutCorte.objects.filter(analysis=analysis, user_wants_finalize=False))
     media_root = Path(settings.MEDIA_ROOT)
@@ -1082,7 +1086,11 @@ def finalizar_auto_cut_task(
         except Exception:
             pass
 
-    to_finalize = list(AutoCutCorte.objects.filter(analysis=analysis, user_wants_finalize=True))
+    to_finalize = list(
+        AutoCutCorte.objects.filter(analysis=analysis, user_wants_finalize=True).select_related(
+            "suggestion"
+        )
+    )
 
     for corte in to_finalize:
         if not corte.file:
@@ -1095,6 +1103,12 @@ def finalizar_auto_cut_task(
             corte.is_finalized = True
             corte.save(update_fields=["is_finalized"])
             continue
+
+        # Brand de destino do corte (target_brand direcionado, distribute ou theme)
+        target_brand = _resolve_target_brand_for_suggestion(analysis, corte.suggestion)
+        brand_for_assets = target_brand or getattr(analysis, "brand", None)
+        logo_path = _logo_path_for_brand(brand_for_assets)
+        animation_path = _animation_path_for_brand(brand_for_assets, overlay_animation_asset_id)
 
         try:
             work_path = video_path
