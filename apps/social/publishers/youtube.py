@@ -134,7 +134,7 @@ class YouTubePublisher(BasePublisher):
                 retriable=True,
             ) from e
         video_id = response.get("id")
-        # Thumbnail é enviada em lote após todos os vídeos da brand (upload_thumbnails_after_batch_task).
+        # Thumbnail longos: enviada em lote após postagem (upload_thumbnails_after_batch_task). Shorts: não enviamos.
         result = {"video_id": video_id, "platform": account.platform}
         if youtube_credential is not None:
             result["youtube_credential_id"] = youtube_credential.id

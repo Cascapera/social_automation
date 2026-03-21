@@ -85,7 +85,7 @@ class Factory(models.Model):
     )
     send_thumbnail = models.BooleanField(
         default=False,
-        help_text="Quando ativo, envia capas customizadas para Shorts no YouTube. Desative se houver excesso de envio (quota).",
+        help_text="Legado: o envio automático de capa de Shorts ao YouTube está desligado no código; capas continuam sendo geradas localmente.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -569,16 +569,14 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     Chamado após o último vídeo da brand (check_scheduled_posts_task agenda com countdown).
     Retry: 60s entre tentativas, máx 2 retries (3 tentativas no total) por vídeo.
     post_ids: IDs dos posts da batch (opcional; se vazio, usa todos DONE da brand).
-    Para Shorts (YT): só envia se factory.send_thumbnail ativo. Para longos (YTB): sempre envia.
+    Shorts (YT): não envia capa ao YouTube (geração local continua; evita cota).
+    Longos (YTB): envia capa quando houver thumbnail no corte.
     """
     try:
         brand = Brand.objects.select_related("factory").get(id=brand_id)
     except Brand.DoesNotExist:
         logger.warning("[THUMB] Brand %s não encontrada para upload de capas", brand_id)
         return {"brand_id": brand_id, "uploaded": 0, "skipped": 0, "errors": 0}
-
-    factory = getattr(brand, "factory", None)
-    send_thumbnail_shorts = factory and getattr(factory, "send_thumbnail", False)
 
     qs = ScheduledPost.objects.filter(
         auto_cut_corte__isnull=False,
@@ -600,7 +598,7 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
             if getattr(p.auto_cut_corte, "thumbnail", None):
                 platforms = p.platforms or []
                 is_short = "YT" in platforms and "YTB" not in platforms
-                if is_short and not send_thumbnail_shorts:
+                if is_short:
                     continue
                 video_id = str((p.external_ids or {}).get("YT") or (p.external_ids or {}).get("YTB") or "")
                 if video_id:
@@ -871,9 +869,7 @@ def check_scheduled_posts_task():
             continue
         platforms = p.platforms or []
         is_short = "YT" in platforms and "YTB" not in platforms
-        factory = getattr(brand, "factory", None)
-        send_thumb = factory and getattr(factory, "send_thumbnail", False)
-        if is_short and not send_thumb:
+        if is_short:
             continue
         brand_to_last_index[brand.id] = i
         brand_to_post_ids.setdefault(brand.id, []).append(p.id)
@@ -1739,14 +1735,12 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         pass
     _sync_factory_posting_schedule(post)
 
-    # Para posts manuais (retry, run_scheduled_posts_now): agenda upload de capa
+    # Para posts manuais (retry, run_scheduled_posts_now): agenda upload de capa (só longos)
     if post.status == "DONE" and _platforms_are_youtube_only(post.platforms):
         brand = _resolve_post_target_brand(post)
         platforms = post.platforms or []
         is_short = "YT" in platforms and "YTB" not in platforms
-        factory = getattr(brand, "factory", None) if brand else None
-        send_thumb = factory and getattr(factory, "send_thumbnail", False)
-        qualifies = (is_short and send_thumb) or (not is_short)
+        qualifies = not is_short
         if qualifies and brand and post.auto_cut_corte_id and getattr(post.auto_cut_corte, "thumbnail", None):
             video_id = str((post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or "")
             if video_id:
