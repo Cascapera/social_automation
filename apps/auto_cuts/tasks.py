@@ -32,9 +32,10 @@ from apps.auto_cuts.services.grok import analyze_chunks_in_one_request, analyze_
 CHUNKED_TRANSCRIPTION_THRESHOLD_SEC = 10 * 60  # 10 min
 VIRAL_SHORT_MIN_SEC = 30
 VIRAL_SHORT_MAX_SEC = 60
-# Modo viral_long / viral_long_en: shorts estendidos (90–160s), mesma lógica viral
-VIRAL_LONG_SHORT_MIN_SEC = 90
+# Modo viral_long / viral_long_en: alvo 80–160s; cortes mais curtos podem ser mantidos se score > 95
+VIRAL_LONG_SHORT_MIN_SEC = 80
 VIRAL_LONG_SHORT_MAX_SEC = 160
+VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT = 95  # abaixo do mínimo de duração, ainda assim manter
 VIRAL_LONG_MIN_SEC = 8 * 60
 VIRAL_LONG_MAX_SEC = 15 * 60
 EDUCATIONAL_SHORT_MAX_SEC = 180
@@ -101,6 +102,42 @@ def _sort_by_virality(items: list[dict]) -> list[dict]:
             -(_normalize_virality_score(item.get("virality_score")) or -1),
             int(item.get("rank") or 9999),
         ),
+    )
+
+
+def _estimate_short_duration_seconds(item: dict, tc_to_seconds) -> float:
+    """Duração em segundos a partir de duration_seconds no JSON ou timestamps."""
+    ds = item.get("duration") or item.get("duration_seconds")
+    if ds is not None:
+        try:
+            d = float(ds)
+            if d > 0:
+                return d
+        except (TypeError, ValueError):
+            pass
+    st = _pick_timestamp(item, True)
+    en = _pick_timestamp(item, False)
+    try:
+        return max(0.0, float(tc_to_seconds(en) - tc_to_seconds(st)))
+    except Exception:
+        return 0.0
+
+
+def _sort_shorts_viral_long(items: list[dict], tc_to_seconds) -> list[dict]:
+    """
+    Ordena shorts do modo viral_long: combina score viral e duração (até 160s).
+    Peso 50% virality_score + 50% duração normalizada — favorece clipes mais longos com bom score.
+    """
+    def composite(item: dict) -> float:
+        score = float(_normalize_virality_score(item.get("virality_score")) or 0)
+        dur = _estimate_short_duration_seconds(item, tc_to_seconds)
+        dur = max(0.0, min(dur, float(VIRAL_LONG_SHORT_MAX_SEC)))
+        dur_part = (dur / float(VIRAL_LONG_SHORT_MAX_SEC)) * 100.0
+        return 0.5 * score + 0.5 * dur_part
+
+    return sorted(
+        items,
+        key=lambda item: (-composite(item), -(_normalize_virality_score(item.get("virality_score")) or -1)),
     )
 
 
@@ -719,7 +756,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             shorts_source = candidate_shorts_source or ranked_shorts_source
         else:
             shorts_source = ranked_shorts_source or candidate_shorts_source
-        ranked_shorts = _sort_by_virality(shorts_source)[:shorts_limit]
+        if pv in ("viral_long", "viral_long_en"):
+            ranked_shorts = _sort_shorts_viral_long(shorts_source, tc_to_seconds)[:shorts_limit]
+        else:
+            ranked_shorts = _sort_by_virality(shorts_source)[:shorts_limit]
         ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])[:longs_limit]
         source_asset_id = ""
         if getattr(analysis, "source_id", None):
@@ -772,23 +812,61 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             if is_viral_prompt:
                 raw_duration = end_sec - start_sec
                 if pv in ("viral_long", "viral_long_en"):
-                    vmin, vmax = VIRAL_LONG_SHORT_MIN_SEC, VIRAL_LONG_SHORT_MAX_SEC
+                    vmax = VIRAL_LONG_SHORT_MAX_SEC
+                    vmin = VIRAL_LONG_SHORT_MIN_SEC
+                    score_v = _normalize_virality_score(item.get("virality_score"))
+                    if raw_duration < VIRAL_SHORT_MIN_SEC:
+                        logger.info(
+                            "[FLUXO] Short viral_long ignorado: duração %.2fs < mínimo absoluto %ss (%s -> %s)",
+                            raw_duration,
+                            VIRAL_SHORT_MIN_SEC,
+                            start_tc,
+                            end_tc,
+                        )
+                        continue
+                    if raw_duration < vmin:
+                        if score_v is not None and score_v > VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT:
+                            logger.info(
+                                "[FLUXO] Short viral_long mantido (score=%s > %s) apesar de duração %.2fs < %ss (%s -> %s)",
+                                score_v,
+                                VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT,
+                                raw_duration,
+                                vmin,
+                                start_tc,
+                                end_tc,
+                            )
+                        else:
+                            logger.info(
+                                "[FLUXO] Short viral_long ignorado: duração %.2fs < %ss e score <= %s (score=%s) (%s -> %s)",
+                                raw_duration,
+                                vmin,
+                                VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT,
+                                score_v,
+                                start_tc,
+                                end_tc,
+                            )
+                            continue
+                    if raw_duration > vmax:
+                        end_sec = start_sec + vmax
+                        end_tc = seconds_to_tc(end_sec)
+                        raw_duration = vmax
+                    duration_seconds = raw_duration
                 else:
                     vmin, vmax = VIRAL_SHORT_MIN_SEC, VIRAL_SHORT_MAX_SEC
-                if raw_duration < vmin:
-                    logger.info(
-                        "[FLUXO] Short viral ignorado por duração < %ss: %.2fs (%s -> %s)",
-                        vmin,
-                        raw_duration,
-                        start_tc,
-                        end_tc,
-                    )
-                    continue
-                if raw_duration > vmax:
-                    end_sec = start_sec + vmax
-                    end_tc = seconds_to_tc(end_sec)
-                    raw_duration = vmax
-                duration_seconds = raw_duration
+                    if raw_duration < vmin:
+                        logger.info(
+                            "[FLUXO] Short viral ignorado por duração < %ss: %.2fs (%s -> %s)",
+                            vmin,
+                            raw_duration,
+                            start_tc,
+                            end_tc,
+                        )
+                        continue
+                    if raw_duration > vmax:
+                        end_sec = start_sec + vmax
+                        end_tc = seconds_to_tc(end_sec)
+                        raw_duration = vmax
+                    duration_seconds = raw_duration
             elif is_educational_prompt:
                 raw_duration = end_sec - start_sec
                 if raw_duration > EDUCATIONAL_SHORT_MAX_SEC:
