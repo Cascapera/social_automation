@@ -163,7 +163,13 @@ def extract_audio_chunk(
     duration_sec: float,
     output_path: Path,
 ) -> None:
-    """Extrai trecho de áudio do vídeo com FFmpeg (rápido, sem re-encode)."""
+    """
+    Extrai trecho de áudio do vídeo para transcrição (chunks).
+
+    Não usa -c:a copy: vídeos do YouTube com faixa EN podem vir em Opus, que o container .m4a
+    (muxer ipod) não aceita em copy — gera "Could not find tag for codec opus".
+    Reencode para AAC (leve), compatível com Whisper e M4A.
+    """
     import subprocess
 
     # -ss antes de -i para seek rápido (input seeking)
@@ -174,7 +180,10 @@ def extract_audio_chunk(
         "-t", str(duration_sec),
         "-i", str(video_path),
         "-vn",
-        "-acodec", "copy",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-ar", "48000",
+        "-ac", "2",
         str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
