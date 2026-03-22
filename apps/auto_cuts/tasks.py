@@ -528,13 +528,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             download_dir = media_root / "auto_cuts" / "sources"
             download_dir.mkdir(parents=True, exist_ok=True)
             out_path = download_dir / f"yt_{analysis_id}.mp4"
-            # Modos EN: forçar faixa de áudio em inglês no yt-dlp (PT: canais BR, sem forçar)
-            prefer_en_audio = pv in ("viral_en", "viral_long_en", "educational_en", "viral_translate")
-            downloaded = download_youtube(
-                youtube_url,
-                out_path,
-                preferred_audio_language="en" if prefer_en_audio else None,
-            )
+            downloaded = download_youtube(youtube_url, out_path)
             with open(downloaded, "rb") as f:
                 analysis.file.save(downloaded.name, File(f), save=True)
             # Mantém youtube_url para metadados de publicação (descrição/episódio completo).

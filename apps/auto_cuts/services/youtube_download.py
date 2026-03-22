@@ -1,25 +1,98 @@
 """Download de videos do YouTube via yt-dlp."""
 
 import logging
+import os
 from pathlib import Path
 import time
 
 logger = logging.getLogger(__name__)
 
 
+def _yt_dlp_youtube_extractor_options(*, has_cookies: bool) -> dict:
+    """
+    player_client: com cookies, clientes "android/ios" são ignorados pelo yt-dlp
+    ("Skipping client … since it does not support cookies") — usar só clients web.
+    Sem cookies: tenta android/web/ios.
+    EJS: precisa de runtime JS (Deno no Dockerfile) + pip install 'yt-dlp[default]' (yt-dlp-ejs).
+    """
+    raw = (os.getenv("YTDLP_YOUTUBE_PLAYER_CLIENTS") or "").strip()
+    if raw:
+        clients = [x.strip() for x in raw.split(",") if x.strip()]
+    elif has_cookies:
+        clients = ["web", "mweb", "tv_embedded"]
+    else:
+        clients = ["android", "web", "ios"]
+    if not clients:
+        return {}
+    return {
+        "extractor_args": {
+            "youtube": {
+                "player_client": clients,
+            },
+        },
+    }
+
+
+def _yt_dlp_js_runtime_options() -> dict:
+    """
+    Por omissão o yt-dlp já usa Deno (js_runtimes=['deno']). Só sobrescreve com YTDLP_JS_RUNTIMES
+    (ex.: 'node', 'deno,node', 'node:/usr/bin/node'). Valores separados por vírgula.
+    """
+    raw = (os.getenv("YTDLP_JS_RUNTIMES") or "").strip()
+    if not raw:
+        return {}
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    return {"js_runtimes": parts} if parts else {}
+
+
+def _yt_dlp_cookie_options() -> dict:
+    """
+    YouTube frequentemente exige sessão autenticada (anti-bot). Configure no .env:
+
+    - YTDLP_COOKIES_FILE=/caminho/para/youtube_cookies.txt (Netscape; recomendado em Docker)
+    - YTDLP_COOKIES_FROM_BROWSER=chrome  ou  firefox:perfil  (lê cookies do PC onde roda o worker)
+
+    Ver: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
+    """
+    opts: dict = {}
+    cookiefile = (os.getenv("YTDLP_COOKIES_FILE") or "").strip()
+    if cookiefile:
+        p = Path(cookiefile).expanduser()
+        if p.is_file():
+            opts["cookiefile"] = str(p.resolve())
+            logger.info("[YTDLP] Usando cookies (arquivo YTDLP_COOKIES_FILE)")
+            return opts
+        logger.warning(
+            "[YTDLP] YTDLP_COOKIES_FILE definido mas arquivo inexistente: %s",
+            p,
+        )
+
+    browser = (os.getenv("YTDLP_COOKIES_FROM_BROWSER") or "").strip()
+    if not browser:
+        return opts
+
+    parts = browser.split(":", 1)
+    name = (parts[0] or "").strip().lower()
+    if not name:
+        return opts
+    profile = parts[1].strip() if len(parts) > 1 else None
+    if profile:
+        opts["cookiesfrombrowser"] = (name, profile)
+    else:
+        opts["cookiesfrombrowser"] = (name,)
+    logger.info("[YTDLP] Usando cookies do navegador (YTDLP_COOKIES_FROM_BROWSER=%s)", browser)
+    return opts
+
+
 def download_youtube(
     url: str,
     output_path: Path,
-    *,
-    preferred_audio_language: str | None = None,
 ) -> Path:
     """
     Baixa vídeo do YouTube (ou suportados pelo yt-dlp) para o caminho indicado.
     Retorna o Path do arquivo baixado.
 
-    preferred_audio_language:
-        Quando "en", prioriza faixa de áudio em inglês (evita dublagem automática em outro idioma
-        quando o vídeo oferece várias faixas). Modos PT não precisam passar (canais BR).
+    Usa a melhor combinação de formatos que o YouTube oferece (sem forçar idioma de áudio).
     """
     import yt_dlp
 
@@ -28,24 +101,21 @@ def download_youtube(
     # Template: base.%(ext)s para forcar nome e obter .mp4
     out_template = str(output_path.with_suffix("")) + ".%(ext)s"
 
-    # Fallbacks para reduzir falhas de rede/CDN:
-    # Com EN: tenta primeiro áudio com idioma en (en, en-US, etc.) antes do melhor áudio genérico.
-    if (preferred_audio_language or "").strip().lower() == "en":
-        format_candidates = [
-            "bestvideo[ext=mp4]+bestaudio[language^=en]/bestvideo[ext=mp4]+bestaudio[ext=m4a]",
-            "bestvideo[ext=mp4]+bestaudio[language=en]/bestvideo[ext=mp4]+bestaudio[ext=m4a]",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
-            "best[ext=mp4]",
-            "best",
-        ]
-        logger.info("[YTDLP] Preferindo faixa de áudio em inglês (modo análise EN)")
-    else:
-        format_candidates = [
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
-            "best[ext=mp4]",
-            "best",
-        ]
+    # Ordem: preferir merge vídeo+áudio → mp4 quando possível → melhor qualidade genérica.
+    # Evita exigir ext=m4a em todos os vídeos (alguns só têm opus/webm).
+    format_candidates = [
+        "bestvideo+bestaudio/best",
+        "bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best",
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+        "best[ext=mp4]/best",
+        "best",
+    ]
     last_exc: Exception | None = None
+
+    cookie_opts = _yt_dlp_cookie_options()
+    has_cookies = bool(cookie_opts.get("cookiefile") or cookie_opts.get("cookiesfrombrowser"))
+    extractor_opts = _yt_dlp_youtube_extractor_options(has_cookies=has_cookies)
+    js_opts = _yt_dlp_js_runtime_options()
 
     for idx, fmt in enumerate(format_candidates, start=1):
         opts = {
@@ -61,6 +131,9 @@ def download_youtube(
             "socket_timeout": 25,
             # Evita rota IPv6 instavel em alguns hosts/CDNs no Docker/WSL.
             "force_ipv4": True,
+            **js_opts,
+            **extractor_opts,
+            **cookie_opts,
         }
         try:
             logger.info("[YTDLP] Tentativa %s com formato: %s", idx, fmt)
@@ -79,4 +152,22 @@ def download_youtube(
             # pequeno backoff entre tentativas para reduzir erro de rede temporario
             time.sleep(min(4 * idx, 12))
 
-    raise RuntimeError(f"Falha ao baixar video do YouTube apos fallbacks: {last_exc}")
+    msg = f"Falha ao baixar video do YouTube apos fallbacks: {last_exc}"
+    err_s = str(last_exc).lower()
+    if "sign in" in err_s or "not a bot" in err_s or "cookies" in err_s:
+        msg += (
+            " Configure YTDLP_COOKIES_FILE (arquivo Netscape) ou YTDLP_COOKIES_FROM_BROWSER no .env — "
+            "veja README e https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+        )
+    if (
+        "challenge" in err_s
+        or "only images" in err_s
+        or "ejs" in err_s
+        or "javascript runtime" in err_s
+    ):
+        msg += (
+            " Desafio do YouTube (EJS): use `pip install -U \"yt-dlp[default]\"` (pacote yt-dlp-ejs), "
+            "imagem Docker com Deno (`docker compose build --no-cache`) e veja "
+            "https://github.com/yt-dlp/yt-dlp/wiki/EJS"
+        )
+    raise RuntimeError(msg)

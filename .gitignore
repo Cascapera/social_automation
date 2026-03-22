@@ -1,4 +1,7 @@
 .env
+# Cookies yt-dlp exportados (manter pasta vazia com .gitkeep)
+secrets/*
+!secrets/.gitkeep
 *.pyc
 __pycache__/
 .venv/

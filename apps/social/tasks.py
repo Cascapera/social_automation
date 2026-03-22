@@ -1462,7 +1462,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             else:
                 errors.append(f"{platform}: nenhuma conta conectada")
                 continue
-        if not post.social_account_id:
+        # SimpleNamespace é só para publicar com BrandYouTubeCredential; FK exige BrandSocialAccount.
+        if not post.social_account_id and isinstance(account, BrandSocialAccount):
             post.social_account = account
             social_account_changed = True
         # Deduplicação extra: evita upload duplicado acidental para mesmo canal/plataforma.

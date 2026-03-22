@@ -1,8 +1,17 @@
 FROM python:3.11-slim
 
+# Deno: runtime JS recomendado pelo yt-dlp para EJS (desafio "n" do YouTube).
+# PyPI: instalar também yt-dlp[default] (scripts yt-dlp-ejs). Ver https://github.com/yt-dlp/yt-dlp/wiki/EJS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    curl \
+    unzip \
+    && curl -fsSL https://deno.land/install.sh | sh \
+    && install -m 755 /root/.deno/bin/deno /usr/local/bin/deno \
+    && rm -rf /root/.deno \
+    && rm -rf /var/lib/apt/lists/* \
+    && deno --version
 
 WORKDIR /app
 

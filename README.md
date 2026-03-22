@@ -154,6 +154,15 @@ CELERY_RESULT_BACKEND=django-db
 OPENAI_API_KEY=sk-...            # para transcrição/análise
 XAI_API_KEY=xai-...              # Grok (opcional)
 # YouTube OAuth: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REDIRECT_URI
+
+# yt-dlp (download de vídeo para análise): se aparecer "Sign in / not a bot"
+# Docker: coloque o ficheiro em secrets/ (pasta ignorada pelo Git) e use o caminho dentro do contentor:
+# YTDLP_COOKIES_FILE=/app/secrets/youtube_cookies.txt
+# Fora do Docker (caminho absoluto no host):
+# YTDLP_COOKIES_FILE=C:/Users/.../youtube_cookies.txt
+# Apenas worker no mesmo PC que o Chrome (não use no Docker):
+# YTDLP_COOKIES_FROM_BROWSER=chrome
+# Exportar cookies: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
 ```
 
 ### 3. Banco e migrações
@@ -169,6 +178,16 @@ python manage.py createsuperuser
 docker compose up -d
 # Acesse: http://localhost:8000/admin
 ```
+
+**Cookies do YouTube (yt-dlp) no Docker:** o `docker-compose` monta o projeto em `/app`. Crie a pasta `secrets/` na raiz (está no `.gitignore`), exporte os cookies no Chrome (extensão **Get cookies.txt LOCALLY** — ver [wiki yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)), guarde como `secrets/youtube_cookies.txt` e no `.env`:
+
+```env
+YTDLP_COOKIES_FILE=/app/secrets/youtube_cookies.txt
+```
+
+Reinicie o worker que faz download de vídeo (`docker compose restart celery`). `YTDLP_COOKIES_FROM_BROWSER` **não** é adequado dentro do container (não há perfil do Chrome lá); use sempre o ficheiro. Renove o `youtube_cookies.txt` quando o YouTube voltar a exigir login.
+
+**Desafio “n” / “Only images” / EJS:** o YouTube exige [EJS](https://github.com/yt-dlp/yt-dlp/wiki/EJS): (1) **`pip install "yt-dlp[default]"`** inclui o pacote **yt-dlp-ejs**; (2) a imagem Docker inclui **Deno** (runtime JS usado por omissão pelo yt-dlp). Reconstrua: `docker compose build --no-cache` e `docker compose up -d`. Com **cookies**, o yt-dlp ignora clientes `android/ios` — o código usa `web,mweb,tv_embedded`; pode ajustar com `YTDLP_YOUTUBE_PLAYER_CLIENTS`. Opcional: `YTDLP_JS_RUNTIMES=node` se preferir Node 20+ em vez de Deno.
 
 ### 5. Frontend (opcional)
 
