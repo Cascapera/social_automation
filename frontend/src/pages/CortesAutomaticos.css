@@ -1028,6 +1028,83 @@
   border: 1px solid #dc3545;
 }
 
+.finalized-title-cell {
+  min-width: 220px;
+  max-width: 480px;
+  vertical-align: middle;
+}
+
+.title-display-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.title-display-row .title-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.btn-edit-title {
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-edit-title:hover {
+  background: rgba(29, 155, 240, 0.12);
+}
+
+.title-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.title-edit-input {
+  flex: 1;
+  min-width: 140px;
+  min-height: 2rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.btn-title-save,
+.btn-title-cancel {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-title-save {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+
+.btn-title-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-title-cancel {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
 /* Botão Editar legenda no corte */
 .btn-edit-legenda {
   padding: 0.35rem 0.6rem;
@@ -1297,4 +1374,128 @@
 .btn-ok-legenda:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.ready-cuts-pick-btn {
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #444);
+  background: var(--bg-elevated, #252528);
+  color: var(--text, #eee);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.ready-cuts-pick-btn:hover {
+  filter: brightness(1.08);
+}
+
+.ready-cuts-modal-overlay {
+  z-index: 1200;
+}
+
+.ready-cuts-order-modal {
+  background: var(--bg-dark, #1a1a1e);
+  border: 1px solid var(--border, #333);
+  border-radius: 10px;
+  max-width: 520px;
+  width: 92vw;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.ready-cuts-order-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border, #333);
+}
+
+.ready-cuts-order-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.ready-cuts-order-modal-body {
+  padding: 1rem 1.25rem;
+}
+
+.ready-cuts-order-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+}
+
+.ready-cuts-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border, #2a2a2e);
+  font-size: 0.9rem;
+}
+
+.ready-cuts-order-item:last-child {
+  border-bottom: none;
+}
+
+.ready-cuts-order-num {
+  flex: 0 0 1.5rem;
+  color: var(--text-muted, #888);
+  font-weight: 600;
+}
+
+.ready-cuts-order-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-cuts-order-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.ready-cuts-order-actions button {
+  min-width: 2rem;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--border, #444);
+  background: transparent;
+  color: var(--text, #eee);
+}
+
+.ready-cuts-order-modal-footer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border, #333);
+  justify-content: flex-end;
+}
+
+.ready-cuts-order-modal-footer button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.ready-cuts-order-modal-footer button[type="submit"] {
+  background: var(--accent, #c42);
+  color: #fff;
+  border: none;
+}
+
+.ready-cuts-order-modal-footer button:first-of-type {
+  background: transparent;
+  color: var(--text-muted, #888);
+  border: 1px solid var(--border, #444);
 }

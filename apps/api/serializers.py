@@ -24,7 +24,7 @@ from apps.jobs.models import (
     FactoryPostingSchedule,
     PostedVideoLog,
 )
-from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte
+from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte, AutoCutReadyChunk
 
 
 class FactorySerializer(serializers.ModelSerializer):
@@ -549,9 +549,16 @@ class AutoCutCorteSerializer(serializers.ModelSerializer):
         return value
 
 
+class AutoCutReadyChunkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AutoCutReadyChunk
+        fields = ["id", "order_index", "duration_seconds"]
+
+
 class AutoCutAnalysisSerializer(serializers.ModelSerializer):
     suggestions = AutoCutSuggestionSerializer(many=True, read_only=True)
     cortes = AutoCutCorteSerializer(many=True, read_only=True)
+    ready_chunks = AutoCutReadyChunkSerializer(many=True, read_only=True)
     target_brand_name = serializers.SerializerMethodField(read_only=True)
     factory_name = serializers.SerializerMethodField(read_only=True)
 
@@ -594,8 +601,15 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
             "transcript",
             "error",
             "created_at",
+            "is_ready_cuts",
+            "vertical_mode",
+            "ready_cuts_transcribe",
+            "ready_cuts_create_long_video",
+            "ready_cuts_long_fade_duration",
+            "ready_cuts_titles_language",
             "suggestions",
             "cortes",
+            "ready_chunks",
         ]
         read_only_fields = ["status", "progress", "progress_message", "transcript", "error", "created_at"]
 

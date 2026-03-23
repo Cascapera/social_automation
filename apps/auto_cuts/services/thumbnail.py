@@ -190,17 +190,37 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
         if selected_font not in {"anton", "bebas", "montserrat", "impact"}:
             selected_font = "impact"
         # Para Shorts (vertical): extrair frame do corte já extraído (formato 9:16, ideal para YouTube Shorts)
-        # Para Longs (horizontal): usar vídeo original ou corte
+        # Para Longs (horizontal): corte final (ex.: concat em cortes prontos sem vídeo na análise) ou vídeo original
         is_short = (getattr(corte, "format", "") or "").lower() == "vertical"
+        raw_early = corte.suggestion.raw_data or {}
         if is_short and corte.file:
             try:
                 corte_path = Path(corte.file.path)
                 if corte_path.exists():
                     source_video_path = corte_path
-                    ts_sec = 1.0  # frame no início do short (já é o corte)
+                    # Cortes prontos: frame nos primeiros ~5s (padrão 2s); fallback 1s
+                    ts_sec = float(raw_early.get("thumbnail_frame_sec", 1.0))
+                    if ts_sec < 0:
+                        ts_sec = 1.0
                 else:
                     source_video_path = None
                     ts_sec = 0.0
+            except Exception:
+                source_video_path = None
+        elif not is_short and corte.file:
+            try:
+                corte_path = Path(corte.file.path)
+                if corte_path.exists():
+                    source_video_path = corte_path
+                    raw_h = corte.suggestion.raw_data or {}
+                    ts_raw = raw_h.get("thumbnail_moment_timestamp") or raw_h.get("start_timestamp") or corte.suggestion.start_tc
+                    ts_sec = tc_to_seconds(str(ts_raw))
+                    start_sec = tc_to_seconds(corte.suggestion.start_tc or "")
+                    end_sec = tc_to_seconds(corte.suggestion.end_tc or "")
+                    if end_sec > start_sec and (ts_sec < start_sec or ts_sec > end_sec):
+                        ts_sec = start_sec + ((end_sec - start_sec) / 2.0)
+                else:
+                    source_video_path = None
             except Exception:
                 source_video_path = None
         else:

@@ -146,6 +146,24 @@ class AutoCutAnalysis(models.Model):
         default=False,
         help_text="Vídeo(s) já editados: transcreve, LLM retorna só metadata (title, virality, thumbnail), finaliza. Sem extração de segmentos.",
     )
+    ready_cuts_transcribe = models.BooleanField(
+        default=True,
+        help_text="Cortes prontos em lote: transcrever e gerar legendas (Whisper). Se falso, títulos vêm só do nome do job.",
+    )
+    ready_cuts_create_long_video = models.BooleanField(
+        default=False,
+        help_text="Montar um vídeo longo horizontal juntando os arquivos (fade entre clipes).",
+    )
+    ready_cuts_long_fade_duration = models.FloatField(
+        default=0.5,
+        help_text="Duração do fade (s) entre clipes no vídeo longo.",
+    )
+    ready_cuts_titles_language = models.CharField(
+        max_length=2,
+        choices=[("pt", "Português"), ("en", "English")],
+        default="pt",
+        help_text="Idioma dos títulos gerados pela LLM no job de cortes prontos (lote).",
+    )
     vertical_mode = models.CharField(
         max_length=20,
         choices=[("zoom_crop", "Zoom e corte"), ("frame_center", "Enquadrar e centralizar")],
@@ -164,6 +182,31 @@ class AutoCutAnalysis(models.Model):
         if self.source and self.source.file:
             return self.source.file
         return self.file
+
+
+class AutoCutReadyChunk(models.Model):
+    """Arquivo de vídeo no job de cortes prontos (lote); ordem define a edição do vídeo longo."""
+
+    analysis = models.ForeignKey(
+        AutoCutAnalysis,
+        on_delete=models.CASCADE,
+        related_name="ready_chunks",
+    )
+    order_index = models.PositiveSmallIntegerField(default=0)
+    file = models.FileField(upload_to="auto_cuts/ready_chunks/", max_length=255)
+    duration_seconds = models.FloatField(null=True, blank=True)
+    transcript = models.TextField(blank=True, default="")
+    transcript_segments = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Segmentos Whisper [{start, end, text}] relativos a este arquivo",
+    )
+
+    class Meta:
+        ordering = ["analysis_id", "order_index", "id"]
+
+    def __str__(self) -> str:
+        return f"ReadyChunk #{self.id} job={self.analysis_id} ord={self.order_index}"
 
 
 class AutoCutSuggestion(models.Model):

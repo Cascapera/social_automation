@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useBrand } from '../context/BrandContext'
 import {
   getAutoCutAnalyses,
@@ -108,12 +108,21 @@ export default function CortesAutomaticos() {
   const [unitScheduling, setUnitScheduling] = useState(false)
   const [uploadingThumbnailId, setUploadingThumbnailId] = useState(null)
   const [thumbnailModal, setThumbnailModal] = useState(null)
+  const [titleEditCorteId, setTitleEditCorteId] = useState(null)
+  const [titleEditValue, setTitleEditValue] = useState('')
+  const [savingTitleId, setSavingTitleId] = useState(null)
   const [factoryInfo, setFactoryInfo] = useState(null)
   const [togglingFactoryProcessing, setTogglingFactoryProcessing] = useState(false)
-  const [readyCutsFiles, setReadyCutsFiles] = useState([])
   const [readyCutsBrandId, setReadyCutsBrandId] = useState('')
   const [creatingReadyCuts, setCreatingReadyCuts] = useState(false)
   const [jobVerticalMode, setJobVerticalMode] = useState('zoom_crop')
+  const readyCutsFileInputRef = useRef(null)
+  const [readyCutsModalOpen, setReadyCutsModalOpen] = useState(false)
+  const [readyCutsModalFiles, setReadyCutsModalFiles] = useState([])
+  const [readyCutsJobName, setReadyCutsJobName] = useState('')
+  const [readyCutsTranscribe, setReadyCutsTranscribe] = useState(true)
+  const [readyCutsLongVideo, setReadyCutsLongVideo] = useState(false)
+  const [readyCutsTitlesLanguage, setReadyCutsTitlesLanguage] = useState('pt')
 
   const selectedAnalysis = analyses.find((a) => a.id === expandedId)
   const factoryBrands = viewMode === 'factory' && factoryId
@@ -365,24 +374,60 @@ export default function CortesAutomaticos() {
     }
   }
 
-  async function handleUploadReadyCuts(e) {
+  function handleReadyCutsFilePick(e) {
+    const list = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (!list.length) return
+    setReadyCutsModalFiles(list)
+    setReadyCutsModalOpen(true)
+  }
+
+  function moveReadyCutModal(index, delta) {
+    setReadyCutsModalFiles((prev) => {
+      const j = index + delta
+      if (j < 0 || j >= prev.length) return prev
+      const next = [...prev]
+      ;[next[index], next[j]] = [next[j], next[index]]
+      return next
+    })
+  }
+
+  async function handleConfirmReadyCutsModal(e) {
     e.preventDefault()
     const effectiveBrandId = viewMode === 'factory' ? readyCutsBrandId : activeBrandId
     if (!effectiveBrandId) {
       setError(viewMode === 'factory' ? 'Selecione uma Brand da factory.' : 'Selecione uma marca no menu à esquerda.')
       return
     }
-    if (!readyCutsFiles?.length) {
+    const name = readyCutsJobName.trim()
+    if (!name) {
+      setError('Informe o nome do job.')
+      return
+    }
+    if (!readyCutsModalFiles?.length) {
       setError('Selecione pelo menos um arquivo de vídeo.')
       return
     }
     setError('')
     setCreatingReadyCuts(true)
     try {
-      const { created } = await createReadyCutsAnalysis({ files: readyCutsFiles, brandId: effectiveBrandId, verticalMode: jobVerticalMode })
-      setAnalyses((prev) => [...created, ...prev])
-      if (created?.[0]?.id) setExpandedId(created[0].id)
-      setReadyCutsFiles([])
+      const a = await createReadyCutsAnalysis({
+        files: readyCutsModalFiles,
+        brandId: effectiveBrandId,
+        name,
+        verticalMode: jobVerticalMode,
+        transcribe: readyCutsTranscribe,
+        createLongVideo: readyCutsLongVideo,
+        titlesLanguage: readyCutsTitlesLanguage,
+      })
+      setAnalyses((prev) => [a, ...prev])
+      if (a?.id) setExpandedId(a.id)
+      setReadyCutsModalOpen(false)
+      setReadyCutsModalFiles([])
+      setReadyCutsJobName('')
+      setReadyCutsTranscribe(true)
+      setReadyCutsLongVideo(false)
+      setReadyCutsTitlesLanguage('pt')
       loadAnalysesForView()
     } catch (err) {
       setError(err.message)
@@ -503,6 +548,25 @@ export default function CortesAutomaticos() {
       await loadFinalizedCortes()
     } catch (e) {
       setError(e.message)
+    }
+  }
+
+  async function handleSaveFinalizedTitle(corte) {
+    const t = titleEditValue.trim()
+    if (!t) {
+      setError('Informe um título.')
+      return
+    }
+    setSavingTitleId(corte.id)
+    setError('')
+    try {
+      await updateAutoCutCorte(corte.id, { title: t })
+      setTitleEditCorteId(null)
+      await loadFinalizedCortes()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingTitleId(null)
     }
   }
 
@@ -710,20 +774,25 @@ export default function CortesAutomaticos() {
         <section className="section">
           <h2>Upload cortes prontos</h2>
           <p className="form-hint" style={{ marginBottom: 12 }}>
-            Vídeos já editados: envie os arquivos e a IA gera título, thumbnail e legenda automaticamente.
+            Selecione uma pasta com vários vídeos. Confirme a ordem no modal, preencha o nome do job e as opções, depois envie.
           </p>
-          <form onSubmit={handleUploadReadyCuts} className="auto-cut-form">
+          <input
+            ref={readyCutsFileInputRef}
+            type="file"
+            accept="video/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleReadyCutsFilePick}
+          />
+          <div className="auto-cut-form">
             <div className="form-group">
-              <label>Arquivos de vídeo</label>
-              <input
-                type="file"
-                accept="video/*"
-                multiple
-                onChange={(e) => setReadyCutsFiles(Array.from(e.target.files || []))}
-              />
-              {readyCutsFiles?.length > 0 && (
-                <span className="form-hint">{readyCutsFiles.length} arquivo(s) selecionado(s)</span>
-              )}
+              <button
+                type="button"
+                className="ready-cuts-pick-btn"
+                onClick={() => readyCutsFileInputRef.current?.click()}
+              >
+                Selecionar vídeos…
+              </button>
             </div>
             {viewMode === 'factory' && factoryId && (
               <div className="form-group">
@@ -739,21 +808,101 @@ export default function CortesAutomaticos() {
                 </select>
               </div>
             )}
-            <div className="form-group">
-              <label>Formato final dos shorts</label>
-              <select
-                value={jobVerticalMode}
-                onChange={(e) => setJobVerticalMode(e.target.value)}
-              >
-                <option value="zoom_crop">Zoom e corte</option>
-                <option value="frame_center">Enquadrar e centralizar</option>
-              </select>
-              <span className="form-hint">Zoom: preenche a tela. Enquadrar: vídeo centralizado com bordas e logo.</span>
+          </div>
+
+          {readyCutsModalOpen && (
+            <div className="modal-overlay ready-cuts-modal-overlay" onClick={() => !creatingReadyCuts && setReadyCutsModalOpen(false)}>
+              <div className="ready-cuts-order-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="ready-cuts-order-modal-header">
+                  <h3>Ordem dos vídeos e opções do job</h3>
+                  <button type="button" className="legenda-modal-close" disabled={creatingReadyCuts} onClick={() => setReadyCutsModalOpen(false)}>✕</button>
+                </div>
+                <form onSubmit={handleConfirmReadyCutsModal}>
+                  <div className="ready-cuts-order-modal-body">
+                    <div className="form-group">
+                      <label>Nome do job</label>
+                      <input
+                        type="text"
+                        value={readyCutsJobName}
+                        onChange={(e) => setReadyCutsJobName(e.target.value)}
+                        placeholder="Ex: Parkour radical"
+                        required
+                      />
+                    </div>
+                    <p className="form-hint">Ordem na edição do vídeo longo (fade 0,5s entre clipes). Arraste não disponível — use ↑ ↓.</p>
+                    <ul className="ready-cuts-order-list">
+                      {readyCutsModalFiles.map((f, idx) => (
+                        <li key={`${f.name}-${idx}`} className="ready-cuts-order-item">
+                          <span className="ready-cuts-order-num">{idx + 1}</span>
+                          <span className="ready-cuts-order-name">{f.name}</span>
+                          <span className="ready-cuts-order-actions">
+                            <button type="button" disabled={idx === 0 || creatingReadyCuts} onClick={() => moveReadyCutModal(idx, -1)} title="Subir">↑</button>
+                            <button type="button" disabled={idx === readyCutsModalFiles.length - 1 || creatingReadyCuts} onClick={() => moveReadyCutModal(idx, 1)} title="Descer">↓</button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="form-group">
+                      <label>Transcrição e legenda</label>
+                      <select
+                        value={readyCutsTranscribe ? 'yes' : 'no'}
+                        onChange={(e) => setReadyCutsTranscribe(e.target.value === 'yes')}
+                      >
+                        <option value="yes">Sim (Whisper + legenda nos vídeos)</option>
+                        <option value="no">Não (títulos só a partir do nome do job)</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Idioma dos títulos (IA)</label>
+                      <select
+                        value={readyCutsTitlesLanguage}
+                        onChange={(e) => setReadyCutsTitlesLanguage(e.target.value)}
+                        disabled={!readyCutsTranscribe}
+                        title={!readyCutsTranscribe ? 'Com transcrição desligada, os títulos seguem o nome do job (sem IA de títulos).' : undefined}
+                      >
+                        <option value="pt">Português (BR)</option>
+                        <option value="en">English</option>
+                      </select>
+                      <p className="form-hint">Só aplica quando a transcrição está ativa; a LLM gera títulos só neste idioma.</p>
+                    </div>
+                    <div className="form-group">
+                      <label>Criar vídeo longo (horizontal)</label>
+                      <select
+                        value={readyCutsLongVideo ? 'yes' : 'no'}
+                        onChange={(e) => setReadyCutsLongVideo(e.target.value === 'yes')}
+                      >
+                        <option value="no">Não</option>
+                        <option value="yes">Sim (junta os clipes com fade antes de finalizar os shorts)</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Formato final dos shorts</label>
+                      <select
+                        value={jobVerticalMode}
+                        onChange={(e) => setJobVerticalMode(e.target.value)}
+                      >
+                        <option value="zoom_crop">Zoom e corte</option>
+                        <option value="frame_center">Enquadrar e centralizar</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="ready-cuts-order-modal-footer">
+                    <button type="button" onClick={() => !creatingReadyCuts && setReadyCutsModalOpen(false)}>Cancelar</button>
+                    <button
+                      type="submit"
+                      disabled={
+                        creatingReadyCuts
+                        || !readyCutsModalFiles.length
+                        || (viewMode === 'factory' && !readyCutsBrandId)
+                      }
+                    >
+                      {creatingReadyCuts ? 'Enviando...' : 'OK — enviar job'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
-            <button type="submit" disabled={creatingReadyCuts || !readyCutsFiles?.length || (viewMode === 'factory' && !readyCutsBrandId)}>
-              {creatingReadyCuts ? 'Enviando...' : 'Enviar cortes prontos'}
-            </button>
-          </form>
+          )}
         </section>
       )}
 
@@ -1374,7 +1523,10 @@ export default function CortesAutomaticos() {
 
       <section className="section">
         <h2>Cortes finalizados</h2>
-        <p className="section-desc">Cortes agrupados por job. Clique para expandir e ver a lista.</p>
+        <p className="section-desc">
+          Cortes agrupados por job. Clique para expandir. Use &quot;Editar nome&quot; para ajustar o título do vídeo
+          (inventário e agendamentos pendentes são atualizados).
+        </p>
         <div className="filters-row">
           <input
             type="date"
@@ -1452,7 +1604,55 @@ export default function CortesAutomaticos() {
                           <tbody>
                             {cortes.map((c) => (
                               <tr key={c.id}>
-                                <td>{c.suggestion?.title || '-'}</td>
+                                <td className="finalized-title-cell">
+                                  {titleEditCorteId === c.id ? (
+                                    <div className="title-edit-row">
+                                      <input
+                                        type="text"
+                                        className="title-edit-input"
+                                        value={titleEditValue}
+                                        onChange={(e) => setTitleEditValue(e.target.value)}
+                                        maxLength={200}
+                                        disabled={savingTitleId === c.id}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Escape') {
+                                            setTitleEditCorteId(null)
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="btn-title-save"
+                                        onClick={() => handleSaveFinalizedTitle(c)}
+                                        disabled={savingTitleId === c.id}
+                                      >
+                                        {savingTitleId === c.id ? 'Salvando...' : 'Salvar'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn-title-cancel"
+                                        onClick={() => setTitleEditCorteId(null)}
+                                        disabled={savingTitleId === c.id}
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="title-display-row">
+                                      <span className="title-text">{c.suggestion?.title || '—'}</span>
+                                      <button
+                                        type="button"
+                                        className="btn-edit-title"
+                                        onClick={() => {
+                                          setTitleEditCorteId(c.id)
+                                          setTitleEditValue(c.suggestion?.title || '')
+                                        }}
+                                      >
+                                        Editar nome
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
                                 <td>{c.created_at?.slice(0, 10)}</td>
                                 <td>
                                   {c.suggestion?.duration_seconds != null

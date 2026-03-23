@@ -1286,7 +1286,7 @@ def analyze_chunks_in_one_request(
     return parsed
 
 
-READY_CUT_SYSTEM_PROMPT = """Você é um editor de conteúdo para redes sociais. Receberá a transcrição de um vídeo curto já editado (corte pronto).
+READY_CUT_SYSTEM_PROMPT_BASE = """Você é um editor de conteúdo para redes sociais. Receberá a transcrição de um vídeo curto já editado (corte pronto).
 
 Sua tarefa: retornar APENAS metadados para publicação:
 - virality_score: 1-10 (potencial de viralização)
@@ -1298,10 +1298,73 @@ Responda SOMENTE com JSON válido, sem markdown:
 {"virality_score": 8, "title": "Título com emoji 🎯", "thumbnail_moment_timestamp": "00:12", "thumbnail_text": "MOMENTO CHAVE"}"""
 
 
+def _ready_cuts_metadata_language_block(titles_language: str) -> str:
+    lg = (titles_language or "pt").strip().lower()
+    if lg == "en":
+        return (
+            "\n\nMANDATORY LANGUAGE: Write title and thumbnail_text ONLY in English (US). "
+            "Do not use Portuguese or any other language."
+        )
+    return (
+        "\n\nIDIOMA OBRIGATÓRIO: Escreva title e thumbnail_text APENAS em português brasileiro. "
+        "Não use inglês nem outro idioma."
+    )
+
+
+def _ready_cuts_batch_transcripts_system_prompt(titles_language: str) -> str:
+    lg = (titles_language or "pt").strip().lower()
+    if lg == "en":
+        lang_block = (
+            "MANDATORY LANGUAGE: Write EVERY title in English (US) only — even if the transcript is in another language. "
+            "Do not use Portuguese or any other language in the titles."
+        )
+    else:
+        lang_block = (
+            "IDIOMA OBRIGATÓRIO: Escreva TODOS os títulos apenas em português brasileiro — "
+            "mesmo que a transcrição esteja em outro idioma. Não use inglês nos títulos."
+        )
+    return (
+        "Você é um editor de redes sociais. Receberá um JSON com vários vídeos curtos (cortes), "
+        "cada um com um índice (id) e a transcrição.\n\n"
+        f"{lang_block}\n\n"
+        "Tarefa: para CADA vídeo, invente UM título para YouTube Shorts (45–100 caracteres), chamativo.\n"
+        "OBRIGATÓRIO: cada título deve incluir pelo menos 2 emojis relevantes (engajamento).\n\n"
+        "Responda SOMENTE com JSON válido, sem markdown, neste formato exato:\n"
+        '{"titles": {"0": "...", "1": "..."}}\n'
+        "Use as chaves como string com o mesmo id de cada item."
+    )
+
+
+def _ready_cuts_batch_jobname_system_prompt(titles_language: str) -> str:
+    lg = (titles_language or "pt").strip().lower()
+    if lg == "en":
+        lang_block = (
+            "MANDATORY LANGUAGE: Write EVERY title in English (US) only. "
+            "Do not use Portuguese or any other language."
+        )
+    else:
+        lang_block = (
+            "IDIOMA OBRIGATÓRIO: Escreva TODOS os títulos apenas em português brasileiro. "
+            "Não use inglês nem outro idioma."
+        )
+    return (
+        "Você é um editor de redes sociais. O usuário posta vários vídeos do MESMO nicho/tema; "
+        "o nome geral do conjunto é informado abaixo.\n\n"
+        f"{lang_block}\n\n"
+        "Tarefa: crie exatamente N títulos ALTERNATIVOS entre si (distintos), para N vídeos desse segmento. "
+        "Cada título: 45–100 caracteres, chamativo para Shorts.\n"
+        "OBRIGATÓRIO: cada título deve ter pelo menos 2 emojis relevantes.\n\n"
+        "Responda SOMENTE com JSON válido, sem markdown:\n"
+        '{"titles": ["título 1", "título 2", ...]}'
+    )
+
+
 def analyze_ready_cut_metadata(
     transcript: str,
     duration_seconds: float,
     api_key: str | None = None,
+    *,
+    titles_language: str = "pt",
 ) -> dict:
     """
     Analisa vídeo já editado (corte pronto). Retorna apenas:
@@ -1320,7 +1383,8 @@ def analyze_ready_cut_metadata(
 {transcript[:8000]}
 
 Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnail_moment_timestamp (MM:SS), thumbnail_text (2-4 palavras)."""
-    content = call_grok_chat(READY_CUT_SYSTEM_PROMPT, user, api_key)
+    system = READY_CUT_SYSTEM_PROMPT_BASE + _ready_cuts_metadata_language_block(titles_language)
+    content = call_grok_chat(system, user, api_key)
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
         return {
@@ -1335,3 +1399,60 @@ Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnai
         "thumbnail_moment_timestamp": (parsed.get("thumbnail_moment_timestamp") or "00:00").strip()[:16],
         "thumbnail_text": (parsed.get("thumbnail_text") or "Vídeo")[:80],
     }
+
+
+def analyze_ready_cuts_batch_titles_from_transcripts(
+    items: list[dict],
+    api_key: str | None = None,
+    *,
+    titles_language: str = "pt",
+) -> dict[str, str]:
+    """
+    items: [{"id": "0", "transcript": "..."}, ...]
+    Retorna mapa id -> título.
+    """
+    if not items:
+        return {}
+    payload = json.dumps(
+        [{"id": str(it.get("id", "")), "transcript": (it.get("transcript") or "")[:12000]} for it in items],
+        ensure_ascii=False,
+    )
+    user = f"Dados dos vídeos (JSON):\n{payload}\n\nRetorne apenas o JSON com titles."
+    system = _ready_cuts_batch_transcripts_system_prompt(titles_language)
+    content = call_grok_chat(system, user, api_key)
+    parsed = _extract_json(content)
+    if not isinstance(parsed, dict):
+        return {}
+    titles = parsed.get("titles")
+    if not isinstance(titles, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in titles.items():
+        if v and str(v).strip():
+            out[str(k)] = str(v).strip()[:200]
+    return out
+
+
+def analyze_ready_cuts_batch_titles_from_job_name(
+    job_name: str,
+    count: int,
+    api_key: str | None = None,
+    *,
+    titles_language: str = "pt",
+) -> list[str]:
+    """Gera N títulos alternativos só com base no nome do job (sem transcrição)."""
+    n = max(1, int(count))
+    name = (job_name or "").strip() or "Conteúdo"
+    user = f'Nome do conjunto / tema: "{name}"\n\nN = {n}\n\nCrie exatamente {n} títulos na lista.'
+    system = _ready_cuts_batch_jobname_system_prompt(titles_language)
+    content = call_grok_chat(system, user, api_key)
+    parsed = _extract_json(content)
+    if not isinstance(parsed, dict):
+        return [f"{name} #{i+1}" for i in range(n)]
+    titles = parsed.get("titles")
+    if not isinstance(titles, list):
+        return [f"{name} #{i+1}" for i in range(n)]
+    cleaned = [str(t).strip()[:200] for t in titles if t and str(t).strip()]
+    while len(cleaned) < n:
+        cleaned.append(f"{name} #{len(cleaned)+1}")
+    return cleaned[:n]

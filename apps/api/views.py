@@ -67,6 +67,27 @@ def _delete_auto_cut_job_files(analysis):
     import shutil
 
     media_root = Path(settings.MEDIA_ROOT)
+    # Arquivos do lote de cortes prontos (vários vídeos)
+    try:
+        from apps.auto_cuts.models import AutoCutReadyChunk
+
+        for ch in AutoCutReadyChunk.objects.filter(analysis=analysis):
+            if ch.file:
+                try:
+                    fp = Path(ch.file.path) if ch.file.name else None
+                except Exception:
+                    fp = None
+                try:
+                    ch.file.delete(save=False)
+                except Exception:
+                    pass
+                if fp and fp.exists():
+                    try:
+                        fp.unlink()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     # Vídeo original (upload)
     if analysis.file:
         try:
@@ -1459,7 +1480,11 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             qs = qs.exclude(
                 Exists(AutoCutCorte.objects.filter(analysis_id=OuterRef("pk"), is_finalized=True))
             )
-        return qs.select_related("target_brand", "brand", "brand__factory").order_by("-created_at")
+        return (
+            qs.select_related("target_brand", "brand", "brand__factory")
+            .prefetch_related("ready_chunks")
+            .order_by("-created_at")
+        )
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -1586,17 +1611,37 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="upload-ready-cuts")
     def upload_ready_cuts(self, request):
         """
-        Upload de cortes prontos: vídeos já editados.
-        Aceita files[] (múltiplos) e brand_id. Cria 1 job por arquivo com is_ready_cuts=True.
+        Upload de cortes prontos: vários vídeos em um único job (ordem = ordem dos arquivos).
+        Campos: files[], brand (obrigatório), name (nome do job, obrigatório),
+        transcribe (true/false), create_long_video (true/false), vertical_mode,
+        titles_language (pt|en — idioma dos títulos gerados pela LLM).
         """
         files = request.FILES.getlist("files") or request.FILES.getlist("file")
         brand_id = request.data.get("brand") or request.POST.get("brand")
+        job_name = (request.data.get("name") or request.POST.get("name") or "").strip()
         vertical_mode = (request.data.get("vertical_mode") or request.POST.get("vertical_mode") or "zoom_crop").strip().lower()
         if vertical_mode not in ("zoom_crop", "frame_center"):
             vertical_mode = "zoom_crop"
+        tr_raw = (request.data.get("transcribe") or request.POST.get("transcribe") or "true")
+        lr_raw = (request.data.get("create_long_video") or request.POST.get("create_long_video") or "false")
+        transcribe = str(tr_raw).lower() in ("1", "true", "yes", "on")
+        create_long = str(lr_raw).lower() in ("1", "true", "yes", "on")
+        titles_lang_raw = (
+            request.data.get("titles_language")
+            or request.POST.get("titles_language")
+            or "pt"
+        )
+        titles_language = str(titles_lang_raw).strip().lower()
+        if titles_language not in ("pt", "en"):
+            titles_language = "pt"
         if not brand_id:
             return Response(
                 {"error": "Informe brand_id (obrigatório)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not job_name:
+            return Response(
+                {"error": "Informe o nome do job (name)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not files:
@@ -1604,26 +1649,34 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 {"error": "Envie pelo menos um arquivo de vídeo (files ou file)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        from apps.auto_cuts.models import AutoCutAnalysis
+        from apps.auto_cuts.models import AutoCutAnalysis, AutoCutReadyChunk
         from apps.auto_cuts.tasks import analyze_auto_cuts_task
 
-        created = []
+        analysis = AutoCutAnalysis(
+            user=request.user,
+            brand_id=brand_id,
+            target_brand_id=brand_id,
+            name=job_name,
+            is_ready_cuts=True,
+            vertical_mode=vertical_mode,
+            ready_cuts_transcribe=transcribe,
+            ready_cuts_create_long_video=create_long,
+            ready_cuts_long_fade_duration=0.5,
+            ready_cuts_titles_language=titles_language,
+        )
+        analysis.save()
         for i, file_obj in enumerate(files):
-            name = getattr(file_obj, "name", "") or f"Corte pronto {i + 1}"
-            job_name = Path(name).stem if name else f"Corte pronto {i + 1}"
-            analysis = AutoCutAnalysis(
-                user=request.user,
-                brand_id=brand_id,
-                target_brand_id=brand_id,
+            AutoCutReadyChunk.objects.create(
+                analysis=analysis,
+                order_index=i,
                 file=file_obj,
-                name=job_name,
-                is_ready_cuts=True,
-                vertical_mode=vertical_mode,
             )
-            analysis.save()
-            analyze_auto_cuts_task.delay(analysis.id)
-            created.append(AutoCutAnalysisSerializer(analysis, context={"request": request}).data)
-        return Response({"created": created, "count": len(created)}, status=status.HTTP_201_CREATED)
+        analyze_auto_cuts_task.delay(analysis.id)
+        data = AutoCutAnalysisSerializer(
+            AutoCutAnalysis.objects.prefetch_related("ready_chunks").get(pk=analysis.pk),
+            context={"request": request},
+        ).data
+        return Response(data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="reset-stuck")
     def reset_stuck(self, request):
@@ -1873,8 +1926,14 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
                 old_thumb_path = None
         title = request.data.get("title")
         if title is not None and corte.suggestion_id:
-            corte.suggestion.title = str(title)[:200]
+            safe_title = str(title).strip()[:200]
+            corte.suggestion.title = safe_title
             corte.suggestion.save(update_fields=["title"])
+            # Mantém título alinhado no banco de vídeos e em agendamentos ainda não postados
+            VideoInventoryItem.objects.filter(auto_cut_corte=corte).update(title=safe_title[:220])
+            ScheduledPost.objects.filter(auto_cut_corte=corte).exclude(status="DONE").update(
+                title=safe_title[:200]
+            )
         response = super().partial_update(request, *args, **kwargs)
         if "thumbnail" in request.FILES and old_thumb_path:
             try:

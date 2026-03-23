@@ -5,6 +5,50 @@ function getToken() {
   return localStorage.getItem('access_token')
 }
 
+function detailToMessage(detail) {
+  if (detail == null || detail === '') return ''
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((x) => {
+        if (typeof x === 'string') return x
+        if (x && typeof x === 'object') {
+          return Object.values(x)
+            .flat()
+            .filter((v) => typeof v === 'string')
+            .join(' ')
+        }
+        return String(x)
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+  if (typeof detail === 'object' && detail !== null) {
+    if (typeof detail.detail === 'string') return detail.detail
+    if (typeof detail.message === 'string') return detail.message
+    return ''
+  }
+  return String(detail)
+}
+
+/**
+ * Fetch com FormData: lê JSON uma vez; 401 igual ao apiRequest (logout + login).
+ */
+async function jsonFromMultipartFetch(res) {
+  const data = await res.json().catch(() => ({}))
+  if (res.status === 401) {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    window.location.href = '/login'
+    throw new Error('Sessão expirada. Faça login novamente.')
+  }
+  if (!res.ok) {
+    const msg = detailToMessage(data.detail) || data.error || `Erro ${res.status}`
+    throw new Error(msg)
+  }
+  return data
+}
+
 export async function apiRequest(endpoint, options = {}) {
   const token = getToken()
   const headers = {
@@ -386,11 +430,7 @@ export async function uploadCut(file, name = '', format = '', brandId = null) {
     headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     body: formData,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || err.detail || `Erro ${res.status}`)
-  }
-  return res.json()
+  return jsonFromMultipartFetch(res)
 }
 
 export async function uploadJob(file, name = '', format = '', brandId = null) {
@@ -405,11 +445,7 @@ export async function uploadJob(file, name = '', format = '', brandId = null) {
     headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     body: formData,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || err.detail || `Erro ${res.status}`)
-  }
-  return res.json()
+  return jsonFromMultipartFetch(res)
 }
 
 export async function createJob(data, brandId = null) {
@@ -437,9 +473,15 @@ export async function deleteJob(id) {
     method: 'DELETE',
     headers: token ? { 'Authorization': `Bearer ${token}` } : {},
   })
+  if (res.status === 401) {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    window.location.href = '/login'
+    throw new Error('Sessão expirada. Faça login novamente.')
+  }
   if (res.status === 204) return
   const data = await res.json().catch(() => ({}))
-  throw new Error(data.detail || data.error || `Erro ${res.status}`)
+  throw new Error(detailToMessage(data.detail) || data.error || `Erro ${res.status}`)
 }
 
 export async function getJob(id) {
@@ -644,7 +686,15 @@ export async function deleteStuckAutoCuts(brandId) {
   return apiRequest(url, { method: 'POST' })
 }
 
-export async function createReadyCutsAnalysis({ files, brandId, verticalMode = 'zoom_crop' }) {
+export async function createReadyCutsAnalysis({
+  files,
+  brandId,
+  name,
+  verticalMode = 'zoom_crop',
+  transcribe = true,
+  createLongVideo = false,
+  titlesLanguage = 'pt',
+}) {
   const formData = new FormData()
   if (files?.length) {
     for (const f of files) formData.append('files', f)
@@ -652,18 +702,19 @@ export async function createReadyCutsAnalysis({ files, brandId, verticalMode = '
     formData.append('file', files[0])
   }
   if (brandId) formData.append('brand', brandId)
+  if (name != null && String(name).trim()) formData.append('name', String(name).trim())
   formData.append('vertical_mode', verticalMode || 'zoom_crop')
+  formData.append('transcribe', transcribe ? 'true' : 'false')
+  formData.append('create_long_video', createLongVideo ? 'true' : 'false')
+  const tl = String(titlesLanguage || 'pt').toLowerCase() === 'en' ? 'en' : 'pt'
+  formData.append('titles_language', tl)
   const token = getToken()
   const res = await fetch(`${API_BASE}/auto-cuts/upload-ready-cuts/`, {
     method: 'POST',
     headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     body: formData,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || err.detail || `Erro ${res.status}`)
-  }
-  return res.json()
+  return jsonFromMultipartFetch(res)
 }
 
 export async function createAutoCutAnalysis({
@@ -709,11 +760,7 @@ export async function createAutoCutAnalysis({
     headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     body: formData,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || err.detail || `Erro ${res.status}`)
-  }
-  return res.json()
+  return jsonFromMultipartFetch(res)
 }
 
 export async function deleteAutoCutSuggestion(id) {

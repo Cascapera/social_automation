@@ -230,6 +230,59 @@ def concat_videos(files: List[Path], output_file: Path, workdir: Path, use_gpu: 
         raise RuntimeError(f"concat failed: {res.stderr}")
 
 
+def normalize_video_to_canvas(
+    input_path: Path,
+    output_path: Path,
+    width: int = 1920,
+    height: int = 1080,
+    use_gpu: bool = False,
+    *,
+    target_fps: Optional[int] = None,
+    audio_hz: Optional[int] = None,
+) -> None:
+    """
+    Coloca o vídeo em um canvas 16:9 fixo (padrão 1920×1080): escala mantendo proporção
+    e completa com barras pretas (letterbox/pillarbox). Áudio preservado quando existir.
+
+    target_fps: quando definido (ex.: 30), força FPS e SAR 1:1 — necessário antes de
+    concat_with_xfade com clipes mistos (25/30/60 fps), pois o xfade exige timebase
+    compatível entre entradas.
+
+    audio_hz: quando definido com áudio na entrada, reamostra para esta taxa (ex.: 48000)
+    para acrossfade entre clipes 44.1/48 kHz.
+    """
+    w, h = int(width), int(height)
+    vf = (
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+    )
+    if target_fps is not None:
+        fps = max(1, int(target_fps))
+        vf = f"{vf},setsar=1,fps={fps}"
+    cmd = [
+        settings.FFMPEG_BIN,
+        "-y",
+        "-i",
+        str(input_path),
+        "-vf",
+        vf,
+    ]
+    if audio_hz is not None and input_has_audio(input_path):
+        hz = max(8000, int(audio_hz))
+        cmd.extend(["-af", f"aresample={hz}"])
+    cmd.extend(
+        [
+            *video_encode_args(use_gpu),
+            *audio_encode_args(input_path),
+            *common_mp4_flags(),
+            str(output_path),
+        ]
+    )
+    res = run_cmd(cmd)
+    if not res.ok:
+        raise RuntimeError(f"normalize_video_to_canvas failed: {res.stderr}")
+
+
 def concat_with_xfade(
     parts: List[Path],
     output_file: Path,
