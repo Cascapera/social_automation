@@ -1427,8 +1427,14 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             warnings.append(f"Upload-Post: {last_up_error}")
 
     for platform in post.platforms:
-        # Se YouTube já foi postado via Upload Post, pular API
-        if platform in ("YT", "YTB") and upload_post_youtube_ok and external_ids.get(platform):
+        # Se YouTube já foi tratado via Upload Post, não chamar API nativa (evita Short duplicado).
+        # upload_post_youtube_ok fica True também com async (só request_id, sem video_id ainda) — não exigir external_ids.
+        if platform in ("YT", "YTB") and upload_post_youtube_ok:
+            logger.info(
+                "[POSTING] YouTube via Upload Post já aplicado; a saltar publisher API (post_id=%s platform=%s)",
+                post.id,
+                platform,
+            )
             continue
         account = post.social_account
         if not account or account.platform != platform:
