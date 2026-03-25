@@ -1540,6 +1540,34 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         shorts_target = max(1, min(30, shorts_target))
         longs_target = max(1, min(10, longs_target))
 
+        long_overlay_raw = request.data.get("long_overlay_enabled")
+        long_overlay_enabled = str(long_overlay_raw or "").lower() in ("1", "true", "yes", "on")
+        long_overlay_asset_val = request.data.get("long_overlay_asset")
+        long_overlay_asset_id = None
+        if long_overlay_enabled:
+            if not long_overlay_asset_val:
+                return Response(
+                    {"error": "Selecione um overlay ou desative a opção."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                long_overlay_asset_id = int(long_overlay_asset_val)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "Overlay inválido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ovl = BrandAsset.objects.filter(
+                id=long_overlay_asset_id,
+                brand_id=brand_id,
+                asset_type="OVERLAY_LONG",
+            ).first()
+            if not ovl:
+                return Response(
+                    {"error": "Overlay inválido para esta brand."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         sources_count = sum([bool(file_obj), bool(source_id), bool(youtube_url)])
         if sources_count == 0:
             return Response(
@@ -1587,6 +1615,8 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             shorts_target=shorts_target,
             longs_target=longs_target,
             vertical_mode=vertical_mode,
+            long_overlay_enabled=long_overlay_enabled,
+            long_overlay_asset_id=long_overlay_asset_id if long_overlay_enabled else None,
         )
         analysis.save()
 
@@ -1634,6 +1664,33 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         titles_language = str(titles_lang_raw).strip().lower()
         if titles_language not in ("pt", "en"):
             titles_language = "pt"
+        long_overlay_raw = request.data.get("long_overlay_enabled")
+        long_overlay_enabled = str(long_overlay_raw or "").lower() in ("1", "true", "yes", "on")
+        long_overlay_asset_val = request.data.get("long_overlay_asset")
+        long_overlay_asset_id = None
+        if long_overlay_enabled:
+            if not long_overlay_asset_val:
+                return Response(
+                    {"error": "Selecione um overlay ou desative a opção."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                long_overlay_asset_id = int(long_overlay_asset_val)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "Overlay inválido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ovl = BrandAsset.objects.filter(
+                id=long_overlay_asset_id,
+                brand_id=brand_id,
+                asset_type="OVERLAY_LONG",
+            ).first()
+            if not ovl:
+                return Response(
+                    {"error": "Overlay inválido para esta brand."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         if not brand_id:
             return Response(
                 {"error": "Informe brand_id (obrigatório)."},
@@ -1663,6 +1720,8 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             ready_cuts_create_long_video=create_long,
             ready_cuts_long_fade_duration=0.5,
             ready_cuts_titles_language=titles_language,
+            long_overlay_enabled=long_overlay_enabled,
+            long_overlay_asset_id=long_overlay_asset_id if long_overlay_enabled else None,
         )
         analysis.save()
         for i, file_obj in enumerate(files):
@@ -1724,6 +1783,35 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         overlay_position = data.get("overlay_position") or "bottom_right"
         overlay_margin = data.get("overlay_margin")
         overlay_height = data.get("overlay_height")
+        lo_en_raw = data.get("long_overlay_enabled")
+        if lo_en_raw is None:
+            long_overlay_enabled = bool(getattr(analysis, "long_overlay_enabled", False))
+        else:
+            long_overlay_enabled = str(lo_en_raw).lower() in ("1", "true", "yes", "on")
+        lo_id_raw = data.get("long_overlay_asset_id")
+        if lo_id_raw is None:
+            long_overlay_asset_id = getattr(analysis, "long_overlay_asset_id", None)
+        else:
+            try:
+                long_overlay_asset_id = int(lo_id_raw) if lo_id_raw else None
+            except (TypeError, ValueError):
+                long_overlay_asset_id = None
+        if long_overlay_enabled and not long_overlay_asset_id:
+            return Response(
+                {"error": "Selecione um overlay ou desative a opção."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if long_overlay_enabled and long_overlay_asset_id:
+            bid = getattr(analysis, "brand_id", None)
+            if not bid or not BrandAsset.objects.filter(
+                id=long_overlay_asset_id,
+                brand_id=bid,
+                asset_type="OVERLAY_LONG",
+            ).exists():
+                return Response(
+                    {"error": "Overlay inválido para esta brand."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         finalizar_auto_cut_task.delay(
             analysis.id,
             subtitle_style=subtitle_style,
@@ -1741,6 +1829,8 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             overlay_position=overlay_position,
             overlay_margin=overlay_margin,
             overlay_height=overlay_height,
+            long_overlay_enabled=long_overlay_enabled,
+            long_overlay_asset_id=long_overlay_asset_id if long_overlay_enabled else None,
         )
         return Response({"finalized": "Em processamento (reenquadramento e legendas em background)"})
 

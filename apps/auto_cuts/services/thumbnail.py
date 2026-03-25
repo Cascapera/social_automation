@@ -13,7 +13,10 @@ from django.core.files import File
 from PIL import Image, ImageDraw, ImageFont
 
 from apps.brands.models import BrandAsset
-from apps.jobs.services.ffmpeg import run_cmd, tc_to_seconds
+from apps.jobs.services.ffmpeg import ffprobe_duration, run_cmd, tc_to_seconds
+
+# Se o timestamp sugerido falhar (FFmpeg), usar este instante no ficheiro de vídeo do corte (relativo ou absoluto conforme o caso).
+THUMB_FALLBACK_SEC_IN_CUT = 5.0
 
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -122,6 +125,10 @@ def _fit_text_into_box(
 
 
 def _extract_frame_at(video_path: Path, output_image_path: Path, sec: float) -> None:
+    """
+    Extrai um frame como PNG. Evita encoder MJPEG (.jpg), que em alguns builds/ffmpeg
+    falha (ff_frame_thread_encoder_init / dimensões ímpares) ao gerar a capa.
+    """
     ts = max(0.0, float(sec))
     cmd = [
         settings.FFMPEG_BIN,
@@ -130,15 +137,39 @@ def _extract_frame_at(video_path: Path, output_image_path: Path, sec: float) -> 
         f"{ts:.3f}",
         "-i",
         str(video_path),
+        "-an",
+        "-sn",
+        "-dn",
         "-frames:v",
         "1",
-        "-q:v",
-        "2",
+        "-vcodec",
+        "png",
         str(output_image_path),
     ]
     res = run_cmd(cmd)
     if not res.ok:
         raise RuntimeError(f"frame extract failed: {res.stderr}")
+    if not output_image_path.exists() or output_image_path.stat().st_size < 32:
+        raise RuntimeError(f"frame extract produced no output: {output_image_path}")
+
+
+def _extract_frame_with_fallback(
+    video_path: Path,
+    output_image_path: Path,
+    primary_sec: float,
+    fallback_sec: float,
+) -> None:
+    """Tenta o instante principal; em erro, tenta fallback (ex. 5 s dentro do corte)."""
+    try:
+        _extract_frame_at(video_path, output_image_path, primary_sec)
+    except Exception as e:
+        logger.warning(
+            "[THUMB] Frame em %.2fs falhou (%s); a usar fallback %.2fs",
+            primary_sec,
+            e,
+            fallback_sec,
+        )
+        _extract_frame_at(video_path, output_image_path, fallback_sec)
 
 
 def _hex_to_rgb(hex_color: str, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -189,6 +220,10 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
             )
         if selected_font not in {"anton", "bebas", "montserrat", "impact"}:
             selected_font = "impact"
+        sug_start_sec = tc_to_seconds(corte.suggestion.start_tc or "")
+        sug_end_sec = tc_to_seconds(corte.suggestion.end_tc or "")
+        # True = ficheiro é só o corte (timeline 0..duração); False = vídeo fonte completo (timestamps absolutos).
+        timeline_is_cut_only = False
         # Para Shorts (vertical): extrair frame do corte já extraído (formato 9:16, ideal para YouTube Shorts)
         # Para Longs (horizontal): corte final (ex.: concat em cortes prontos sem vídeo na análise) ou vídeo original
         is_short = (getattr(corte, "format", "") or "").lower() == "vertical"
@@ -198,6 +233,7 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 corte_path = Path(corte.file.path)
                 if corte_path.exists():
                     source_video_path = corte_path
+                    timeline_is_cut_only = True
                     # Cortes prontos: frame nos primeiros ~5s (padrão 2s); fallback 1s
                     ts_sec = float(raw_early.get("thumbnail_frame_sec", 1.0))
                     if ts_sec < 0:
@@ -212,6 +248,7 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 corte_path = Path(corte.file.path)
                 if corte_path.exists():
                     source_video_path = corte_path
+                    timeline_is_cut_only = True
                     raw_h = corte.suggestion.raw_data or {}
                     ts_raw = raw_h.get("thumbnail_moment_timestamp") or raw_h.get("start_timestamp") or corte.suggestion.start_tc
                     ts_sec = tc_to_seconds(str(ts_raw))
@@ -219,6 +256,14 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                     end_sec = tc_to_seconds(corte.suggestion.end_tc or "")
                     if end_sec > start_sec and (ts_sec < start_sec or ts_sec > end_sec):
                         ts_sec = start_sec + ((end_sec - start_sec) / 2.0)
+                    # Ficheiro extraído começa em 0:00; a LLM devolve tempo absoluto no vídeo original.
+                    # Sem isto, o seek aponta para além da duração (ex. 938 s num MP4 de ~12 min) e não há frame.png.
+                    if end_sec > start_sec:
+                        ts_sec = ts_sec - start_sec
+                        cut_len = end_sec - start_sec
+                        ts_sec = max(0.0, min(ts_sec, cut_len - 0.25))
+                    else:
+                        ts_sec = 0.0
                 else:
                     source_video_path = None
             except Exception:
@@ -235,10 +280,23 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
             raw = corte.suggestion.raw_data or {}
             ts_raw = raw.get("thumbnail_moment_timestamp") or raw.get("start_timestamp") or corte.suggestion.start_tc
             ts_sec = tc_to_seconds(str(ts_raw))
-            start_sec = tc_to_seconds(corte.suggestion.start_tc or "")
-            end_sec = tc_to_seconds(corte.suggestion.end_tc or "")
+            start_sec = sug_start_sec
+            end_sec = sug_end_sec
             if end_sec > start_sec and (ts_sec < start_sec or ts_sec > end_sec):
                 ts_sec = start_sec + ((end_sec - start_sec) / 2.0)
+
+        def _thumb_fallback_seek_sec() -> float:
+            """~5 s dentro do corte: relativo ao ficheiro se for só o corte; senão absoluto no vídeo fonte."""
+            try:
+                dur = ffprobe_duration(source_video_path)
+            except Exception:
+                dur = 0.0
+            if timeline_is_cut_only:
+                return min(THUMB_FALLBACK_SEC_IN_CUT, max(0.0, dur - 0.25))
+            if sug_end_sec > sug_start_sec:
+                cut_len = sug_end_sec - sug_start_sec
+                return sug_start_sec + min(THUMB_FALLBACK_SEC_IN_CUT, max(0.0, cut_len - 0.25))
+            return min(THUMB_FALLBACK_SEC_IN_CUT, max(0.0, dur - 0.25))
 
         raw = corte.suggestion.raw_data or {}
         thumb_text = (raw.get("thumbnail_text") or "").strip()
@@ -249,9 +307,14 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            frame_path = tmpdir_path / "frame.jpg"
+            frame_path = tmpdir_path / "frame.png"
             out_path = tmpdir_path / "thumb_final.jpg"
-            _extract_frame_at(source_video_path, frame_path, ts_sec)
+            _extract_frame_with_fallback(
+                source_video_path,
+                frame_path,
+                ts_sec,
+                _thumb_fallback_seek_sec(),
+            )
 
             img = Image.open(frame_path).convert("RGB")
             w, h = img.size

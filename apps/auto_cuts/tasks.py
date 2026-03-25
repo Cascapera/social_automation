@@ -187,6 +187,23 @@ def _safe_save_analysis(analysis, update_fields):
         raise
 
 
+def _sanitize_long_overlay_fk(analysis) -> bool:
+    """
+    Se long_overlay_asset_id aponta para um BrandAsset apagado, limpa FK e desativa overlay.
+    Evita IntegrityError ao salvar o job (ex.: após download do YouTube com file.save).
+    """
+    from apps.brands.models import BrandAsset
+
+    pk = getattr(analysis, "long_overlay_asset_id", None)
+    if not pk:
+        return False
+    if BrandAsset.objects.filter(pk=pk).exists():
+        return False
+    analysis.long_overlay_asset_id = None
+    analysis.long_overlay_enabled = False
+    return True
+
+
 def _resolve_target_brand_for_suggestion(analysis, suggestion):
     """
     Resolve a brand de destino via target_brand (prioridade), distribute ou categoria (Factory 1:1).
@@ -475,7 +492,6 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     finalizar_auto_cut_task.run(
         analysis.id,
         vertical_mode=vert_mode,
-        horizontal_insert_logo=True,
         horizontal_logo_x=20,
         horizontal_logo_y=20,
     )
@@ -771,7 +787,6 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
     finalizar_auto_cut_task.run(
         analysis.id,
         vertical_mode=vert_mode,
-        horizontal_insert_logo=True,
         horizontal_logo_x=20,
         horizontal_logo_y=20,
     )
@@ -797,6 +812,13 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         analysis = AutoCutAnalysis.objects.get(id=analysis_id)
     except ObjectDoesNotExist:
         return  # Análise deletada; ignora task da fila
+
+    if _sanitize_long_overlay_fk(analysis):
+        analysis.save(update_fields=["long_overlay_asset_id", "long_overlay_enabled"])
+        logger.warning(
+            "[FLUXO] Analysis %s: overlay lateral (long_overlay_asset) órfão; opção desativada.",
+            analysis_id,
+        )
 
     # Idempotência: se já concluído, retorna sem reprocessar (evita loop quando Celery
     # trava ao liberar GPU e a task é reentregue após reinício)
@@ -1354,7 +1376,6 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         finalizar_auto_cut_task.run(
             analysis.id,
             vertical_mode=vert_mode,
-            horizontal_insert_logo=True,
             horizontal_logo_x=20,
             horizontal_logo_y=20,
         )
@@ -1368,10 +1389,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         raise
 
 
-# Estilo padrão para legendas (fonte com emojis)
+# Estilo padrão para legendas (fonte com emojis).
+# size = FontSize ASS em unidades do PlayRes (≈ px na altura do vídeo); 12 em 1080p era ilegível.
 DEFAULT_SUBTITLE_STYLE = {
     "font": "Segoe UI Emoji",
-    "size": 12,
+    "size": 36,
     "color": "#FFFFFF",
     "outline_color": "#000000",
     "outline": 2,
@@ -1397,6 +1419,8 @@ def finalizar_auto_cut_task(
     overlay_position: str | None = None,
     overlay_margin: int | None = None,
     overlay_height: int | None = None,
+    long_overlay_enabled: bool | None = None,
+    long_overlay_asset_id: int | None = None,
 ) -> None:
     """
     Finaliza cortes: deleta os não marcados, reenquadra verticais (se 16:9),
@@ -1405,12 +1429,25 @@ def finalizar_auto_cut_task(
     from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
     from apps.brands.models import BrandAsset
     from apps.auto_cuts.services.vertical_reformat import reformat_video_vertical
-    from apps.jobs.services.ffmpeg import ffprobe_video_info, overlay_logo, overlay_animation
+    from apps.jobs.services.ffmpeg import (
+        ffprobe_video_info,
+        ffprobe_sample_aspect_ratio_float,
+        overlay_logo,
+        overlay_animation,
+        overlay_long_right,
+    )
 
     try:
         analysis = AutoCutAnalysis.objects.get(id=analysis_id)
     except ObjectDoesNotExist:
         return
+
+    if _sanitize_long_overlay_fk(analysis):
+        analysis.save(update_fields=["long_overlay_asset_id", "long_overlay_enabled"])
+        logger.warning(
+            "[FLUXO] Analysis %s: overlay lateral órfão na finalização; desativado.",
+            analysis_id,
+        )
 
     style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
     # Shorts: legendas na parte inferior (acima dos botões do YouTube), não no topo
@@ -1460,6 +1497,31 @@ def finalizar_auto_cut_task(
             except Exception:
                 pass
         return None
+
+    def _long_overlay_path_for_brand(brand, asset_id):
+        """Retorna Path do overlay lateral (vídeo longo) da brand ou None."""
+        if not brand or not asset_id:
+            return None
+        ovl = BrandAsset.objects.filter(
+            id=asset_id,
+            brand_id=brand.id,
+            asset_type="OVERLAY_LONG",
+        ).first()
+        if ovl and ovl.file:
+            try:
+                return Path(ovl.file.path)
+            except Exception:
+                pass
+        return None
+
+    if long_overlay_enabled is None:
+        lo_enabled = bool(getattr(analysis, "long_overlay_enabled", False))
+    else:
+        lo_enabled = bool(long_overlay_enabled)
+    if long_overlay_asset_id is None:
+        lo_asset_id = getattr(analysis, "long_overlay_asset_id", None)
+    else:
+        lo_asset_id = int(long_overlay_asset_id) if long_overlay_asset_id else None
 
     to_delete = list(AutoCutCorte.objects.filter(analysis=analysis, user_wants_finalize=False))
     media_root = Path(settings.MEDIA_ROOT)
@@ -1513,8 +1575,19 @@ def finalizar_auto_cut_task(
         # Brand de destino do corte (target_brand direcionado, distribute ou theme)
         target_brand = _resolve_target_brand_for_suggestion(analysis, corte.suggestion)
         brand_for_assets = target_brand or getattr(analysis, "brand", None)
+        sug = corte.suggestion
+        is_long_horizontal = (
+            getattr(sug, "cut_type", "") == "long" and corte.format == "horizontal"
+        )
+        long_subs_ok = bool(getattr(brand_for_assets, "long_video_subtitles_enabled", False))
+        long_logo_ok = bool(getattr(brand_for_assets, "long_video_logo_enabled", False))
         logo_path = _logo_path_for_brand(brand_for_assets)
         animation_path = _animation_path_for_brand(brand_for_assets, overlay_animation_asset_id)
+        # Overlay longo: asset sempre da brand do job (upload em Brands), não da brand roteada por tema/distribuir.
+        overlay_brand_for_long = getattr(analysis, "brand", None)
+        long_overlay_path = (
+            _long_overlay_path_for_brand(overlay_brand_for_long, lo_asset_id) if lo_enabled else None
+        )
 
         try:
             work_path = video_path
@@ -1589,6 +1662,51 @@ def finalizar_auto_cut_task(
                         corte.id,
                     )
 
+            # 1b. Longos 16:9: canvas 1920×1080, SAR 1:1 e 30 fps antes de animação/overlay/logo/legenda.
+            # Sem isso, vídeo anamórfico ou altura efetiva menor que 1080 faz logo (px fixos) e MarginV da
+            # legenda parecerem gigantes ou deslocados (ex.: legenda “no meio”).
+            if is_long_horizontal and work_path.exists():
+                try:
+                    info_long = ffprobe_video_info(work_path)
+                    wl, hl = int(info_long.get("width", 0) or 0), int(info_long.get("height", 0) or 0)
+                    sar_f = ffprobe_sample_aspect_ratio_float(info_long.get("sample_aspect_ratio"))
+                    needs_canvas = wl != 1920 or hl != 1080
+                    if not needs_canvas and sar_f is not None and abs(sar_f - 1.0) > 0.03:
+                        needs_canvas = True
+                    if needs_canvas:
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            norm_long = Path(tmpdir) / "long_16x9_norm.mp4"
+                            normalize_video_to_canvas(
+                                work_path,
+                                norm_long,
+                                width=1920,
+                                height=1080,
+                                use_gpu=False,
+                                target_fps=30,
+                                audio_hz=48000,
+                            )
+                            corte.file.delete(save=False)
+                            with open(norm_long, "rb") as f:
+                                corte.file.save(
+                                    f"job_{analysis.id}_sug_{corte.suggestion_id}_long_norm.mp4",
+                                    File(f),
+                                    save=True,
+                                )
+                            work_path = Path(corte.file.path)
+                            logger.info(
+                                "Corte %s: normalizado para 1920×1080 SAR 1:1 (longo horizontal; era %d×%d sar=%s)",
+                                corte.id,
+                                wl,
+                                hl,
+                                info_long.get("sample_aspect_ratio") or "N/A",
+                            )
+                except Exception as e:
+                    logger.exception(
+                        "Erro ao normalizar longo horizontal (canvas 16:9) corte %s: %s",
+                        corte.id,
+                        e,
+                    )
+
             # 2. Sobrepõe animação (cortes curtos e longos, se solicitado)
             if animation_path and animation_path.exists() and work_path.exists():
                 try:
@@ -1615,40 +1733,86 @@ def finalizar_auto_cut_task(
                 except Exception as e:
                     logger.exception("Erro ao aplicar animação overlay corte %s: %s", corte.id, e)
 
-            # 3. Marca d'água: logo em todos os vídeos (shorts e longs), canto sup esq, 80% opacidade
-            if corte.format == "horizontal" and logo_path and logo_path.exists():
-                if work_path.exists():
-                    try:
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            logo_out = Path(tmpdir) / "with_logo.mp4"
-                            overlay_logo(
-                                work_path,
-                                logo_out,
-                                logo_path,
-                                x=horiz_logo_x,
-                                y=horiz_logo_y,
-                                logo_height=160,
-                                opacity=0.8,
-                                use_gpu=False,
+            # 2b. Overlay lateral direita (somente cortes longos horizontais)
+            if (
+                lo_enabled
+                and long_overlay_path
+                and long_overlay_path.exists()
+                and is_long_horizontal
+                and work_path.exists()
+            ):
+                try:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        lo_out = Path(tmpdir) / "with_long_overlay.mp4"
+                        overlay_long_right(
+                            work_path,
+                            long_overlay_path,
+                            lo_out,
+                            use_gpu=False,
+                        )
+                        corte.file.delete(save=False)
+                        with open(lo_out, "rb") as f:
+                            corte.file.save(
+                                f"job_{analysis.id}_sug_{corte.suggestion_id}_long_overlay.mp4",
+                                File(f),
+                                save=True,
                             )
-                            corte.file.delete(save=False)
-                            with open(logo_out, "rb") as f:
-                                corte.file.save(
-                                    f"job_{analysis.id}_sug_{corte.suggestion_id}_logo.mp4",
-                                    File(f),
-                                    save=True,
-                                )
-                            work_path = Path(corte.file.path)
-                            logger.info("Corte %s: logo inserido em (%d,%d)", corte.id, horiz_logo_x, horiz_logo_y)
-                    except Exception as e:
-                        logger.exception("Erro ao inserir logo corte %s: %s", corte.id, e)
+                        work_path = Path(corte.file.path)
+                        logger.info("Corte %s: overlay lateral (long) aplicado", corte.id)
+                except Exception as e:
+                    logger.exception(
+                        "Erro ao aplicar overlay lateral longo corte %s: %s", corte.id, e
+                    )
 
-            # 4. Queimar legendas (se marcado)
+            # 3. Logo em vídeo longo horizontal (16:9), se a marca tiver long_video_logo_enabled
+            if (
+                is_long_horizontal
+                and long_logo_ok
+                and logo_path
+                and logo_path.exists()
+                and work_path.exists()
+            ):
+                try:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        logo_out = Path(tmpdir) / "with_logo.mp4"
+                        overlay_logo(
+                            work_path,
+                            logo_out,
+                            logo_path,
+                            x=horiz_logo_x,
+                            y=horiz_logo_y,
+                            logo_height=160,
+                            opacity=0.8,
+                            use_gpu=False,
+                        )
+                        corte.file.delete(save=False)
+                        with open(logo_out, "rb") as f:
+                            corte.file.save(
+                                f"job_{analysis.id}_sug_{corte.suggestion_id}_logo.mp4",
+                                File(f),
+                                save=True,
+                            )
+                        work_path = Path(corte.file.path)
+                        logger.info("Corte %s: logo inserido em (%d,%d)", corte.id, horiz_logo_x, horiz_logo_y)
+                except Exception as e:
+                    logger.exception("Erro ao inserir logo corte %s: %s", corte.id, e)
+
+            # 4. Queimar legendas (shorts: se marcado; longos horizontais: só se a marca permitir)
+            should_burn_subs = (
+                corte.needs_subtitle
+                and corte.subtitle_segments
+                and (not is_long_horizontal or long_subs_ok)
+            )
             if not corte.needs_subtitle:
                 logger.info("Corte %s: pulando legendas (needs_subtitle=False)", corte.id)
             elif not corte.subtitle_segments:
                 logger.info("Corte %s: pulando legendas (subtitle_segments vazio)", corte.id)
-            if corte.needs_subtitle and corte.subtitle_segments:
+            elif is_long_horizontal and not long_subs_ok:
+                logger.info(
+                    "Corte %s: pulando legendas (vídeo longo 16:9: desativado nas preferências da marca)",
+                    corte.id,
+                )
+            if should_burn_subs:
                 if work_path.exists():
                     try:
                         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1658,7 +1822,13 @@ def finalizar_auto_cut_task(
                                 segments_to_srt(corte.subtitle_segments), encoding="utf-8"
                             )
                             output_tmp = tmppath / "output_with_subs.mp4"
-                            burn_subtitles(work_path, srt_path, output_tmp, style)
+                            burn_subtitles(
+                                work_path,
+                                srt_path,
+                                output_tmp,
+                                style,
+                                segments=corte.subtitle_segments,
+                            )
                             corte.file.delete(save=False)
                             with open(output_tmp, "rb") as f:
                                 corte.file.save(

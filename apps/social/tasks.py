@@ -29,6 +29,8 @@ from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_fac
 
 logger = logging.getLogger(__name__)
 YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
+# Upload-Post não aceita ficheiros muito grandes (~250MB); longos acima disso → YouTube só API nativa.
+UPLOAD_POST_LONG_MAX_BYTES = 250 * 1024 * 1024
 BATCH_LIMIT_PER_TICK = 20
 YOUTUBE_VERIFY_GRACE_SECONDS = 600
 YOUTUBE_CHECK_CLIENT_ENABLED = bool(
@@ -1326,6 +1328,19 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     # Upload-Post (preferência): TikTok, X, Instagram, YouTube quando habilitado na brand.
     # Curtos e longos. Retry 2x com 10s. Fallback para YouTube API se falhar.
     upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
+    # Longos acima do limite (~250MB): Upload-Post não aceita; YouTube só pela API nativa (resumable upload).
+    if upload_post_platforms and "YTB" in (post.platforms or []):
+        try:
+            file_sz = os.path.getsize(video_path)
+        except OSError:
+            file_sz = 0
+        if file_sz > UPLOAD_POST_LONG_MAX_BYTES and "YOUTUBE" in upload_post_platforms:
+            upload_post_platforms = [p for p in upload_post_platforms if p != "YOUTUBE"]
+            logger.info(
+                "[UploadPost] Vídeo longo %.1f MB > limite %.0f MB; YouTube fora do Upload-Post (API nativa)",
+                file_sz / (1024 * 1024),
+                UPLOAD_POST_LONG_MAX_BYTES / (1024 * 1024),
+            )
     if not errors and brand and video_path and upload_post_platforms:
         import time as _time
         from apps.social.publishers.upload_post import (

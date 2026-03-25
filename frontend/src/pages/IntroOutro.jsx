@@ -83,6 +83,8 @@ export default function IntroOutro() {
   const [assetType, setAssetType] = useState('INTRO')
   const [label, setLabel] = useState('')
   const [file, setFile] = useState(null)
+  const [overlayLongLabel, setOverlayLongLabel] = useState('')
+  const [overlayLongFile, setOverlayLongFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [newBrandName, setNewBrandName] = useState('')
   const [newBrandThemeCategory, setNewBrandThemeCategory] = useState('')
@@ -195,6 +197,26 @@ export default function IntroOutro() {
     setUploadPostInstagramExtra(selected?.upload_post_instagram_extra_description || '')
     setUploadPostYoutubeEnabled(!!selected?.upload_post_youtube_enabled)
   }, [brandId, brands])
+
+  async function handleAddOverlay(e) {
+    e.preventDefault()
+    if (!brandId || !overlayLongFile) {
+      setError('Selecione a marca e um arquivo (PNG, JPG ou MP4)')
+      return
+    }
+    setError('')
+    setUploading(true)
+    try {
+      await createBrandAsset(brandId, 'OVERLAY_LONG', overlayLongFile, overlayLongLabel.trim())
+      setOverlayLongFile(null)
+      setOverlayLongLabel('')
+      getBrandAssets(brandId).then(setAssets)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
 
   async function handleAdd(e) {
     e.preventDefault()
@@ -458,7 +480,10 @@ export default function IntroOutro() {
     }
   }
 
-  const typeLabel = (id) => ASSET_TYPES.find((t) => t.id === id)?.label || id
+  const typeLabel = (id) => {
+    if (id === 'OVERLAY_LONG') return 'Overlay vídeo longo (direita)'
+    return ASSET_TYPES.find((t) => t.id === id)?.label || id
+  }
 
   return (
     <div className="intro-outro">
@@ -1062,6 +1087,39 @@ export default function IntroOutro() {
               </div>
               <button type="submit" disabled={uploading}>
                 {uploading ? 'Enviando...' : 'Adicionar'}
+              </button>
+            </form>
+          </div>
+
+          <div className="add-form">
+            <h2>Adicionar overlay (vídeo longo)</h2>
+            <p className="form-hint">
+              PNG, JPG ou MP4 para sobrepor ao vídeo longo na lateral direita (canto superior direito se a altura for menor
+              que a do vídeo). Vários arquivos: use rótulos diferentes.
+            </p>
+            <form onSubmit={handleAddOverlay}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Rótulo (opcional)</label>
+                  <input
+                    type="text"
+                    value={overlayLongLabel}
+                    onChange={(e) => setOverlayLongLabel(e.target.value)}
+                    placeholder="Ex: faixa patrocinador"
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Arquivo (PNG, JPG ou MP4)</label>
+                <input
+                  type="file"
+                  accept=".mp4,.png,.jpg,.jpeg,video/mp4,image/png,image/jpeg"
+                  onChange={(e) => setOverlayLongFile(e.target.files?.[0] || null)}
+                  required
+                />
+              </div>
+              <button type="submit" disabled={uploading}>
+                {uploading ? 'Enviando...' : 'Adicionar overlay'}
               </button>
             </form>
           </div>

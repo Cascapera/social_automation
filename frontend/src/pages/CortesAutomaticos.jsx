@@ -20,6 +20,7 @@ import {
   getAutoCutCortes,
   deleteAutoCutCorte,
   uploadAutoCutCorteThumbnail,
+  updateBrand,
 } from '../api'
 import './CortesAutomaticos.css'
 
@@ -42,7 +43,7 @@ function isShortCorte(corte) {
 }
 
 export default function CortesAutomaticos() {
-  const { brandId, brands, viewMode, factoryId } = useBrand()
+  const { brandId, brands, viewMode, factoryId, setBrands } = useBrand()
   const [analyses, setAnalyses] = useState([])
   const [factoryRunningAnalyses, setFactoryRunningAnalyses] = useState([])
   const [sources, setSources] = useState([])
@@ -86,11 +87,19 @@ export default function CortesAutomaticos() {
     text_color: '#FFFFFF',
   })
   const [horizontalOptions, setHorizontalOptions] = useState({
-    insert_logo: false,
     logo_x: 100,
     logo_y: 100,
   })
+  const [longVideoSubtitles, setLongVideoSubtitles] = useState(false)
+  const [longVideoLogo, setLongVideoLogo] = useState(false)
+  const [readyCutsLongSubs, setReadyCutsLongSubs] = useState(false)
+  const [readyCutsLongLogo, setReadyCutsLongLogo] = useState(false)
   const [animationAssets, setAnimationAssets] = useState([])
+  const [longOverlayAssets, setLongOverlayAssets] = useState([])
+  const [longOverlayEnabled, setLongOverlayEnabled] = useState(false)
+  const [longOverlayAssetId, setLongOverlayAssetId] = useState('')
+  const [readyCutsLongOverlayEnabled, setReadyCutsLongOverlayEnabled] = useState(false)
+  const [readyCutsLongOverlayAssetId, setReadyCutsLongOverlayAssetId] = useState('')
   const [overlayAnimationOptions, setOverlayAnimationOptions] = useState({
     asset_id: '',
     position: 'bottom_right',
@@ -243,6 +252,32 @@ export default function CortesAutomaticos() {
     }
   }
 
+  async function persistLongVideoPreference(field, value) {
+    if (!activeBrandId) return
+    setError('')
+    try {
+      const updated = await updateBrand(activeBrandId, { [field]: value })
+      setBrands((prev) =>
+        prev.map((b) => (String(b.id) === String(activeBrandId) ? { ...b, ...updated } : b)),
+      )
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  async function persistReadyCutsLongVideo(field, value) {
+    const bid = viewMode === 'factory' ? readyCutsBrandId : activeBrandId
+    if (!bid) return
+    try {
+      const updated = await updateBrand(bid, { [field]: value })
+      setBrands((prev) =>
+        prev.map((b) => (String(b.id) === String(bid) ? { ...b, ...updated } : b)),
+      )
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   async function handleToggleFactoryProcessing() {
     if (!factoryInfo?.id || togglingFactoryProcessing) return
     setError('')
@@ -276,6 +311,40 @@ export default function CortesAutomaticos() {
   }, [activeBrandId, selectedBrand?.vertical_mode])
 
   useEffect(() => {
+    const jobBrandId = selectedAnalysis?.brand
+    if (jobBrandId != null && jobBrandId !== '') {
+      const b = brands.find((x) => String(x.id) === String(jobBrandId))
+      if (b) {
+        setLongVideoSubtitles(!!b.long_video_subtitles_enabled)
+        setLongVideoLogo(!!b.long_video_logo_enabled)
+      }
+      return
+    }
+    if (selectedBrand) {
+      setLongVideoSubtitles(!!selectedBrand.long_video_subtitles_enabled)
+      setLongVideoLogo(!!selectedBrand.long_video_logo_enabled)
+    }
+  }, [
+    expandedId,
+    selectedAnalysis?.brand,
+    selectedBrand?.id,
+    selectedBrand?.long_video_subtitles_enabled,
+    selectedBrand?.long_video_logo_enabled,
+    brands,
+  ])
+
+  useEffect(() => {
+    if (!readyCutsModalOpen) return
+    const bid = viewMode === 'factory' ? readyCutsBrandId : activeBrandId
+    if (!bid) return
+    const b = brands.find((x) => String(x.id) === String(bid))
+    if (b) {
+      setReadyCutsLongSubs(!!b.long_video_subtitles_enabled)
+      setReadyCutsLongLogo(!!b.long_video_logo_enabled)
+    }
+  }, [readyCutsModalOpen, readyCutsBrandId, activeBrandId, viewMode, brands])
+
+  useEffect(() => {
     const shouldLoadFactoryAggregated = viewMode === 'factory'
     if (shouldLoadFactoryAggregated || activeBrandId) {
       loadAnalysesForView().catch(() => setAnalyses([]))
@@ -298,6 +367,18 @@ export default function CortesAutomaticos() {
     }
   }, [activeBrandId, filters, viewMode, brandId, factoryId, factoryBrandIdsKey])
 
+  useEffect(() => {
+    const bid =
+      readyCutsModalOpen && viewMode === 'factory' && readyCutsBrandId
+        ? readyCutsBrandId
+        : activeBrandId
+    if (!bid) {
+      setLongOverlayAssets([])
+      return
+    }
+    getBrandAssets(bid, 'OVERLAY_LONG').then(setLongOverlayAssets).catch(() => setLongOverlayAssets([]))
+  }, [activeBrandId, readyCutsModalOpen, readyCutsBrandId, viewMode])
+
   async function handleGenerate(e) {
     e.preventDefault()
     if (!activeBrandId) {
@@ -313,6 +394,10 @@ export default function CortesAutomaticos() {
       return
     }
     setError('')
+    if (longOverlayEnabled && !longOverlayAssetId) {
+      setError('Selecione um overlay ou desative a opção.')
+      return
+    }
     setCreating(true)
     try {
       const useBrandThumbDefaults = viewMode === 'factory' && !!selectedBrand
@@ -350,6 +435,8 @@ export default function CortesAutomaticos() {
         shortsTarget,
         longsTarget,
         verticalMode: jobVerticalMode,
+        longOverlayEnabled,
+        longOverlayAssetId: longOverlayEnabled && longOverlayAssetId ? Number(longOverlayAssetId) : null,
       })
       setAnalyses((prev) => [a, ...prev])
       setExpandedId(a.id)
@@ -367,6 +454,8 @@ export default function CortesAutomaticos() {
       setThumbnailStrokeColor('#FFEBDC')
       setShortsTarget(12)
       setLongsTarget(3)
+      setLongOverlayEnabled(false)
+      setLongOverlayAssetId('')
     } catch (e) {
       setError(e.message)
     } finally {
@@ -408,6 +497,10 @@ export default function CortesAutomaticos() {
       setError('Selecione pelo menos um arquivo de vídeo.')
       return
     }
+    if (readyCutsLongOverlayEnabled && !readyCutsLongOverlayAssetId) {
+      setError('Selecione um overlay ou desative a opção.')
+      return
+    }
     setError('')
     setCreatingReadyCuts(true)
     try {
@@ -419,6 +512,11 @@ export default function CortesAutomaticos() {
         transcribe: readyCutsTranscribe,
         createLongVideo: readyCutsLongVideo,
         titlesLanguage: readyCutsTitlesLanguage,
+        longOverlayEnabled: readyCutsLongOverlayEnabled,
+        longOverlayAssetId:
+          readyCutsLongOverlayEnabled && readyCutsLongOverlayAssetId
+            ? Number(readyCutsLongOverlayAssetId)
+            : null,
       })
       setAnalyses((prev) => [a, ...prev])
       if (a?.id) setExpandedId(a.id)
@@ -428,6 +526,8 @@ export default function CortesAutomaticos() {
       setReadyCutsTranscribe(true)
       setReadyCutsLongVideo(false)
       setReadyCutsTitlesLanguage('pt')
+      setReadyCutsLongOverlayEnabled(false)
+      setReadyCutsLongOverlayAssetId('')
       loadAnalysesForView()
     } catch (err) {
       setError(err.message)
@@ -496,9 +596,29 @@ export default function CortesAutomaticos() {
 
   async function handleFinalizar() {
     if (!selectedAnalysis) return
+    const finalizeBrandId = selectedAnalysis.brand ?? activeBrandId
+    if (!finalizeBrandId) {
+      setError('Não foi possível identificar a marca deste job.')
+      return
+    }
     setFinalizing(selectedAnalysis.id)
     setError('')
     try {
+      await updateBrand(finalizeBrandId, {
+        long_video_subtitles_enabled: longVideoSubtitles,
+        long_video_logo_enabled: longVideoLogo,
+      })
+      setBrands((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(finalizeBrandId)
+            ? {
+                ...b,
+                long_video_subtitles_enabled: longVideoSubtitles,
+                long_video_logo_enabled: longVideoLogo,
+              }
+            : b,
+        ),
+      )
       await finalizarAutoCutJob(selectedAnalysis.id, {
         subtitle_style: subtitleStyle,
         vertical_mode: verticalOptions.mode,
@@ -508,13 +628,15 @@ export default function CortesAutomaticos() {
         font_size_text: verticalOptions.font_size_text,
         title_color: verticalOptions.title_color,
         text_color: verticalOptions.text_color,
-        horizontal_insert_logo: horizontalOptions.insert_logo,
-        horizontal_logo_x: horizontalOptions.insert_logo ? horizontalOptions.logo_x : undefined,
-        horizontal_logo_y: horizontalOptions.insert_logo ? horizontalOptions.logo_y : undefined,
+        horizontal_insert_logo: longVideoLogo,
+        horizontal_logo_x: longVideoLogo ? horizontalOptions.logo_x : undefined,
+        horizontal_logo_y: longVideoLogo ? horizontalOptions.logo_y : undefined,
         overlay_animation_asset_id: overlayAnimationOptions.asset_id ? Number(overlayAnimationOptions.asset_id) : undefined,
         overlay_position: overlayAnimationOptions.asset_id ? overlayAnimationOptions.position : undefined,
         overlay_margin: overlayAnimationOptions.asset_id ? overlayAnimationOptions.margin : undefined,
         overlay_height: overlayAnimationOptions.asset_id ? overlayAnimationOptions.height : undefined,
+        long_overlay_enabled: !!selectedAnalysis.long_overlay_enabled,
+        long_overlay_asset_id: selectedAnalysis.long_overlay_asset ?? undefined,
       })
       const list = await loadAnalysesForView()
       setAnalyses(list)
@@ -875,16 +997,85 @@ export default function CortesAutomaticos() {
                         <option value="yes">Sim (junta os clipes com fade antes de finalizar os shorts)</option>
                       </select>
                     </div>
-                    <div className="form-group">
-                      <label>Formato final dos shorts</label>
-                      <select
-                        value={jobVerticalMode}
-                        onChange={(e) => setJobVerticalMode(e.target.value)}
-                      >
-                        <option value="zoom_crop">Zoom e corte</option>
-                        <option value="frame_center">Enquadrar e centralizar</option>
-                      </select>
+            <div className="form-group">
+              <label>Formato final dos shorts</label>
+              <select
+                value={jobVerticalMode}
+                onChange={(e) => setJobVerticalMode(e.target.value)}
+              >
+                <option value="zoom_crop">Zoom e corte</option>
+                <option value="frame_center">Enquadrar e centralizar</option>
+              </select>
                     </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Deseja adicionar overlay?</label>
+                        <select
+                          value={readyCutsLongOverlayEnabled ? 'yes' : 'no'}
+                          onChange={(e) => {
+                            const yes = e.target.value === 'yes'
+                            setReadyCutsLongOverlayEnabled(yes)
+                            if (!yes) setReadyCutsLongOverlayAssetId('')
+                          }}
+                        >
+                          <option value="no">Não</option>
+                          <option value="yes">Sim</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Selecione o overlay</label>
+                        <select
+                          value={readyCutsLongOverlayAssetId}
+                          onChange={(e) => setReadyCutsLongOverlayAssetId(e.target.value)}
+                          disabled={!readyCutsLongOverlayEnabled}
+                        >
+                          <option value="">
+                            {readyCutsLongOverlayEnabled ? 'Escolha…' : 'Marque Sim acima'}
+                          </option>
+                          {longOverlayAssets.map((a) => (
+                            <option key={a.id} value={a.id}>{a.label || `Overlay #${a.id}`}</option>
+                          ))}
+                        </select>
+                        {readyCutsLongOverlayEnabled && longOverlayAssets.length === 0 && (
+                          <span className="form-hint">
+                            Cadastre overlays em Mídias da marca → Adicionar overlay (vídeo longo).
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="form-hint">Overlay: só em cortes longos horizontais (PNG/JPG/MP4 na lateral direita).</p>
+                    {(viewMode === 'factory' ? readyCutsBrandId : activeBrandId) ? (
+                      <div className="form-row" style={{ marginTop: '0.75rem' }}>
+                        <div className="form-group">
+                          <label>Vídeo longo com legenda</label>
+                          <select
+                            value={readyCutsLongSubs ? 'yes' : 'no'}
+                            onChange={async (e) => {
+                              const v = e.target.value === 'yes'
+                              setReadyCutsLongSubs(v)
+                              await persistReadyCutsLongVideo('long_video_subtitles_enabled', v)
+                            }}
+                          >
+                            <option value="no">Não</option>
+                            <option value="yes">Sim</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label>Inserir logo no vídeo longo</label>
+                          <select
+                            value={readyCutsLongLogo ? 'yes' : 'no'}
+                            onChange={async (e) => {
+                              const v = e.target.value === 'yes'
+                              setReadyCutsLongLogo(v)
+                              await persistReadyCutsLongVideo('long_video_logo_enabled', v)
+                            }}
+                          >
+                            <option value="no">Não</option>
+                            <option value="yes">Sim</option>
+                          </select>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="ready-cuts-order-modal-footer">
                     <button type="button" onClick={() => !creatingReadyCuts && setReadyCutsModalOpen(false)}>Cancelar</button>
@@ -1131,6 +1322,77 @@ export default function CortesAutomaticos() {
               <span className="form-hint">Faixa: 1 a 10 (padrão 3).</span>
             </div>
           </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Deseja adicionar overlay?</label>
+              <select
+                value={longOverlayEnabled ? 'yes' : 'no'}
+                onChange={(e) => {
+                  const yes = e.target.value === 'yes'
+                  setLongOverlayEnabled(yes)
+                  if (!yes) setLongOverlayAssetId('')
+                }}
+              >
+                <option value="no">Não</option>
+                <option value="yes">Sim</option>
+              </select>
+              <span className="form-hint">Sobreposto à direita nos vídeos longos (16:9).</span>
+            </div>
+            <div className="form-group">
+              <label>Selecione o overlay</label>
+              <select
+                value={longOverlayAssetId}
+                onChange={(e) => setLongOverlayAssetId(e.target.value)}
+                disabled={!longOverlayEnabled}
+              >
+                <option value="">
+                  {longOverlayEnabled ? 'Escolha…' : 'Marque Sim acima'}
+                </option>
+                {longOverlayAssets.map((a) => (
+                  <option key={a.id} value={a.id}>{a.label || `Overlay #${a.id}`}</option>
+                ))}
+              </select>
+              {longOverlayEnabled && longOverlayAssets.length === 0 && (
+                <span className="form-hint">
+                  Nenhum overlay cadastrado. Em <strong>Mídias da marca</strong> → <strong>Adicionar overlay (vídeo longo)</strong>, envie PNG, JPG ou MP4.
+                </span>
+              )}
+            </div>
+          </div>
+          {activeBrandId ? (
+            <div className="form-row">
+              <div className="form-group">
+                <label>Vídeo longo com legenda</label>
+                <select
+                  value={longVideoSubtitles ? 'yes' : 'no'}
+                  onChange={async (e) => {
+                    const v = e.target.value === 'yes'
+                    setLongVideoSubtitles(v)
+                    await persistLongVideoPreference('long_video_subtitles_enabled', v)
+                  }}
+                >
+                  <option value="no">Não</option>
+                  <option value="yes">Sim</option>
+                </select>
+                <span className="form-hint">Só afeta cortes longos 16:9 na finalização (padrão: não).</span>
+              </div>
+              <div className="form-group">
+                <label>Inserir logo no vídeo longo</label>
+                <select
+                  value={longVideoLogo ? 'yes' : 'no'}
+                  onChange={async (e) => {
+                    const v = e.target.value === 'yes'
+                    setLongVideoLogo(v)
+                    await persistLongVideoPreference('long_video_logo_enabled', v)
+                  }}
+                >
+                  <option value="no">Não</option>
+                  <option value="yes">Sim</option>
+                </select>
+                <span className="form-hint">Logo da marca em longos 16:9 (padrão: não).</span>
+              </div>
+            </div>
+          ) : null}
           <button type="submit" disabled={creating || (!file && !sourceId && !youtubeUrl)}>
             {creating ? 'Iniciando...' : 'Gerar cortes'}
           </button>
@@ -1339,20 +1601,38 @@ export default function CortesAutomaticos() {
                     <div className="horizontal-reformat-block">
                       <h4>Cortes horizontais (longos)</h4>
                       <p className="form-hint">
-                        Opções para cortes em formato 16:9 (vídeos longos).
+                        Preferências por marca (vídeos longos 16:9). Ajuste também em &quot;Gerar cortes&quot; acima.
                       </p>
                       <div className="horizontal-options-fields">
                         <label>
-                          <span>Inserir logo</span>
+                          <span>Vídeo longo com legenda</span>
                           <select
-                            value={horizontalOptions.insert_logo ? 'yes' : 'no'}
-                            onChange={(e) => setHorizontalOptions((o) => ({ ...o, insert_logo: e.target.value === 'yes' }))}
+                            value={longVideoSubtitles ? 'yes' : 'no'}
+                            onChange={async (e) => {
+                              const v = e.target.value === 'yes'
+                              setLongVideoSubtitles(v)
+                              await persistLongVideoPreference('long_video_subtitles_enabled', v)
+                            }}
                           >
                             <option value="no">Não</option>
                             <option value="yes">Sim</option>
                           </select>
                         </label>
-                        {horizontalOptions.insert_logo && (
+                        <label>
+                          <span>Inserir logo no vídeo longo</span>
+                          <select
+                            value={longVideoLogo ? 'yes' : 'no'}
+                            onChange={async (e) => {
+                              const v = e.target.value === 'yes'
+                              setLongVideoLogo(v)
+                              await persistLongVideoPreference('long_video_logo_enabled', v)
+                            }}
+                          >
+                            <option value="no">Não</option>
+                            <option value="yes">Sim</option>
+                          </select>
+                        </label>
+                        {longVideoLogo && (
                           <label>
                             <span>Posição do logo (X:Y em px)</span>
                             <div className="position-input-row">
@@ -1438,7 +1718,10 @@ export default function CortesAutomaticos() {
                       </div>
                     </div>
                     <div className="subtitle-style-block">
-                      <h4>Estilo da legenda (vale para todos com legenda marcada)</h4>
+                      <h4>Estilo da legenda</h4>
+                      <p className="form-hint">
+                        Cortes curtos: legendas quando marcado no card. Vídeos longos 16:9: só queimam legenda se &quot;Vídeo longo com legenda&quot; estiver Sim na marca do corte.
+                      </p>
                       <div className="subtitle-style-fields">
                         <label>
                           <span>Fonte</span>

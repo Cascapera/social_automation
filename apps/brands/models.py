@@ -224,6 +224,14 @@ class Brand(models.Model):
         default=False,
         help_text="Se ativo, envia vídeos para YouTube via Upload-Post (preferência). Se inativo, usa YouTube API/OAuth direto.",
     )
+    long_video_subtitles_enabled = models.BooleanField(
+        default=False,
+        help_text="Se ativo, queima legendas nos cortes longos horizontais (16:9) na finalização.",
+    )
+    long_video_logo_enabled = models.BooleanField(
+        default=False,
+        help_text="Se ativo, insere o logo da marca nos cortes longos horizontais na finalização.",
+    )
 
     class Meta:
         constraints = [
@@ -383,6 +391,7 @@ class BrandAsset(models.Model):
         ("OUTRO", "Outro vídeo"),
         ("CTA", "CTA vídeo/imagem"),
         ("ANIMATION", "Animação overlay (PNG/GIF com transparência)"),
+        ("OVERLAY_LONG", "Overlay vídeo longo (direita: PNG/JPG/MP4)"),
         ("THUMB_SHORT", "Thumb Shorts"),
         ("THUMB_LONG", "Thumb Longs"),
     ]

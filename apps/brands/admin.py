@@ -35,7 +35,18 @@ class BrandAdmin(admin.ModelAdmin):
         (None, {"fields": ("name", "slug", "factory", "theme_category")}),
         ("YouTube", {"fields": ("youtube_made_for_kids", "youtube_description_extra", "youtube_client_id", "youtube_client_secret", "youtube_redirect_uri")}),
         ("Thumbnails", {"fields": ("thumbnail_font", "thumbnail_band_color", "thumbnail_text_color", "thumbnail_effect_color")}),
-        ("Agendamento", {"fields": ("short_slot_times", "long_slot_times", "vertical_mode")}),
+        (
+            "Agendamento",
+            {
+                "fields": (
+                    "short_slot_times",
+                    "long_slot_times",
+                    "vertical_mode",
+                    "long_video_subtitles_enabled",
+                    "long_video_logo_enabled",
+                ),
+            },
+        ),
         (
             "Upload-Post (TikTok, X, Instagram, YouTube)",
             {

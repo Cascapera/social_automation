@@ -694,6 +694,8 @@ export async function createReadyCutsAnalysis({
   transcribe = true,
   createLongVideo = false,
   titlesLanguage = 'pt',
+  longOverlayEnabled = false,
+  longOverlayAssetId = null,
 }) {
   const formData = new FormData()
   if (files?.length) {
@@ -708,6 +710,10 @@ export async function createReadyCutsAnalysis({
   formData.append('create_long_video', createLongVideo ? 'true' : 'false')
   const tl = String(titlesLanguage || 'pt').toLowerCase() === 'en' ? 'en' : 'pt'
   formData.append('titles_language', tl)
+  formData.append('long_overlay_enabled', longOverlayEnabled ? 'true' : 'false')
+  if (longOverlayEnabled && longOverlayAssetId) {
+    formData.append('long_overlay_asset', String(longOverlayAssetId))
+  }
   const token = getToken()
   const res = await fetch(`${API_BASE}/auto-cuts/upload-ready-cuts/`, {
     method: 'POST',
@@ -735,6 +741,8 @@ export async function createAutoCutAnalysis({
   shortsTarget,
   longsTarget,
   verticalMode = 'zoom_crop',
+  longOverlayEnabled = false,
+  longOverlayAssetId = null,
 }) {
   const formData = new FormData()
   if (file) formData.append('file', file)
@@ -754,6 +762,10 @@ export async function createAutoCutAnalysis({
   if (thumbnailStrokeColor) formData.append('thumbnail_stroke_color', thumbnailStrokeColor)
   if (shortsTarget != null) formData.append('shorts_target', String(shortsTarget))
   if (longsTarget != null) formData.append('longs_target', String(longsTarget))
+  formData.append('long_overlay_enabled', longOverlayEnabled ? 'true' : 'false')
+  if (longOverlayEnabled && longOverlayAssetId) {
+    formData.append('long_overlay_asset', String(longOverlayAssetId))
+  }
   const token = getToken()
   const res = await fetch(`${API_BASE}/auto-cuts/`, {
     method: 'POST',
@@ -802,6 +814,8 @@ export async function finalizarAutoCutJob(analysisId, {
   overlay_position: overlayPosition = 'bottom_right',
   overlay_margin: overlayMargin,
   overlay_height: overlayHeight,
+  long_overlay_enabled: longOverlayEnabled,
+  long_overlay_asset_id: longOverlayAssetId,
 } = {}) {
   const body = {
     subtitle_style: subtitleStyle,
@@ -820,6 +834,8 @@ export async function finalizarAutoCutJob(analysisId, {
   if (overlayPosition != null) body.overlay_position = overlayPosition
   if (overlayMargin != null) body.overlay_margin = overlayMargin
   if (overlayHeight != null) body.overlay_height = overlayHeight
+  if (longOverlayEnabled !== undefined) body.long_overlay_enabled = longOverlayEnabled
+  if (longOverlayAssetId !== undefined) body.long_overlay_asset_id = longOverlayAssetId
   return apiRequest(`/auto-cuts/${analysisId}/finalizar/`, {
     method: 'POST',
     body: JSON.stringify(body),

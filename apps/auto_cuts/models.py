@@ -1,7 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
-from apps.brands.models import Brand
+from apps.brands.models import Brand, BrandAsset
 from apps.mediahub.models import SourceVideo
 
 
@@ -170,6 +170,18 @@ class AutoCutAnalysis(models.Model):
         default="zoom_crop",
         blank=True,
         help_text="Modo de reenquadramento vertical para shorts (16:9 → 9:16). Zoom preenche a tela; Enquadrar adiciona bordas e logo.",
+    )
+    long_overlay_enabled = models.BooleanField(
+        default=False,
+        help_text="Sobrepõe imagem ou MP4 na lateral direita dos cortes longos (16:9), alinhado ao topo e à direita.",
+    )
+    long_overlay_asset = models.ForeignKey(
+        BrandAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Asset OVERLAY_LONG da brand; usado só se long_overlay_enabled.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

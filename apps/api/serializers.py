@@ -128,6 +128,8 @@ class BrandSerializer(serializers.ModelSerializer):
             "upload_post_instagram_enabled",
             "upload_post_instagram_extra_description",
             "upload_post_youtube_enabled",
+            "long_video_subtitles_enabled",
+            "long_video_logo_enabled",
         ]
         extra_kwargs = {"slug": {"required": False}}
 
@@ -168,6 +170,20 @@ class BrandAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = BrandAsset
         fields = ["id", "brand", "asset_type", "label", "file"]
+
+    def validate(self, attrs):
+        at = attrs.get("asset_type")
+        if self.instance is not None and at is None:
+            at = self.instance.asset_type
+        f = attrs.get("file")
+        if at == "OVERLAY_LONG" and f:
+            name = (getattr(f, "name", "") or "").lower()
+            ext = name.rsplit(".", 1)[-1] if "." in name else ""
+            if ext not in ("mp4", "png", "jpg", "jpeg"):
+                raise serializers.ValidationError(
+                    {"file": "Formato inválido. Use MP4, PNG ou JPG."}
+                )
+        return attrs
 
 
 class BrandSocialAccountSerializer(serializers.ModelSerializer):
@@ -581,6 +597,7 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
         model = AutoCutAnalysis
         fields = [
             "id",
+            "brand",
             "name",
             "target_brand_name",
             "distribution_mode",
@@ -607,6 +624,8 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
             "ready_cuts_create_long_video",
             "ready_cuts_long_fade_duration",
             "ready_cuts_titles_language",
+            "long_overlay_enabled",
+            "long_overlay_asset",
             "suggestions",
             "cortes",
             "ready_chunks",

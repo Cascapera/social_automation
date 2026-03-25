@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import tempfile
 import traceback
 from pathlib import Path
@@ -10,7 +11,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-from apps.jobs.services.ffmpeg import ffprobe_video_info, run_cmd
+from apps.jobs.services.ffmpeg import ffprobe_video_info, run_cmd, video_encode_args_burn_cpu
 
 # Fonte com suporte a emojis (Windows). Linux: Noto Color Emoji. macOS: Apple Color Emoji
 DEFAULT_FONT_EMOJI = "Segoe UI Emoji"
@@ -212,6 +213,49 @@ def _sec_to_ass_tc(sec: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+def segments_to_ass_static_for_burn(
+    segments: list[dict],
+    playres_w: int,
+    playres_h: int,
+    style: dict,
+) -> str:
+    """
+    ASS estático para queima em vídeo horizontal (16:9).
+    PlayRes + Alignment=2 (base inferior) evitam legenda ao centro quando SRT+force_style
+    é mal interpretado pelo libass no filtro subtitles do FFmpeg.
+    """
+    font = style.get("font", DEFAULT_FONT_EMOJI)
+    size = max(8, min(72, int(style.get("size", 24))))
+    color = _hex_to_ass_color(style.get("color", "#FFFFFF"))
+    outline_color = _hex_to_ass_color(style.get("outline_color", "#000000"))
+    outline = max(0, min(8, int(style.get("outline", 2))))
+    margin_v = max(0, min(2000, int(style.get("margin_v", 160))))
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {playres_w}\n"
+        f"PlayResY: {playres_h}\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, Shadow, Alignment, MarginV\n"
+        f"Style: Default,{font},{size},{color},{outline_color},1,{outline},1,2,{margin_v}\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    lines = []
+    for seg in segments:
+        text = (seg.get("text") or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        start_tc = _sec_to_ass_tc(float(seg.get("start", 0)))
+        end_tc = _sec_to_ass_tc(float(seg.get("end", 0)))
+        safe_text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        # {\an2} = base central (reforço; Style já Alignment=2)
+        lines.append(f"Dialogue: 0,{start_tc},{end_tc},Default,,0,0,0,,{{\\an2}}{safe_text}")
+    return header + "\n".join(lines)
+
+
 def segments_to_srt(segments: list[dict]) -> str:
     """Converte segmentos para formato SRT."""
     def sec_to_tc(sec: float) -> str:
@@ -309,33 +353,117 @@ def build_ffmpeg_force_style(style: dict | None) -> str:
     )
 
 
-# Resolução padrão do ASS quando SRT é convertido (libass usa 384x288)
+# Resolução de referência do ASS gerado a partir de SRT (libass usa 384x288 internamente).
+# Shorts verticais: escalar MarginV para essa base evita legenda “no meio” em 9:16.
 ASS_DEFAULT_PLAYRES_Y = 288
 
 
-def burn_subtitles(video_path: Path, srt_path: Path, output_path: Path, style: dict | None = None) -> None:
+def _srt_tc_to_seconds(tc: str) -> float:
+    tc = (tc or "").strip().replace(",", ".")
+    if not tc:
+        return 0.0
+    parts = tc.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        return float(parts[0])
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _parse_srt_to_segments(raw: str) -> list[dict]:
+    """Parse mínimo de SRT → [{start, end, text}, ...]."""
+    segments: list[dict] = []
+    raw = (raw or "").strip()
+    if not raw:
+        return segments
+    for block in re.split(r"\r?\n\r?\n", raw):
+        lines = [ln.strip() for ln in block.strip().split("\n") if ln.strip()]
+        if len(lines) < 2:
+            continue
+        i = 0
+        if lines[0].isdigit():
+            i = 1
+        if i >= len(lines):
+            continue
+        time_line = lines[i]
+        if "-->" not in time_line:
+            continue
+        left, right = time_line.split("-->", 1)
+        start = _srt_tc_to_seconds(left.strip())
+        end = _srt_tc_to_seconds(right.strip())
+        text = " ".join(lines[i + 1 :]).strip()
+        if text:
+            segments.append({"start": start, "end": end, "text": text})
+    return segments
+
+
+def burn_subtitles(
+    video_path: Path,
+    srt_path: Path,
+    output_path: Path,
+    style: dict | None = None,
+    *,
+    segments: list[dict] | None = None,
+) -> None:
     """Queima legendas no vídeo usando FFmpeg."""
     style = dict(style or {})
-    # MarginV no ASS usa coordenadas da resolução padrão (288px altura).
-    # Escalar para a altura real do vídeo evita legenda no meio em shorts (1080x1920).
+    video_w = 1920
+    video_h = 1080
     try:
         info = ffprobe_video_info(video_path)
-        video_h = info.get("height") or 1080
-        margin_desired = style.get("margin_v", 140)
-        margin_ass = max(10, int(margin_desired * ASS_DEFAULT_PLAYRES_Y / video_h))
-        style["margin_v"] = margin_ass
+        video_w = int(info.get("width") or 1920)
+        video_h = int(info.get("height") or 1080)
+        margin_desired = int(style.get("margin_v", 140))
+        if video_w > video_h:
+            # Longos horizontais (16:9): margem em px do vídeo; não escalar para 288 —
+            # com original_size, libass alinha ao rodapé; escalar aqui empurrava a legenda ao centro.
+            style["margin_v"] = max(24, margin_desired)
+        else:
+            # Verticais (shorts): manter escala para PlayRes ~288
+            style["margin_v"] = max(10, int(margin_desired * ASS_DEFAULT_PLAYRES_Y / video_h))
     except Exception:
-        pass  # mantém style original em caso de erro
-    force_style = build_ffmpeg_force_style(style)
-    # Path para FFmpeg: no Windows, usar / e escapar :
-    srt_str = str(srt_path.resolve()).replace("\\", "/")
-    if ":" in srt_str:
-        srt_str = srt_str.replace(":", "\\:")
-    vf = f"subtitles='{srt_str}':force_style='{force_style}'"
+        pass
+
+    is_horizontal = video_w > video_h
+    # Longos 16:9: ASS com PlayRes + Alignment=2 — SRT+force_style no libass costuma ignorar alinhamento
+    # e colocar a legenda ao centro (meio do ecrã).
+    if is_horizontal:
+        # Legendas animadas já vêm em .ass — não substituir por estático (preserva words/efeitos).
+        if srt_path.suffix.lower() == ".ass":
+            ass_str = str(srt_path.resolve()).replace("\\", "/")
+            if ":" in ass_str:
+                ass_str = ass_str.replace(":", "\\:")
+            vf = f"subtitles='{ass_str}'"
+        else:
+            segs = segments
+            if not segs:
+                try:
+                    segs = _parse_srt_to_segments(srt_path.read_text(encoding="utf-8"))
+                except Exception:
+                    segs = []
+            if not segs:
+                raise RuntimeError("burn_subtitles: sem segmentos para vídeo horizontal")
+            ass_text = segments_to_ass_static_for_burn(segs, video_w, video_h, style)
+            ass_path = srt_path.with_suffix(".ass")
+            ass_path.write_text(ass_text, encoding="utf-8")
+            ass_str = str(ass_path.resolve()).replace("\\", "/")
+            if ":" in ass_str:
+                ass_str = ass_str.replace(":", "\\:")
+            vf = f"subtitles='{ass_str}'"
+    else:
+        force_style = build_ffmpeg_force_style(style)
+        srt_str = str(srt_path.resolve()).replace("\\", "/")
+        if ":" in srt_str:
+            srt_str = srt_str.replace(":", "\\:")
+        vf = f"subtitles='{srt_str}':force_style='{force_style}':original_size={video_w}x{video_h}"
     cmd = [
         settings.FFMPEG_BIN, "-y",
         "-i", str(video_path),
         "-vf", vf,
+        *video_encode_args_burn_cpu(),
         "-c:a", "copy",
         "-movflags", "+faststart",
         str(output_path),

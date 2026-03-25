@@ -224,6 +224,15 @@ CELERY_TASK_ROUTES = {
 # FFmpeg
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")
+# libx264 (CPU): CRF menor = melhor qualidade (ficheiro maior); preset mais lento = melhor compressão (mais tempo).
+FFMPEG_LIBX264_CRF = int(os.getenv("FFMPEG_LIBX264_CRF", "20"))
+FFMPEG_LIBX264_PRESET = os.getenv("FFMPEG_LIBX264_PRESET", "veryfast")
+# Queima de legendas (subtitles filter): omissão = mesmo CRF/preset do pipeline; evita defaults do libx264.
+FFMPEG_LIBX264_BURN_CRF = int(os.getenv("FFMPEG_LIBX264_BURN_CRF", str(FFMPEG_LIBX264_CRF)))
+FFMPEG_LIBX264_BURN_PRESET = os.getenv("FFMPEG_LIBX264_BURN_PRESET", FFMPEG_LIBX264_PRESET)
+# Overlay lateral em vídeo longo: passo sensível a artefactos — padrão mais pesado (slow + CRF 16).
+FFMPEG_LIBX264_OVERLAY_LONG_CRF = int(os.getenv("FFMPEG_LIBX264_OVERLAY_LONG_CRF", "16"))
+FFMPEG_LIBX264_OVERLAY_LONG_PRESET = os.getenv("FFMPEG_LIBX264_OVERLAY_LONG_PRESET", "slow")
 
 # REST Framework
 REST_FRAMEWORK = {

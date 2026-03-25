@@ -110,7 +110,13 @@ def burn_subtitles_task(self, job_id: int) -> None:
                 subs_path = tmppath / "subtitles.srt"
                 subs_path.write_text(segments_to_srt(segments), encoding="utf-8")
             output_tmp = tmppath / "output_with_subs.mp4"
-            burn_subtitles(video_path, subs_path, output_tmp, job.subtitle_style)
+            burn_subtitles(
+                video_path,
+                subs_path,
+                output_tmp,
+                job.subtitle_style,
+                segments=segments,
+            )
             media_root = Path(settings.MEDIA_ROOT)
             final_dir = media_root / "exports"
             final_dir.mkdir(parents=True, exist_ok=True)

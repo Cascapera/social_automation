@@ -40,7 +40,24 @@ def input_has_audio(input_file: Path) -> bool:
 def video_encode_args(use_gpu: bool) -> list[str]:
     if use_gpu:
         return ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "19", "-pix_fmt", "yuv420p"]
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+    crf = getattr(settings, "FFMPEG_LIBX264_CRF", 20)
+    preset = getattr(settings, "FFMPEG_LIBX264_PRESET", "veryfast")
+    return ["-c:v", "libx264", "-preset", str(preset), "-crf", str(crf), "-pix_fmt", "yuv420p"]
+
+
+def video_encode_args_overlay_long_cpu() -> list[str]:
+    """CPU: qualidade acima do pipeline geral (overlay longo = reencode crítico). Ajustável via .env."""
+    crf = getattr(settings, "FFMPEG_LIBX264_OVERLAY_LONG_CRF", 16)
+    preset = getattr(settings, "FFMPEG_LIBX264_OVERLAY_LONG_PRESET", "slow")
+    return ["-c:v", "libx264", "-preset", str(preset), "-crf", str(crf), "-pix_fmt", "yuv420p"]
+
+
+def video_encode_args_burn_cpu() -> list[str]:
+    """Queima de legendas (filtro subtitles): alinha CRF/preset ao resto do pipeline."""
+    crf = getattr(settings, "FFMPEG_LIBX264_BURN_CRF", 20)
+    preset = getattr(settings, "FFMPEG_LIBX264_BURN_PRESET", "veryfast")
+    return ["-c:v", "libx264", "-preset", str(preset), "-crf", str(crf), "-pix_fmt", "yuv420p"]
+
 
 def audio_encode_args(input_file: Path) -> list[str]:
     if input_has_audio(input_file):
@@ -128,6 +145,82 @@ def overlay_animation(
     res = run_cmd(cmd)
     if not res.ok:
         raise RuntimeError(f"overlay animation failed: {res.stderr}")
+
+
+def overlay_long_right(
+    input_path: Path,
+    overlay_path: Path,
+    output_path: Path,
+    use_gpu: bool = False,
+) -> None:
+    """
+    Sobrepõe PNG/JPG ou vídeo MP4 alinhado à borda direita e superior do vídeo base.
+    Se a altura do overlay for maior que a do vídeo, reduz para caber na altura.
+    Se for menor, mantém o tamanho e posiciona no canto superior direito.
+    - PNG/JPG: imagem estática repetida do início ao fim do vídeo base (-loop 1).
+    - MP4 (ou outro vídeo): repete em loop (-stream_loop -1) até o fim do vídeo base;
+      a saída é limitada à duração exata do vídeo principal (-t).
+    Áudio: só o do vídeo base.
+    """
+    main_dur = ffprobe_duration(input_path)
+    info_v = ffprobe_video_info(input_path)
+    vw = max(1, int(info_v.get("width") or 1920))
+    vh = max(1, int(info_v.get("height") or 1080))
+    info_o = ffprobe_video_info(overlay_path)
+    ow = max(1, int(info_o.get("width") or 1))
+    oh = max(1, int(info_o.get("height") or 1))
+
+    if oh > vh:
+        sh = vh
+        sw = max(1, int(round(ow * (vh / oh))))
+    else:
+        sh = oh
+        sw = ow
+    if sw > vw:
+        sw = vw
+        sh = max(1, int(round(oh * (vw / ow))))
+
+    ext = str(overlay_path.suffix or "").lower().lstrip(".")
+    is_video = ext in ("mp4", "mov", "webm", "mkv", "avi")
+    if is_video:
+        overlay_inputs = ["-stream_loop", "-1", "-i", str(overlay_path)]
+    else:
+        overlay_inputs = ["-loop", "1", "-i", str(overlay_path)]
+
+    # shortest=0: não encerrar quando o clipe overlay (sem loop) acaba antes do principal.
+    # Duração da saída = vídeo base via -t (PNG/JPG estático com -loop 1; MP4 com stream_loop até cortar).
+    vf = (
+        f"[1:v]scale={sw}:{sh}:flags=lanczos,format=rgba[ov];"
+        f"[0:v][ov]overlay=W-w:0:shortest=0:format=auto[outv]"
+    )
+    cmd = [
+        settings.FFMPEG_BIN,
+        "-y",
+        "-i",
+        str(input_path),
+        *overlay_inputs,
+        "-filter_complex",
+        vf,
+    ]
+    if input_has_audio(input_path):
+        cmd.extend(["-map", "[outv]", "-map", "0:a"])
+    else:
+        cmd.extend(["-map", "[outv]"])
+    enc = video_encode_args(use_gpu) if use_gpu else video_encode_args_overlay_long_cpu()
+    cmd.extend(
+        [
+            *enc,
+            *audio_encode_args(input_path),
+            "-t",
+            str(main_dur),
+            *common_mp4_flags(),
+            str(output_path),
+        ]
+    )
+    res = run_cmd(cmd)
+    if not res.ok:
+        raise RuntimeError(f"overlay_long_right failed: {res.stderr}")
+
 
 def cut_clip(input_file: Path, start_tc: str, end_tc: str, output_file: Path, use_gpu: bool) -> None:
     cmd = [
@@ -376,13 +469,32 @@ def ffprobe_duration(input_file: Path) -> float:
     return float(res.stdout.strip())
 
 
+def ffprobe_sample_aspect_ratio_float(sar_raw: str | None) -> float | None:
+    """Converte ffprobe sample_aspect_ratio (ex. '1:1', '4:3', 'N/A') para float ou None se desconhecido."""
+    if not sar_raw or str(sar_raw).strip() in ("N/A", "0:1", "nan"):
+        return None
+    s = str(sar_raw).strip().replace("/", ":")
+    if s in ("1:1", "1"):
+        return 1.0
+    parts = [p for p in s.split(":") if p]
+    if len(parts) >= 2:
+        try:
+            a, b = float(parts[0]), float(parts[1])
+            if b:
+                return a / b
+        except ValueError:
+            pass
+    return None
+
+
 def ffprobe_video_info(input_file: Path) -> dict:
     """Retorna duração (segundos), width, height (dimensões de exibição).
-    Considera rotação via tags.rotate (ffprobe <5) ou side_data.rotation (ffprobe 5+)."""
+    Considera rotação via tags.rotate (ffprobe <5) ou side_data.rotation (ffprobe 5+).
+    Inclui sample_aspect_ratio (string ffprobe) para detectar anamorfismo."""
     cmd = [
         settings.FFPROBE_BIN, "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
+        "-show_entries", "stream=width,height,sample_aspect_ratio",
         "-show_entries", "stream_tags=rotate",
         "-show_entries", "stream_side_data=rotation",
         "-show_entries", "format=duration",
@@ -427,7 +539,17 @@ def ffprobe_video_info(input_file: Path) -> dict:
 
     dur_val = fmt.get("duration", 0)
     duration = float(dur_val) if dur_val else 0.0
-    return {"duration": duration, "width": width, "height": height}
+    sar_str = stream.get("sample_aspect_ratio")
+    if isinstance(sar_str, str):
+        sar_str = sar_str.strip()
+    else:
+        sar_str = None
+    return {
+        "duration": duration,
+        "width": width,
+        "height": height,
+        "sample_aspect_ratio": sar_str,
+    }
 
 
 def seconds_to_tc(sec: float) -> str:

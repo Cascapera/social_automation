@@ -84,6 +84,45 @@ def _yt_dlp_cookie_options() -> dict:
     return opts
 
 
+def _youtube_format_candidates() -> list[str]:
+    """
+    Lista de strings de formato para yt-dlp, da mais desejada à fallback.
+
+    YTDLP_MIN_VIDEO_HEIGHT (ex.: 720, 1080): tenta primeiro vídeo com altura >= N px.
+    Use 0 para desativar o filtro e manter só o comportamento antigo (melhor disponível).
+    """
+    raw = (os.getenv("YTDLP_MIN_VIDEO_HEIGHT") or "").strip()
+    try:
+        min_h = int(raw) if raw else 720
+    except ValueError:
+        min_h = 720
+    min_h = max(0, min_h)
+
+    # Fallbacks sem filtro de altura (se o vídeo não tiver 720p/1080p, ainda baixa o melhor possível).
+    base = [
+        "bestvideo+bestaudio/best",
+        "bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best",
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+        "best[ext=mp4]/best",
+        "best",
+    ]
+    if min_h <= 0:
+        return base
+
+    logger.info("[YTDLP] Altura mínima desejada: %s px (defina YTDLP_MIN_VIDEO_HEIGHT=0 para desativar)", min_h)
+    prefixed = [
+        f"bestvideo[height>={min_h}]+bestaudio/best",
+        f"bestvideo[height>={min_h}][ext=mp4]+bestaudio/best",
+    ]
+    seen = set()
+    out: list[str] = []
+    for f in prefixed + base:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
 def download_youtube(
     url: str,
     output_path: Path,
@@ -93,6 +132,7 @@ def download_youtube(
     Retorna o Path do arquivo baixado.
 
     Usa a melhor combinação de formatos que o YouTube oferece (sem forçar idioma de áudio).
+    Com YTDLP_MIN_VIDEO_HEIGHT (padrão 720), tenta primeiro faixas com altura mínima.
     """
     import yt_dlp
 
@@ -101,15 +141,7 @@ def download_youtube(
     # Template: base.%(ext)s para forcar nome e obter .mp4
     out_template = str(output_path.with_suffix("")) + ".%(ext)s"
 
-    # Ordem: preferir merge vídeo+áudio → mp4 quando possível → melhor qualidade genérica.
-    # Evita exigir ext=m4a em todos os vídeos (alguns só têm opus/webm).
-    format_candidates = [
-        "bestvideo+bestaudio/best",
-        "bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best",
-        "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
-        "best[ext=mp4]/best",
-        "best",
-    ]
+    format_candidates = _youtube_format_candidates()
     last_exc: Exception | None = None
 
     cookie_opts = _yt_dlp_cookie_options()
