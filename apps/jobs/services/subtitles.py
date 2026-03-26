@@ -8,7 +8,13 @@ from pathlib import Path
 
 from django.conf import settings
 
-from apps.jobs.services.ffmpeg import ffprobe_video_info, run_cmd, video_encode_args_burn_cpu
+from apps.jobs.services.ffmpeg import (
+    ffprobe_video_info,
+    resilient_decode_options,
+    resilient_input_demuxer_flags,
+    run_cmd,
+    video_encode_args_burn_cpu,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +466,8 @@ def burn_subtitles(
         vf = f"subtitles='{srt_str}':force_style='{force_style}':original_size={video_w}x{video_h}"
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-i", str(video_path),
         "-vf", vf,
         *video_encode_args_burn_cpu(),

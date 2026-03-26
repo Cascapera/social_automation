@@ -5,6 +5,36 @@ from pathlib import Path
 from django.conf import settings
 
 
+def resilient_decode_options() -> list[str]:
+    """
+    Global decode tolerance for marginal AAC (and similar) in MP4/MOV.
+
+    Reduces decoder spam and failures when container metadata disagrees with the
+    elementary stream, or packets are slightly corrupt — common with phone exports,
+    bad re-muxes, and some downloaded sources. Place once per ffmpeg invocation,
+    immediately after ``-y``.
+    """
+    return ["-err_detect", "ignore_err"]
+
+
+def resilient_input_demuxer_flags() -> list[str]:
+    """
+    Per-input demuxer flags placed immediately before each ``-i`` path.
+
+    Discards corrupt packets and regenerates PTS where needed so filter graphs
+    (acrossfade, concat, aresample) see a cleaner timeline.
+    """
+    return ["-fflags", "+discardcorrupt+genpts"]
+
+
+def input_args_with_resilience(paths: list[Path]) -> list[str]:
+    """Build ``-fflags ... -i path`` repeated for each file (after global ``-err_detect``)."""
+    out: list[str] = []
+    for p in paths:
+        out.extend([*resilient_input_demuxer_flags(), "-i", str(p)])
+    return out
+
+
 @dataclass
 class CmdResult:
     ok: bool
@@ -82,7 +112,10 @@ def overlay_logo(
     aa = max(0.0, min(1.0, float(opacity)))
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-i", str(input_path),
+        *resilient_input_demuxer_flags(),
         "-i", str(logo_path),
         "-filter_complex",
         f"[1:v]scale=-1:{logo_height},format=rgba,colorchannelmixer=aa={aa}[logo];"
@@ -115,7 +148,11 @@ def overlay_animation(
     # Loop infinito para GIF/vídeo curto (animação se repete durante o vídeo)
     ext = str(animation_path).lower().split(".")[-1] if "." in str(animation_path) else ""
     needs_loop = ext in ("gif", "webm", "mov", "mp4")
-    anim_input = ["-stream_loop", "-1", "-i", str(animation_path)] if needs_loop else ["-i", str(animation_path)]
+    fflags = resilient_input_demuxer_flags()
+    if needs_loop:
+        anim_input = ["-stream_loop", "-1", *fflags, "-i", str(animation_path)]
+    else:
+        anim_input = [*fflags, "-i", str(animation_path)]
 
     # Posição: FFmpeg overlay usa expressões
     # top_left: margin:margin
@@ -132,6 +169,8 @@ def overlay_animation(
 
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-i", str(input_path),
         *anim_input,
         "-filter_complex",
@@ -182,10 +221,11 @@ def overlay_long_right(
 
     ext = str(overlay_path.suffix or "").lower().lstrip(".")
     is_video = ext in ("mp4", "mov", "webm", "mkv", "avi")
+    ff = resilient_input_demuxer_flags()
     if is_video:
-        overlay_inputs = ["-stream_loop", "-1", "-i", str(overlay_path)]
+        overlay_inputs = ["-stream_loop", "-1", *ff, "-i", str(overlay_path)]
     else:
-        overlay_inputs = ["-loop", "1", "-i", str(overlay_path)]
+        overlay_inputs = ["-loop", "1", *ff, "-i", str(overlay_path)]
 
     # shortest=0: não encerrar quando o clipe overlay (sem loop) acaba antes do principal.
     # Duração da saída = vídeo base via -t (PNG/JPG estático com -loop 1; MP4 com stream_loop até cortar).
@@ -196,6 +236,8 @@ def overlay_long_right(
     cmd = [
         settings.FFMPEG_BIN,
         "-y",
+        *resilient_decode_options(),
+        *ff,
         "-i",
         str(input_path),
         *overlay_inputs,
@@ -225,7 +267,9 @@ def overlay_long_right(
 def cut_clip(input_file: Path, start_tc: str, end_tc: str, output_file: Path, use_gpu: bool) -> None:
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
         "-ss", start_tc, "-to", end_tc,
+        *resilient_input_demuxer_flags(),
         "-i", str(input_file),
         *video_encode_args(use_gpu),
         *audio_encode_args(input_file),
@@ -250,6 +294,8 @@ def make_vertical_blur(input_file: Path, output_file: Path, use_gpu: bool) -> No
     )
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-i", str(input_file),
         "-filter_complex", vf2,
         *video_encode_args(use_gpu),
@@ -276,6 +322,8 @@ def normalize_part_for_concat(
     if has_audio:
         cmd = [
             settings.FFMPEG_BIN, "-y",
+            *resilient_decode_options(),
+            *resilient_input_demuxer_flags(),
             "-i", str(input_file),
             "-vf", vf,
             *video_encode_args(use_gpu),
@@ -287,6 +335,8 @@ def normalize_part_for_concat(
         dur = ffprobe_duration(input_file)
         cmd = [
             settings.FFMPEG_BIN, "-y",
+            *resilient_decode_options(),
+            *resilient_input_demuxer_flags(),
             "-i", str(input_file),
             "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
             "-filter_complex",
@@ -311,6 +361,8 @@ def concat_videos(files: list[Path], output_file: Path, workdir: Path, use_gpu: 
 
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-f", "concat", "-safe", "0",
         "-i", str(list_file),
         *video_encode_args(use_gpu),
@@ -355,6 +407,8 @@ def normalize_video_to_canvas(
     cmd = [
         settings.FFMPEG_BIN,
         "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-i",
         str(input_path),
         "-vf",
@@ -393,9 +447,7 @@ def concat_with_xfade(
     durations = [ffprobe_duration(p) for p in parts]
     n = len(parts)
 
-    inputs = []
-    for p in parts:
-        inputs += ["-i", str(p)]
+    inputs = [*resilient_decode_options(), *input_args_with_resilience(parts)]
 
     # Cadeia de xfade para vídeo: [0][1]xfade->v01; [v01][2]xfade->vout
     # offset = duração acumulada do output anterior - T
@@ -446,6 +498,8 @@ def concat_videos_copy(files: list[Path], output_file: Path, workdir: Path) -> N
 
     cmd = [
         settings.FFMPEG_BIN, "-y",
+        *resilient_decode_options(),
+        *resilient_input_demuxer_flags(),
         "-f", "concat", "-safe", "0",
         "-i", str(list_file),
         "-c", "copy",
@@ -577,13 +631,12 @@ def concat_videos_filter(parts: list[Path], output_file: Path, use_gpu: bool) ->
     fps = "30"  # escolha fixa para shorts; pode virar preset depois
     w, h = 1080, 1920  # formato vertical para Reels/Shorts/TikTok
 
-    inputs = []
+    inputs = [*resilient_decode_options(), *input_args_with_resilience(parts)]
     filter_lines = []
     vlabels = []
     alabels = []
 
     for i, p in enumerate(parts):
-        inputs += ["-i", str(p)]
 
         # Vídeo: normaliza resolução (evita freeze por mismatch), CFR + PTS novo
         filter_lines.append(

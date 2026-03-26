@@ -10,7 +10,13 @@ from django.core.files import File
 from PIL import Image, ImageDraw, ImageFont
 
 from apps.brands.models import BrandAsset
-from apps.jobs.services.ffmpeg import ffprobe_duration, run_cmd, tc_to_seconds
+from apps.jobs.services.ffmpeg import (
+    ffprobe_duration,
+    resilient_decode_options,
+    resilient_input_demuxer_flags,
+    run_cmd,
+    tc_to_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +141,10 @@ def _extract_frame_at(video_path: Path, output_image_path: Path, sec: float) -> 
     cmd = [
         settings.FFMPEG_BIN,
         "-y",
+        *resilient_decode_options(),
         "-ss",
         f"{ts:.3f}",
+        *resilient_input_demuxer_flags(),
         "-i",
         str(video_path),
         "-an",

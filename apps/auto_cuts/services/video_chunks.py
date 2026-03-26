@@ -42,7 +42,7 @@ def extract_chunks_to_folder(
     result = []
     for i, (start_sec, end_sec) in enumerate(boundaries, 1):
         chunk_duration = end_sec - start_sec
-        chunk_path = folder / f"chunk_{i:03d}.m4a"
+        chunk_path = folder / f"chunk_{i:03d}.wav"
         extract_audio_chunk(video_path, start_sec, chunk_duration, chunk_path)
         result.append((chunk_path, start_sec, end_sec))
     return result
@@ -166,13 +166,18 @@ def extract_audio_chunk(
     """
     Extract an audio segment from video for transcription (chunks).
 
-    Does not use -c:a copy: YouTube videos with EN track may be Opus, which the .m4a
-    (ipod muxer) cannot mux in copy — yields "Could not find tag for codec opus".
-    Re-encode to AAC (light), compatible with Whisper and M4A.
+    Writes 16 kHz mono PCM WAV (Whisper-friendly). We avoid AAC-in → AAC-out here:
+    marginal/corrupt AAC from some YouTube remuxes can confuse the decoder when
+    combined with ``-err_detect ignore_err`` / ``discardcorrupt``, sometimes producing
+    bogus channel layouts (e.g. 33 ch) and breaking swresample. Decoding to PCM with
+    an explicit mono ``pan`` keeps the graph stable. Opus/other codecs are decoded
+    normally to PCM.
     """
     import subprocess
 
-    # -ss before -i for fast seek (input seeking)
+    # -ss before -i: fast input seek (long sources). No discardcorrupt/ignore_err here:
+    # dropping AAC packets can desync the decoder; tolerating decode errors can yield
+    # garbage channel counts mid-stream.
     cmd = [
         settings.FFMPEG_BIN,
         "-y",
@@ -180,10 +185,14 @@ def extract_audio_chunk(
         "-t", str(duration_sec),
         "-i", str(video_path),
         "-vn",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-ar", "48000",
-        "-ac", "2",
+        "-map", "0:a:0",
+        # First channel only: avoids rematrix failures when the native decoder briefly
+        # reports impossible layouts on damaged AAC. Speech is usually centered; for
+        # true stereo-only-right content this may be weaker than a full downmix.
+        "-af", "pan=mono|c0=c0",
+        "-ar", "16000",
+        "-c:a", "pcm_s16le",
+        "-f", "wav",
         str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)

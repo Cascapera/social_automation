@@ -2,13 +2,13 @@
 Test Whisper transcription OUTSIDE Celery to diagnose GPU crashes.
 
 Usage:
-  python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.m4a
-  python manage.py test_whisper_gpu path/to/file.m4a --device cuda
-  python manage.py test_whisper_gpu path/to/file.m4a --device cpu
+  python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.wav
+  python manage.py test_whisper_gpu path/to/file.wav --device cuda
+  python manage.py test_whisper_gpu path/to/file.wav --device cpu
 
 Debug with synchronous CUDA (clearer stack trace on errors):
   set CUDA_LAUNCH_BLOCKING=1
-  python manage.py test_whisper_gpu file.m4a --device cuda
+  python manage.py test_whisper_gpu file.wav --device cuda
 
 Capture stack trace while stuck (in another terminal):
   py-spy dump --pid <PROCESS_PID>
@@ -31,7 +31,7 @@ class Command(BaseCommand):
     help = "Test Whisper transcription outside Celery (GPU crash diagnostics)"
 
     def add_arguments(self, parser):
-        parser.add_argument("path", type=str, help="Path to audio/video (m4a, mp4, etc.)")
+        parser.add_argument("path", type=str, help="Path to audio/video (wav, m4a, mp4, etc.)")
         parser.add_argument(
             "--device",
             choices=["cuda", "cpu"],

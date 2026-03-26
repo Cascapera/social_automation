@@ -22,6 +22,8 @@ from apps.jobs.services.ffmpeg import (
     ffprobe_duration,
     ffprobe_video_info,
     input_has_audio,
+    resilient_decode_options,
+    resilient_input_demuxer_flags,
     run_cmd,
     video_encode_args,
 )
@@ -283,7 +285,8 @@ def reformat_video_vertical(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmppath = Path(tmpdir)
-        inputs = ["-i", str(input_path)]
+        ff = resilient_input_demuxer_flags()
+        inputs = [*ff, "-i", str(input_path)]
         next_idx = 1
 
         if mode == "frame_center":
@@ -311,7 +314,7 @@ def reformat_video_vertical(
 
         if mode == "frame_center":
             if logo_path and logo_path.exists():
-                inputs += ["-i", str(logo_path)]
+                inputs += [*ff, "-i", str(logo_path)]
                 logo_idx = next_idx
                 next_idx += 1
                 # Logo top-left: 80x80 px, 80% opacity, 40px top/left margin
@@ -338,7 +341,7 @@ def reformat_video_vertical(
                     text_color=text_color,
                 )
                 if use_pillow and overlay_png.exists():
-                    inputs += ["-i", str(overlay_png)]
+                    inputs += [*ff, "-i", str(overlay_png)]
                     overlay_idx = next_idx
                     next_idx += 1
                     filter_parts.append(
@@ -364,7 +367,7 @@ def reformat_video_vertical(
         else:
             # zoom_crop: watermark logo top-left (80% opacity)
             if logo_path and logo_path.exists():
-                inputs += ["-i", str(logo_path)]
+                inputs += [*ff, "-i", str(logo_path)]
                 logo_idx = next_idx
                 next_idx += 1
                 filter_parts.append(
@@ -379,6 +382,7 @@ def reformat_video_vertical(
         if has_audio:
             cmd = [
                 settings.FFMPEG_BIN, "-y",
+                *resilient_decode_options(),
                 *inputs,
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",
@@ -395,6 +399,7 @@ def reformat_video_vertical(
             filter_complex += f";[{audio_idx}:a]atrim=0:{dur},asetpts=PTS-STARTPTS[audio]"
             cmd = [
                 settings.FFMPEG_BIN, "-y",
+                *resilient_decode_options(),
                 *inputs,
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",

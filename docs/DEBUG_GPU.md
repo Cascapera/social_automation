@@ -23,10 +23,10 @@ Run transcription **without** Celery to see if the issue is worker-specific:
 
 ```powershell
 # With GPU (will hang if the problem is in transcription)
-python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.m4a --device cuda
+python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.wav --device cuda
 
 # With CPU (should work)
-python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.m4a --device cpu
+python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.wav --device cpu
 ```
 
 Use a real audio file (e.g. a 10–18 min chunk). For a recent job, chunks live under `storage/media/cortes_processo/<analysis_id>/`.
@@ -50,7 +50,7 @@ For a clearer stack trace on error:
 
 ```powershell
 $env:CUDA_LAUNCH_BLOCKING = "1"
-python manage.py test_whisper_gpu path/to/file.m4a --device cuda
+python manage.py test_whisper_gpu path/to/file.wav --device cuda
 ```
 
 ## 4. py-spy (stack trace while process is stuck)
