@@ -184,7 +184,7 @@ def download_youtube(
             # pequeno backoff entre tentativas para reduzir erro de rede temporario
             time.sleep(min(4 * idx, 12))
 
-    msg = f"Falha ao baixar video do YouTube apos fallbacks: {last_exc}"
+    msg = f"Failed to download YouTube video after fallbacks: {last_exc}"
     err_s = str(last_exc).lower()
     if "sign in" in err_s or "not a bot" in err_s or "cookies" in err_s:
         msg += (

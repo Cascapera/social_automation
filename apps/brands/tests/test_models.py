@@ -1,4 +1,4 @@
-"""Testes de modelos de brands."""
+"""Brand model tests."""
 
 from __future__ import annotations
 

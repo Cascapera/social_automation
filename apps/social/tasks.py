@@ -1,4 +1,4 @@
-"""Tasks de postagem em redes sociais."""
+"""Social network posting tasks."""
 import hashlib
 import logging
 import os
@@ -28,7 +28,7 @@ from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_fac
 
 logger = logging.getLogger(__name__)
 YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
-# Upload-Post não aceita ficheiros muito grandes (~250MB); longos acima disso → YouTube só API nativa.
+# Upload-Post rejects very large files (~250MB); longer videos above that use native YouTube API only.
 UPLOAD_POST_LONG_MAX_BYTES = 250 * 1024 * 1024
 BATCH_LIMIT_PER_TICK = 20
 YOUTUBE_VERIFY_GRACE_SECONDS = 600
@@ -40,8 +40,8 @@ YOUTUBE_CHECK_CLIENT_ENABLED = bool(
 
 def _cleanup_local_media_if_possible(post: ScheduledPost) -> None:
     """
-    Remove arquivos locais após postagem concluída para economizar armazenamento.
-    Só limpa quando não há outros agendamentos ativos para a mesma origem.
+    Remove local files after successful posting to save storage.
+    Only cleans when there are no other active schedules for the same source.
     """
     try:
         active_statuses = ["PENDING", "POSTING"]
@@ -77,7 +77,7 @@ def _cleanup_local_media_if_possible(post: ScheduledPost) -> None:
             if corte:
                 corte.save(update_fields=["file", "thumbnail"])
     except Exception:
-        logger.exception("Falha ao limpar mídias locais do ScheduledPost=%s", post.id)
+        logger.exception("Failed to clean local media for ScheduledPost=%s", post.id)
 
 
 def _platforms_are_youtube_only(platforms) -> bool:
@@ -95,9 +95,9 @@ def _first_youtube_platform(platforms) -> str | None:
 
 def _youtube_channel_key_and_interval(post) -> tuple[str | None, int]:
     """
-    Para posts YouTube, retorna (channel_key, min_interval_seconds) para serialização.
-    channel_key identifica o canal; min_interval é o intervalo mínimo em segundos.
-    Para não-YouTube retorna (None, 0).
+    For YouTube posts, returns (channel_key, min_interval_seconds) for serialization.
+    channel_key identifies the channel; min_interval is minimum spacing in seconds.
+    For non-YouTube returns (None, 0).
     """
     platform = _first_youtube_platform(post.platforms or [])
     if not platform:
@@ -119,7 +119,7 @@ def _youtube_channel_key_and_interval(post) -> tuple[str | None, int]:
         )
     channel_id = (getattr(account, "channel_id", None) or "").strip() if account else ""
     channel_key = f"yt_{channel_id}" if channel_id else f"yt_brand_{brand.id}_{platform}"
-    # Usa defaults: shorts 60 min, longos 180 min (slots fixos já espaçam; intervalo só para fila de envio)
+    # Defaults: shorts 60 min, long-form 180 min (fixed slots already space; interval is for send queue)
     minutes = 60 if platform == "YT" else 180
     return channel_key, minutes * 60
 
@@ -143,8 +143,8 @@ def _resolve_social_account_for_platform(post: ScheduledPost, brand, platform: s
 
 def _resolve_post_target_brand(post: ScheduledPost):
     """
-    Resolve a brand efetiva de publicação.
-    Prioriza a brand da FactoryPostingSchedule (destino roteado da Factory).
+    Resolve the effective publishing brand.
+    Prefers FactoryPostingSchedule brand (factory routing destination).
     """
     try:
         schedule = getattr(post, "factory_schedule", None)
@@ -184,14 +184,14 @@ def _source_media_exists(post: ScheduledPost) -> bool:
 
 def _youtube_video_exists_on_channel(account, video_id: str, youtube_credential=None) -> tuple[bool, dict]:
     """
-    Confirma se o vídeo existe no canal autenticado.
+    Check whether the video exists on the authenticated channel.
     """
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
 
     from apps.social.services.youtube_credentials import get_credentials
 
-    # Usar o mesmo OAuth client que emitiu o token (brand/global). Check client causa unauthorized_client.
+    # Use same OAuth client that issued the token (brand/global). Check client causes unauthorized_client.
     creds = get_credentials(
         account,
         youtube_credential=youtube_credential,
@@ -222,14 +222,14 @@ def _youtube_video_exists_on_channel(account, video_id: str, youtube_credential=
 
 def _youtube_verify_exists_with_credential_fallback(account, brand, video_id: str) -> tuple[bool, dict]:
     """
-    Confirma existência no YouTube tentando conta padrão e credenciais da brand em fallback.
+    Verify YouTube existence using default account then brand credentials as fallback.
     """
-    # 1) tenta fluxo padrão da conta social vinculada
+    # 1) try default flow for linked social account
     exists, data = _youtube_video_exists_on_channel(account, video_id)
     if exists:
         return True, data
 
-    # 2) em erro de auth/token, tenta credenciais YouTube da brand
+    # 2) on auth/token error, try brand YouTube credentials
     err = str((data or {}).get("error") or "").lower()
     is_auth_related = any(
         token in err
@@ -251,8 +251,8 @@ def _youtube_verify_exists_with_credential_fallback(account, brand, video_id: st
 
 def _should_remove_missing_by_verify_error(verify_data: dict) -> bool:
     """
-    Só remove da agenda quando temos evidência de ausência real no YouTube.
-    Erros de auth/rede/temporários NÃO removem.
+    Only remove from schedule when we have evidence of real absence on YouTube.
+    Auth/network/temporary errors do NOT remove.
     """
     err = str((verify_data or {}).get("error") or "").strip().lower()
     if not err:
@@ -277,20 +277,20 @@ def _youtube_day_video_index(
     youtube_credential=None,
 ) -> dict[str, dict]:
     """
-    Indexa vídeos do canal no dia (publicados e agendados).
+    Index channel videos for the day (published and scheduled).
     """
     from googleapiclient.discovery import build
 
     from apps.social.services.youtube_credentials import get_credentials
 
-    # Mesmo OAuth client que emitiu o token (brand/global); check client causa unauthorized_client.
+    # Same OAuth client that issued the token (brand/global); check client causes unauthorized_client.
     creds = get_credentials(
         account,
         youtube_credential=youtube_credential,
         use_check_client=False,
     )
     youtube = build("youtube", "v3", credentials=creds)
-    # Descobre playlist de uploads da conta autenticada.
+    # Discover uploads playlist for authenticated account.
     ch_resp = youtube.channels().list(part="contentDetails", mine=True, maxResults=1).execute()
     ch_items = (ch_resp or {}).get("items") or []
     if not ch_items:
@@ -305,7 +305,7 @@ def _youtube_day_video_index(
 
     video_ids: list[str] = []
     page_token = None
-    # Limite conservador para evitar consumo excessivo de cota.
+    # Conservative limit to avoid excessive quota use.
     max_pages = max(1, min(12, int(os.getenv("YOUTUBE_FULL_SCAN_MAX_PAGES", "4") or "4")))
     for _ in range(max_pages):
         pl_resp = youtube.playlistItems().list(
@@ -329,7 +329,7 @@ def _youtube_day_video_index(
         if not page_token:
             break
 
-    # Carrega detalhes de status/publishAt em lotes.
+    # Load status/publishAt details in batches.
     index: dict[str, dict] = {}
     for start in range(0, len(video_ids), 50):
         batch_ids = video_ids[start:start + 50]
@@ -355,7 +355,7 @@ def _youtube_day_video_index(
             if uploaded_at and timezone.is_naive(uploaded_at):
                 uploaded_at = timezone.make_aware(uploaded_at, timezone.get_current_timezone())
 
-            # No dia: considera publishAt (quando existir) ou data de upload.
+            # In window: use publishAt when present else upload date.
             ref_dt = publish_at or uploaded_at
             if not ref_dt:
                 continue
@@ -382,8 +382,8 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
     is_youtube = _platforms_are_youtube_only(post.platforms)
     if post.status == "DONE":
         if is_youtube:
-            # YouTube: upload com sucesso = vídeo já está no canal (público ou agendado).
-            # Marcamos como POSTED para ir para "Vídeos Postados" e não rechecar (economiza cota).
+            # YouTube: successful upload means video is on channel (public or scheduled).
+            # Mark POSTED for Posted Videos list and skip re-check (saves quota).
             schedule.status = "DONE"
             schedule.attempt_count = int(post.retry_count or 0)
             schedule.next_retry_at = None
@@ -424,7 +424,7 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
         item.status = "POSTED"
         item.posted_at = post.posted_at or now
-        item.scheduled_for = post.scheduled_at  # preenche "Agendado" só quando YouTube confirmou
+        item.scheduled_for = post.scheduled_at  # fills schedule time once YouTube confirmed
         item.last_error = ""
         item.attempt_count = int(post.retry_count or 0)
         item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
@@ -471,8 +471,8 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
 
 def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, external_video_id: str, metadata: dict | None = None) -> None:
     """
-    Marca agenda/inventário como efetivamente confirmado na plataforma.
-    Atualiza o ScheduledPost para DONE para sair da lista "aguardando" e ir para "postados".
+    Mark schedule/inventory as confirmed on the platform.
+    Set ScheduledPost to DONE to leave waiting list and move to posted.
     """
     schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
         "inventory_item", "factory", "brand"
@@ -518,7 +518,7 @@ def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, extern
 
 def _mark_factory_posting_still_scheduled(post: ScheduledPost, *, publish_at_raw: str | None, note: str = "") -> None:
     """
-    Mantém status interno como agendado no canal (ainda não publicado), sem confirmar POSTED.
+    Keep internal status as scheduled on channel (not published yet), without confirming POSTED.
     """
     schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
         "inventory_item"
@@ -531,7 +531,7 @@ def _mark_factory_posting_still_scheduled(post: ScheduledPost, *, publish_at_raw
     if publish_at:
         if timezone.is_naive(publish_at):
             publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-        # Rechecagem logo após o horário real de publicação no canal.
+        # Re-check shortly after actual publish time on channel.
         next_check = max(next_check, publish_at + timedelta(minutes=5))
 
     schedule.status = "PLANNED"
@@ -544,7 +544,7 @@ def _mark_factory_posting_still_scheduled(post: ScheduledPost, *, publish_at_raw
 
 def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str) -> None:
     """
-    Remove da agenda interna quando o item não existe no YouTube.
+    Remove from internal schedule when item does not exist on YouTube.
     """
     schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
         "inventory_item"
@@ -559,26 +559,26 @@ def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str
     post.delete()
 
 
-UPLOAD_INTERVAL_SECONDS = 60  # 1 vídeo por minuto na fila de envio
-THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer após último vídeo antes de subir capas
-UPLOAD_POST_RETRY_COUNT = 2  # Máximo de retentativas para Upload Post
-UPLOAD_POST_RETRY_DELAY_SEC = 10  # Segundos entre retentativas
+UPLOAD_INTERVAL_SECONDS = 60  # One video per minute on send queue
+THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer after last video before thumbnail uploads
+UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
+UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
 
 
 @shared_task
 def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None = None):
     """
-    Sobe capas dos vídeos YouTube de uma brand após todos os vídeos terem sido publicados.
-    Chamado após o último vídeo da brand (check_scheduled_posts_task agenda com countdown).
-    Retry: 60s entre tentativas, máx 2 retries (3 tentativas no total) por vídeo.
-    post_ids: IDs dos posts da batch (opcional; se vazio, usa todos DONE da brand).
-    Shorts (YT): não envia capa ao YouTube (geração local continua; evita cota).
-    Longos (YTB): envia capa quando houver thumbnail no corte.
+    Upload YouTube thumbnails for a brand after all videos in batch are published.
+    Called after last video for brand (check_scheduled_posts_task schedules with countdown).
+    Retry: 60s between attempts, max 2 retries (3 attempts total) per video.
+    post_ids: batch post IDs (optional; if empty, all DONE for brand).
+    Shorts (YT): do not send cover to YouTube (local generation still; saves quota).
+    Long-form (YTB): send cover when cut has thumbnail.
     """
     try:
         brand = Brand.objects.select_related("factory").get(id=brand_id)
     except Brand.DoesNotExist:
-        logger.warning("[THUMB] Brand %s não encontrada para upload de capas", brand_id)
+        logger.warning("[THUMB] Brand %s not found for thumbnail upload", brand_id)
         return {"brand_id": brand_id, "uploaded": 0, "skipped": 0, "errors": 0}
 
     qs = ScheduledPost.objects.filter(
@@ -617,7 +617,7 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     creds_list = _list_ordered_youtube_credentials(brand)
     cred = creds_list[0] if creds_list else None
     if not account and not cred:
-        logger.warning("[THUMB] Brand %s sem conta/credencial YouTube", brand_id)
+        logger.warning("[THUMB] Brand %s has no YouTube account/credential", brand_id)
         return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
 
     from googleapiclient.discovery import build
@@ -631,7 +631,7 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
 
     token_holder = cred if cred else account
     if not token_holder.access_token and not token_holder.refresh_token:
-        logger.warning("[THUMB] Brand %s: conta/credencial sem tokens", brand_id)
+        logger.warning("[THUMB] Brand %s: account/credential has no tokens", brand_id)
         return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
 
     acc = account or SimpleNamespace(brand=brand, platform="YT", channel_id="")
@@ -646,19 +646,19 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
                 uploaded += 1
         except Exception as e:
             errors += 1
-            logger.warning("[THUMB] Falha ao subir capa video_id=%s: %s", video_id, e)
+            logger.warning("[THUMB] Failed to upload cover video_id=%s: %s", video_id, e)
 
     return {"brand_id": brand_id, "uploaded": uploaded, "skipped": len(to_upload) - uploaded - errors, "errors": errors}
 
 
 def _build_upload_post_platforms(brand, post) -> list[str]:
-    """Retorna lista de plataformas para Upload Post quando habilitado na brand."""
+    """Return platform list for Upload Post when enabled on brand."""
     platforms: list[str] = []
     post_platforms = post.platforms or []
     is_short = "YT" in post_platforms and "YTB" not in post_platforms
     is_youtube = "YT" in post_platforms or "YTB" in post_platforms
 
-    # Shorts: TikTok, X, Instagram (Reels) + YouTube quando habilitados
+    # Shorts: TikTok, X, Instagram (Reels) + YouTube when enabled
     if is_short:
         if getattr(brand, "upload_post_tiktok_enabled", False):
             platforms.append("TIKTOK")
@@ -666,7 +666,7 @@ def _build_upload_post_platforms(brand, post) -> list[str]:
             platforms.append("X")
         if getattr(brand, "upload_post_instagram_enabled", False):
             platforms.append("INSTAGRAM")
-    # Longos: apenas YouTube (TikTok/Instagram têm limite de duração)
+    # Long-form: YouTube only (TikTok/Instagram have duration limits)
     if is_youtube and getattr(brand, "upload_post_youtube_enabled", False):
         platforms.append("YOUTUBE")
     return platforms
@@ -675,23 +675,23 @@ def _build_upload_post_platforms(brand, post) -> list[str]:
 @shared_task
 def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noqa: C901
     """
-    Processa uma fila de posts de uma brand em sequência.
-    Logs estruturados para observabilidade.
+    Process a brand's post queue sequentially.
+    Structured logs for observability.
     """
     try:
         brand = Brand.objects.select_related("factory").get(id=brand_id)
     except Brand.DoesNotExist:
-        logger.warning("[POSTING] Brand %s não encontrada", brand_id)
+        logger.warning("[POSTING] Brand %s not found", brand_id)
         return {"brand_id": brand_id, "posted": 0, "errors": 1}
 
     brand_slug = getattr(brand, "slug", "") or f"brand_{brand_id}"
     queue_size = len(post_ids)
     logger.info(
-        "[POSTING] Iniciando postagem das mídias da brand_%s (%s)",
+        "[POSTING] Starting media posting for brand_%s (%s)",
         brand_id,
         brand_slug,
     )
-    logger.info("[POSTING] Fila de vídeos da brand (%s)", queue_size)
+    logger.info("[POSTING] Brand video queue size (%s)", queue_size)
 
     posted_count = 0
     error_count = 0
@@ -699,17 +699,17 @@ def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noq
     remaining = queue_size
 
     for post_id in post_ids:
-        logger.info("[POSTING] Enviando para upload post")
+        logger.info("[POSTING] Sending to upload post")
         try:
-            # Chamada direta: não usar apply()/get() dentro de task (causa deadlock no Celery)
+            # Direct call: do not use apply()/get() inside task (Celery deadlock)
             result = _run_post_to_platforms(post_id)
         except Exception as e:
             error_count += 1
             err_msg = str(e)
-            logger.warning("[POSTING] Erro ao processar post %s: %s", post_id, err_msg)
+            logger.warning("[POSTING] Error processing post %s: %s", post_id, err_msg)
             error_details.append({"post_id": post_id, "errors": [err_msg], "error": err_msg})
             remaining -= 1
-            logger.info("[POSTING] Fila de vídeos da brand atualizada (%s)", remaining)
+            logger.info("[POSTING] Brand video queue updated (%s)", remaining)
             continue
 
         if isinstance(result, dict):
@@ -721,24 +721,24 @@ def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noq
                         conf_id = str(ext_ids[k])
                         break
                 logger.info(
-                    "[POSTING] Recebido confirmação da postagem e agendamento (id %s)",
+                    "[POSTING] Posting confirmation received (id %s)",
                     conf_id or "ok",
                 )
                 posted_count += 1
             elif result.get("skipped"):
-                logger.info("[POSTING] Post %s ignorado: %s", post_id, result.get("skipped"))
+                logger.info("[POSTING] Post %s skipped: %s", post_id, result.get("skipped"))
             else:
                 error_count += 1
                 errs = result.get("errors")
-                err = result.get("error", "erro desconhecido")
+                err = result.get("error", "unknown_error")
                 if isinstance(errs, list):
                     err_list = [str(e) for e in errs]
                 elif errs:
                     err_list = [str(errs)]
                 else:
-                    err_list = [str(err)] if err else ["erro desconhecido"]
+                    err_list = [str(err)] if err else ["unknown_error"]
                 logger.warning(
-                    "[POSTING] Post %s falhou: %s",
+                    "[POSTING] Post %s failed: %s",
                     post_id,
                     err_list,
                 )
@@ -746,11 +746,11 @@ def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noq
 
         remaining -= 1
         if remaining > 0:
-            logger.info("[POSTING] Fila de vídeos da brand atualizada (%s)", remaining)
+            logger.info("[POSTING] Brand video queue updated (%s)", remaining)
 
     if error_count > 0:
         logger.info(
-            "[POSTING] Brand_%s (%s) = %s vídeos postados - %s error(s)",
+            "[POSTING] Brand_%s (%s) = %s videos posted - %s error(s)",
             brand_id,
             brand_slug,
             posted_count,
@@ -758,13 +758,13 @@ def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noq
         )
         for ed in error_details:
             logger.error(
-                "[POSTING] Erro post_id=%s (YouTube API / Upload Post): %s",
+                "[POSTING] Error post_id=%s (YouTube API / Upload Post): %s",
                 ed["post_id"],
                 ed.get("errors") or ed.get("error", "?"),
             )
     else:
         logger.info(
-            "[POSTING] Brand_%s (%s) = %s vídeos postados",
+            "[POSTING] Brand_%s (%s) = %s videos posted",
             brand_id,
             brand_slug,
             posted_count,
@@ -781,20 +781,20 @@ def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noq
 @shared_task
 def check_scheduled_posts_task():
     """
-    Roda a cada minuto via Beat.
-    - Pega posts PENDING (scheduled_at <= now ou YouTube antecipado).
-    - Agrupa por brand e processa cada brand em sequência.
-    - Logs estruturados para observabilidade.
+    Runs every minute via Beat.
+    - Picks PENDING posts (scheduled_at <= now or early YouTube).
+    - Groups by brand and processes each brand sequentially.
+    - Structured logs for observability.
     """
     now = timezone.now()
-    # Marca orphan posts (sem origem) como FAILED para não poluir a fila
+    # Mark orphan posts (no source) as FAILED to avoid queue noise
     ScheduledPost.objects.filter(
         status="PENDING",
     ).filter(job_id__isnull=True, auto_cut_corte_id__isnull=True).update(
         status="FAILED",
         error="ScheduledPost sem origem (job/corte)",
     )
-    # Ignora posts sem origem — não enfileira para evitar falhas em loop
+    # Skip posts without source — do not enqueue to avoid failure loops
     has_origin = Q(job_id__isnull=False) | Q(auto_cut_corte_id__isnull=False)
     due_posts = ScheduledPost.objects.filter(
         status="PENDING",
@@ -804,7 +804,7 @@ def check_scheduled_posts_task():
         "scheduled_at",
         "id",
     )[:BATCH_LIMIT_PER_TICK]
-    # Antecipação para YouTube: sobe privado e deixa publishAt no YouTube.
+    # YouTube early upload: private upload with publishAt on YouTube.
     future_candidates = ScheduledPost.objects.filter(
         status="PENDING",
         scheduled_at__gt=now + timedelta(seconds=30),
@@ -831,7 +831,7 @@ def check_scheduled_posts_task():
         .order_by("social_account__brand_id", "scheduled_at", "id")
     )
 
-    # Agrupa por brand
+    # Group by brand
     brand_to_posts: dict[int, list] = {}
     for p in posts:
         brand = _resolve_post_target_brand(p)
@@ -841,12 +841,12 @@ def check_scheduled_posts_task():
     total_brands = len([b for b in brand_to_posts if b > 0])
     total_videos = len(post_ids_list)
     logger.info(
-        "[POSTING] Iniciando ciclo de postagem (total de brands %s e total de vídeos %s)",
+        "[POSTING] Starting posting cycle (brands %s, videos %s)",
         total_brands,
         total_videos,
     )
 
-    # Processa cada brand em sequência (countdown para escalonar)
+    # Process each brand sequentially (countdown to stagger)
     countdown = 0
     for brand_id, pids in sorted(brand_to_posts.items()):
         if brand_id <= 0:
@@ -857,7 +857,7 @@ def check_scheduled_posts_task():
         )
         countdown += UPLOAD_INTERVAL_SECONDS * len(pids)
 
-    # Thumbnails: agendadas após último vídeo de cada brand
+    # Thumbnails: scheduled after last video per brand
     brand_to_last_index: dict[int, int] = {}
     brand_to_post_ids: dict[int, list[int]] = {}
     for i, p in enumerate(posts):
@@ -894,9 +894,9 @@ def check_scheduled_posts_task():
 @shared_task
 def generate_daily_factory_schedules_task():
     """
-    A cada 30 min: para cada factory ativa, se já passou do horário fixo de agendamento
-    (daily_schedule_start_time, padrão 19:00) e ainda não foi gerada a agenda do DIA SEGUINTE, gera.
-    Os vídeos são agendados para o dia seguinte (ex: às 19h de 10/03 agenda para 11/03 8h, 9h, 10h...).
+    Every 30 min: for each active factory, if past fixed schedule time
+    (daily_schedule_start_time, default 19:00) and next day's schedule not yet generated, generate it.
+    Videos are scheduled for the following day (e.g. at 19:00 on 10/03 schedules for 11/03 8:00, 9:00...).
     """
     now = timezone.now()
     created_total = 0
@@ -904,7 +904,7 @@ def generate_daily_factory_schedules_task():
     for factory in Factory.objects.filter(is_active=True, scheduling_paused=False).order_by("id"):
         tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
         now_local = now.astimezone(tz)
-        # Agenda sempre para o DIA SEGUINTE
+        # Always schedule for the NEXT day
         target_date = now_local.date() + timedelta(days=1)
         start_time = getattr(factory, "daily_schedule_start_time", None) or time(19, 0)
         if now_local.time() < start_time:
@@ -919,21 +919,21 @@ def generate_daily_factory_schedules_task():
                 generated += 1
                 created_total += int(result.get("created", 0))
         except Exception:
-            logger.exception("Falha ao gerar agenda diária da factory=%s", factory.id)
+            logger.exception("Failed to generate daily schedule for factory=%s", factory.id)
     return {"generated_factories": generated, "created_posts": created_total}
 
 
 @shared_task
 def reconcile_youtube_schedules_task():
     """
-    Verifica se os uploads/agendamentos YouTube realmente existem no canal.
-    Se faltar, re-enfileira o agendamento sem travar os demais.
-    Só limpa mídia local após confirmação real.
+    Verify YouTube uploads/schedules exist on the channel.
+    If missing, re-queue without blocking others.
+    Clean local media only after real confirmation.
     """
     now = timezone.now()
     window_start = now - timedelta(days=1)
     window_end = now + timedelta(days=1)
-    # Só PENDING e POSTING: DONE já foi confirmado, rechecar gastaria cota à toa.
+    # Only PENDING and POSTING: DONE already confirmed; re-check would waste quota.
     candidates = (
         ScheduledPost.objects.select_related(
             "job",
@@ -962,7 +962,7 @@ def reconcile_youtube_schedules_task():
             continue
         video_id = str((post.external_ids or {}).get(platform) or "")
         if not video_id:
-            # Sem id externo não há como reconciliar no canal.
+            # No external id — cannot reconcile on channel.
             skipped += 1
             continue
         checked += 1
@@ -982,8 +982,8 @@ def reconcile_youtube_schedules_task():
             publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
             if publish_at and timezone.is_naive(publish_at):
                 publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-            # Confirmado no YouTube (já publicado ou agendado para o futuro): marca como POSTED
-            # e não recheca mais, economizando cota da API.
+            # Confirmed on YouTube (already published or scheduled): mark POSTED
+            # and skip re-check to save API quota.
             confirmed += 1
             _mark_factory_posting_verified(
                 post,
@@ -993,12 +993,12 @@ def reconcile_youtube_schedules_task():
             )
             _cleanup_local_media_if_possible(post)
             continue
-        # Só remove quando há evidência de ausência real.
+        # Only remove when there is evidence of real absence.
         if _should_remove_missing_by_verify_error(verify_data):
             _remove_schedule_records_missing_on_youtube(post, verify_data.get("error", "unknown"))
             removed_missing += 1
             continue
-        # Erro temporário (auth/rede/etc): mantém agendado e revalida no próximo ciclo.
+        # Temporary error (auth/network/etc): keep scheduled and revalidate next cycle.
         skipped += 1
         _mark_factory_posting_still_scheduled(
             post,
@@ -1019,10 +1019,10 @@ def reconcile_youtube_schedules_task():
 @shared_task
 def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str | None = None):
     """
-    Full scan diário por canal:
-    - varre vídeos agendados/postados no YouTube no dia
-    - reconcilia agenda interna
-    - remove registros internos ausentes no YouTube
+    Daily full scan per channel:
+    - scan scheduled/posted YouTube videos for the day
+    - reconcile internal schedule
+    - remove internal records missing on YouTube
     """
     factories = Factory.objects.filter(is_active=True)
     if factory_id:
@@ -1055,7 +1055,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
             try:
                 target_day = datetime.strptime(day_iso, "%Y-%m-%d").date()
             except ValueError:
-                summary["errors"].append(f"day_iso inválido: {day_iso}")
+                summary["errors"].append(f"invalid day_iso: {day_iso}")
                 continue
 
         day_start_local = timezone.make_aware(datetime.combine(target_day, datetime.min.time()), factory_tz)
@@ -1068,7 +1068,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
             account = _resolve_brand_youtube_account(brand)
             if not account:
                 logger.info(
-                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s): sem conta social YouTube vinculada, pulando.",
+                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s): no linked YouTube social account, skipping.",
                     brand.name,
                     brand.id,
                 )
@@ -1080,7 +1080,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
             try:
                 channel_index = _youtube_day_video_index(account, day_start_utc, day_end_utc)
                 logger.info(
-                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): scan do canal OK (default).",
+                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): channel scan OK (default).",
                     brand.name,
                     brand.id,
                     scan_credential_label,
@@ -1089,7 +1089,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
             except Exception as exc:
                 scan_error = exc
                 logger.warning(
-                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): falha no scan do canal (default): %s",
+                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): channel scan failed (default): %s",
                     brand.name,
                     brand.id,
                     scan_credential_label,
@@ -1097,12 +1097,12 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                     exc,
                 )
 
-            # Fallback: tenta varrer com cada credencial YouTube ativa da brand.
+            # Fallback: scan with each active brand YouTube credential.
             if channel_index is None:
                 for yt_cred in _list_ordered_youtube_credentials(brand):
                     if not str(getattr(yt_cred, "refresh_token", "") or "").strip():
                         logger.info(
-                            "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): sem refresh_token, pulando.",
+                            "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): no refresh_token, skipping.",
                             brand.name,
                             brand.id,
                             (yt_cred.label or f"cred#{yt_cred.id}"),
@@ -1120,7 +1120,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                         scan_credential_id = yt_cred.id
                         scan_error = None
                         logger.info(
-                            "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): scan do canal OK (fallback).",
+                            "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): channel scan OK (fallback).",
                             brand.name,
                             brand.id,
                             scan_credential_label,
@@ -1130,7 +1130,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                     except Exception as cred_exc:
                         scan_error = cred_exc
                         logger.warning(
-                            "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): falha no scan do canal (fallback): %s",
+                            "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): channel scan failed (fallback): %s",
                             brand.name,
                             brand.id,
                             (yt_cred.label or f"cred#{yt_cred.id}"),
@@ -1141,7 +1141,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
             if channel_index is None:
                 summary["errors"].append(f"brand={brand.id} youtube_scan_error={scan_error}")
                 logger.error(
-                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s): scan falhou em todas as credenciais. erro=%s",
+                    "[RECONCILE/FULL_SCAN] brand=%s(id=%s): scan failed for all credentials. error=%s",
                     brand.name,
                     brand.id,
                     scan_error,
@@ -1214,7 +1214,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
             channel_only_count = max(0, len(channel_index.keys() - internal_video_ids))
             summary["channel_only_videos"] += channel_only_count
             logger.info(
-                "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): resultado scan "
+                "[RECONCILE/FULL_SCAN] brand=%s(id=%s) cred=%s(id=%s): scan result "
                 "checked=%s confirmed=%s still_scheduled=%s removed_missing=%s skipped_no_external_id=%s channel_only_videos=%s",
                 brand.name,
                 brand.id,
@@ -1233,8 +1233,8 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
 
 def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     """
-    Lógica de postagem (chamada direta ou via task).
-    Não usar post_to_platforms_task.apply() de dentro de outra task (causa deadlock).
+    Posting logic (direct call or via task).
+    Do not call post_to_platforms_task.apply() from inside another task (deadlock).
     """
     try:
         post = ScheduledPost.objects.select_related(
@@ -1291,12 +1291,12 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         post.save(update_fields=["status", "error"])
         return {"error": "ScheduledPost sem origem"}
 
-    # Em contexto factory, prioriza brand de destino da agenda para conta/credencial de publicação.
+    # In factory context, prefer schedule destination brand for account/credential.
     target_brand = _resolve_post_target_brand(post)
     if target_brand:
         brand = target_brand
 
-    # Pausa por factory: não interrompe geração de conteúdo, apenas segura agendamento/publicação.
+    # Factory pause: does not stop content generation, only holds scheduling/posting.
     if brand and getattr(brand, "factory_id", None):
         try:
             if brand.factory and brand.factory.scheduling_paused:
@@ -1307,7 +1307,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 _sync_factory_posting_schedule(post)
                 return {"skipped": "factory scheduling paused"}
         except Exception:
-            logger.exception("Falha ao verificar pause da factory no ScheduledPost=%s", post.id)
+            logger.exception("Failed to check factory pause for ScheduledPost=%s", post.id)
 
     errors = []
     warnings = []
@@ -1315,8 +1315,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     external_ids = dict(post.external_ids or {})
     upload_fingerprint = ""
     social_account_changed = False
-    upload_post_youtube_ok = False  # Preenchido se YouTube postado via Upload Post
-    # Hash do arquivo para deduplicação por canal/plataforma.
+    upload_post_youtube_ok = False  # Set if YouTube was posted via Upload Post
+    # File hash for deduplication per channel/platform.
     try:
         hasher = hashlib.sha256()
         with open(video_path, "rb") as f:
@@ -1326,10 +1326,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     except Exception:
         upload_fingerprint = ""
 
-    # Upload-Post (preferência): TikTok, X, Instagram, YouTube quando habilitado na brand.
-    # Curtos e longos. Retry 2x com 10s. Fallback para YouTube API se falhar.
+    # Upload-Post (preferred): TikTok, X, Instagram, YouTube when enabled on brand.
+    # Short and long. Retry 2x at 10s. Fallback to YouTube API on failure.
     upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
-    # Longos acima do limite (~250MB): Upload-Post não aceita; YouTube só pela API nativa (resumable upload).
+    # Long-form above limit (~250MB): Upload-Post rejects; use native YouTube API (resumable upload).
     if upload_post_platforms and "YTB" in (post.platforms or []):
         try:
             file_sz = os.path.getsize(video_path)
@@ -1338,7 +1338,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         if file_sz > UPLOAD_POST_LONG_MAX_BYTES and "YOUTUBE" in upload_post_platforms:
             upload_post_platforms = [p for p in upload_post_platforms if p != "YOUTUBE"]
             logger.info(
-                "[UploadPost] Vídeo longo %.1f MB > limite %.0f MB; YouTube fora do Upload-Post (API nativa)",
+                "[UploadPost] Long video %.1f MB > limit %.0f MB; YouTube outside Upload-Post (native API)",
                 file_sz / (1024 * 1024),
                 UPLOAD_POST_LONG_MAX_BYTES / (1024 * 1024),
             )
@@ -1383,7 +1383,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 if result.get("success"):
                     up_success = True
                     logger.info(
-                        "[UploadPost] Recebido confirmação da postagem e agendamento (id %s)",
+                        "[UploadPost] Posting confirmation received (id %s)",
                         result.get("request_id") or "ok",
                     )
                     yt_platform = "YT" if ("YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])) else "YTB"
@@ -1404,16 +1404,16 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                                     upload_post_youtube_ok = True
                     if result.get("request_id"):
                         external_ids["upload_post_request_id"] = str(result["request_id"])
-                    # Com async_upload=true, YouTube pode vir sem video_id ainda (processando). Evita fallback duplicado.
+                    # With async_upload=true, YouTube may return no video_id yet (processing). Avoid duplicate fallback.
                     if "YOUTUBE" in upload_post_platforms and result.get("request_id"):
                         upload_post_youtube_ok = True
                     break
-                last_up_error = result.get("error", "erro")
+                last_up_error = result.get("error", "error")
             except UploadPostPublishError as e:
                 last_up_error = str(e)
                 if attempt < UPLOAD_POST_RETRY_COUNT:
                     logger.warning(
-                        "[UploadPost] Erro (tentativa %s/%s), retry em %s segundos: %s",
+                        "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
                         attempt + 1,
                         UPLOAD_POST_RETRY_COUNT + 1,
                         UPLOAD_POST_RETRY_DELAY_SEC,
@@ -1421,14 +1421,14 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     )
                     _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
                 else:
-                    logger.warning("[UploadPost] Falha após %s tentativas: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                    logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
                     if "YOUTUBE" in upload_post_platforms:
-                        logger.info("[UploadPost] Fallback para YouTube API")
+                        logger.info("[UploadPost] Falling back to YouTube API")
             except Exception as e:
                 last_up_error = str(e)
                 if attempt < UPLOAD_POST_RETRY_COUNT:
                     logger.warning(
-                        "[UploadPost] Erro (tentativa %s/%s), retry em %s segundos: %s",
+                        "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
                         attempt + 1,
                         UPLOAD_POST_RETRY_COUNT + 1,
                         UPLOAD_POST_RETRY_DELAY_SEC,
@@ -1436,19 +1436,19 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     )
                     _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
                 else:
-                    logger.warning("[UploadPost] Falha após %s tentativas: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                    logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
                     if "YOUTUBE" in upload_post_platforms:
-                        logger.info("[UploadPost] Fallback para YouTube API")
+                        logger.info("[UploadPost] Falling back to YouTube API")
 
         if not up_success and last_up_error and "YOUTUBE" not in upload_post_platforms:
             warnings.append(f"Upload-Post: {last_up_error}")
 
     for platform in post.platforms:
-        # Se YouTube já foi tratado via Upload Post, não chamar API nativa (evita Short duplicado).
-        # upload_post_youtube_ok fica True também com async (só request_id, sem video_id ainda) — não exigir external_ids.
+        # If YouTube was already handled via Upload Post, skip native API (avoid duplicate Short).
+        # upload_post_youtube_ok is True with async (request_id only, no video_id yet) — do not require external_ids.
         if platform in ("YT", "YTB") and upload_post_youtube_ok:
             logger.info(
-                "[POSTING] YouTube via Upload Post já aplicado; a saltar publisher API (post_id=%s platform=%s)",
+                "[POSTING] YouTube via Upload Post already applied; skipping publisher API (post_id=%s platform=%s)",
                 post.id,
                 platform,
             )
@@ -1457,8 +1457,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         if not account or account.platform != platform:
             from apps.brands.models import BrandSocialAccount
 
-            # YouTube Shorts (YT) e YouTube longos (YTB) usam o mesmo OAuth.
-            # Se não houver conta no código exato, tenta o código alternativo.
+            # YouTube Shorts (YT) and long-form (YTB) share the same OAuth.
+            # If no account for exact code, try alternate code.
             platform_candidates = [platform]
             if platform == "YT":
                 platform_candidates.append("YTB")
@@ -1485,11 +1485,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             else:
                 errors.append(f"{platform}: nenhuma conta conectada")
                 continue
-        # SimpleNamespace é só para publicar com BrandYouTubeCredential; FK exige BrandSocialAccount.
+        # SimpleNamespace is only for publishing with BrandYouTubeCredential; FK requires BrandSocialAccount.
         if not post.social_account_id and isinstance(account, BrandSocialAccount):
             post.social_account = account
             social_account_changed = True
-        # Deduplicação extra: evita upload duplicado acidental para mesmo canal/plataforma.
+        # Extra deduplication: avoid accidental duplicate upload for same channel/platform.
         if upload_fingerprint and platform in ("YT", "YTB"):
             done_posts = ScheduledPost.objects.filter(
                 status="DONE",
@@ -1588,14 +1588,14 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         yt_cred.last_error = f"quotaExceeded: {e}"
                         yt_cred.save(update_fields=["quota_exceeded_until", "last_error", "updated_at"])
                         continue
-                    # Qualquer outro erro: salva na credencial e tenta a próxima
+                    # Any other error: save on credential and try next
                     yt_cred.last_error = f"{reason or 'erro'}: {msg}"[:500]
                     yt_cred.save(update_fields=["last_error", "updated_at"])
                     continue
 
             if published:
                 continue
-            # Todas as credenciais falharam: agenda retry ou marca erro
+            # All credentials failed: schedule retry or mark error
             if last_exception is not None:
                 if last_is_retriable:
                     retryable_errors.append(
@@ -1661,7 +1661,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         should_not_consume_attempt = (
             has_quota_exceeded or has_upload_limit_exceeded or has_min_interval_not_reached
         )
-        # 1 retentativa para erros de upload/título; erros de token/cota não contam
+        # One retry for upload/title errors; token/quota errors do not consume attempt
         if not should_not_consume_attempt and next_retry > 1:
             errors.extend([item["message"] for item in retryable_errors])
         else:
@@ -1670,7 +1670,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 for item in retryable_errors
                 if item.get("retry_after_seconds")
             ]
-            # quotaExceeded / uploadLimitExceeded: aguarda reset (sem falha definitiva).
+            # quotaExceeded / uploadLimitExceeded: wait for reset (no hard failure).
             if has_quota_exceeded:
                 delay = max([3600] + requested_delays)
             elif has_upload_limit_exceeded:
@@ -1759,7 +1759,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         pass
     _sync_factory_posting_schedule(post)
 
-    # Para posts manuais (retry, run_scheduled_posts_now): agenda upload de capa (só longos)
+    # Manual posts (retry, run_scheduled_posts_now): schedule cover upload (long-form only)
     if post.status == "DONE" and _platforms_are_youtube_only(post.platforms):
         brand = _resolve_post_target_brand(post)
         platforms = post.platforms or []
@@ -1783,12 +1783,12 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
 
 @shared_task
 def post_to_platforms_task(scheduled_post_id: int):
-    """Publica um ScheduledPost nas plataformas configuradas."""
+    """Publish a ScheduledPost to configured platforms."""
     return _run_post_to_platforms(scheduled_post_id)
 
 
 def _normalize_media_path(path: str) -> str:
-    """Normaliza path para comparação (forward slashes, sem prefixo)."""
+    """Normalize path for comparison (forward slashes, no prefix)."""
     if not path or not path.strip():
         return ""
     return path.replace("\\", "/").strip().lstrip("/")
@@ -1796,8 +1796,8 @@ def _normalize_media_path(path: str) -> str:
 
 def _get_referenced_media_paths() -> set:
     """
-    Coleta todos os caminhos de arquivos referenciados no banco.
-    Retorna set de paths relativos a MEDIA_ROOT, normalizados.
+    Collect all file paths referenced in the database.
+    Returns set of paths relative to MEDIA_ROOT, normalized.
     """
     from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
     from apps.brands.models import BrandAsset
@@ -1809,7 +1809,7 @@ def _get_referenced_media_paths() -> set:
     for name in AutoCutAnalysis.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
         if name:
             refs.add(_normalize_media_path(name))
-    # AutoCutCorte.file e thumbnail (usar .name para garantir path correto)
+    # AutoCutCorte.file and thumbnail (use .name for correct path)
     for corte in AutoCutCorte.objects.only("file", "thumbnail").iterator():
         if corte.file and getattr(corte.file, "name", None):
             refs.add(_normalize_media_path(corte.file.name))
@@ -1836,10 +1836,10 @@ def _get_referenced_media_paths() -> set:
 
 def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
     """
-    Remove arquivos físicos em storage/media que não têm registro no banco.
-    Pastas: auto_cuts/sources, auto_cuts/cortes, auto_cuts/thumbnails,
+    Remove files under storage/media that have no database row.
+    Folders: auto_cuts/sources, auto_cuts/cortes, auto_cuts/thumbnails,
             sources, exports, cuts, brands/assets.
-    Se dry_run=True, apenas lista os órfãos sem deletar.
+    If dry_run=True, only list orphans without deleting.
     """
     media_root = Path(settings.MEDIA_ROOT)
     if not media_root.exists():
@@ -1873,7 +1873,7 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
                         if not dry_run:
                             f.unlink()
                             deleted += 1
-                            logger.info("[CLEANUP] Órfão removido: %s", rel)
+                            logger.info("[CLEANUP] Orphan removed: %s", rel)
                 except Exception as e:
                     errors.append(f"orphan_{f}: {e}")
         except Exception as e:
@@ -1884,13 +1884,13 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
 @shared_task
 def cleanup_posted_media_task():
     """
-    Limpa mídias de vídeos já postados para economizar espaço.
-    Roda a cada 4 horas.
-    - Cortes (AutoCutCorte): apaga file e thumbnail de cortes postados (não disponíveis/agendados)
-    - Job output: apaga arquivo de jobs finalizados cujos posts já foram concluídos
-    - AutoCutAnalysis: apaga vídeo original (upload) de análises finalizadas
-    - Arquivos órfãos: apaga arquivos físicos em storage/media sem registro no banco
-    Não apaga Jobs, nem vídeos disponíveis ou agendados.
+    Clean media for already-posted videos to save space.
+    Runs every 4 hours (when enabled in beat).
+    - Cuts (AutoCutCorte): delete file/thumbnail for posted cuts (not available/scheduled)
+    - Job output: delete file for DONE jobs whose posts are complete
+    - AutoCutAnalysis: delete original upload video for finished analyses
+    - Orphan files: delete files under storage/media with no DB row
+    Does not delete Jobs or available/scheduled videos.
     """
     from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
 
@@ -1902,7 +1902,7 @@ def cleanup_posted_media_task():
         "errors": [],
     }
 
-    # 1) Cortes postados: IDs de cortes que têm pelo menos um ScheduledPost DONE
+    # 1) Posted cuts: cut IDs with at least one DONE ScheduledPost
     posted_corte_ids = set(
         ScheduledPost.objects.filter(
             status="DONE",
@@ -1910,8 +1910,8 @@ def cleanup_posted_media_task():
         ).values_list("auto_cut_corte_id", flat=True)
     )
 
-    # Excluir cortes que ainda NÃO foram postados (inventário: disponível, agendado, postando ou falhou)
-    # Só deleta quando inventário está POSTED ou não existe (post direto sem factory)
+    # Exclude cuts not yet posted (inventory: available, scheduled, posting, or failed)
+    # Only delete when inventory is POSTED or missing (direct post without factory)
     excluded_inventory = set(
         VideoInventoryItem.objects.filter(
             status__in=["AVAILABLE", "SCHEDULED", "POSTING", "FAILED"],
@@ -1920,7 +1920,7 @@ def cleanup_posted_media_task():
     )
     posted_corte_ids -= excluded_inventory
 
-    # Excluir cortes que têm posts pendentes ou em postagem
+    # Exclude cuts with pending or in-flight posts
     active_corte_ids = set(
         ScheduledPost.objects.filter(
             status__in=["PENDING", "POSTING"],
@@ -1940,7 +1940,7 @@ def cleanup_posted_media_task():
                 try:
                     corte.file.delete(save=False)
                 except Exception as e:
-                    logger.warning("[CLEANUP] Falha ao deletar file do corte %s: %s", corte.id, e)
+                    logger.warning("[CLEANUP] Failed to delete cut file %s: %s", corte.id, e)
                 else:
                     if fp and fp.exists():
                         try:
@@ -1958,7 +1958,7 @@ def cleanup_posted_media_task():
                 try:
                     corte.thumbnail.delete(save=False)
                 except Exception as e:
-                    logger.warning("[CLEANUP] Falha ao deletar thumbnail do corte %s: %s", corte.id, e)
+                    logger.warning("[CLEANUP] Failed to delete cut thumbnail %s: %s", corte.id, e)
                 else:
                     if tfp and tfp.exists():
                         try:
@@ -1970,10 +1970,10 @@ def cleanup_posted_media_task():
             if changed:
                 corte.save(update_fields=["file", "thumbnail"])
         except Exception as e:
-            logger.exception("[CLEANUP] Erro ao limpar corte %s", corte.id)
+            logger.exception("[CLEANUP] Error cleaning cut %s", corte.id)
             summary["errors"].append(f"corte_{corte.id}: {e}")
 
-    # 2) Job output (vídeo final): jobs DONE cujos posts já foram concluídos
+    # 2) Job output (final video): DONE jobs with all posts complete
     done_jobs = Job.objects.filter(status="DONE").select_related("output")
     for job in done_jobs:
         try:
@@ -1998,14 +1998,14 @@ def cleanup_posted_media_task():
                     pass
             summary["job_outputs_cleaned"] += 1
         except Exception as e:
-            logger.warning("[CLEANUP] Falha ao deletar output do job %s: %s", job.id, e)
+            logger.warning("[CLEANUP] Failed to delete job output %s: %s", job.id, e)
             summary["errors"].append(f"job_{job.id}: {e}")
 
-    # 3) AutoCutAnalysis: vídeo original (upload direto) de análises finalizadas
+    # 3) AutoCutAnalysis: original upload video for finished analyses
     for analysis in AutoCutAnalysis.objects.filter(status="done"):
         if not analysis.file or not analysis.file.name:
             continue
-        # Só apaga se não houver cortes ainda disponíveis/agendados desta análise
+        # Only delete if no cuts from this analysis are still available/scheduled
         cortes_from_analysis = AutoCutCorte.objects.filter(analysis=analysis).values_list("id", flat=True)
         has_available_or_scheduled = VideoInventoryItem.objects.filter(
             auto_cut_corte_id__in=cortes_from_analysis,
@@ -2025,17 +2025,17 @@ def cleanup_posted_media_task():
             analysis.save(update_fields=["file"])
             summary["analysis_files_cleaned"] += 1
         except Exception as e:
-            logger.warning("[CLEANUP] Falha ao deletar file da análise %s: %s", analysis.id, e)
+            logger.warning("[CLEANUP] Failed to delete analysis file %s: %s", analysis.id, e)
             summary["errors"].append(f"analysis_{analysis.id}: {e}")
 
-    # 4) Arquivos órfãos: físicos em storage/media sem registro no banco
+    # 4) Orphan files: on disk under storage/media with no DB row
     orphan_result = _cleanup_orphan_media_files()
     summary["orphans_deleted"] = orphan_result["orphans_deleted"]
     summary["errors"].extend(orphan_result.get("errors", []))
 
     if any(v > 0 for k, v in summary.items() if k != "errors" and isinstance(v, int)):
         logger.info(
-            "[CLEANUP] Concluído: cortes=%s job_outputs=%s analysis_files=%s orphans=%s",
+            "[CLEANUP] Done: cortes=%s job_outputs=%s analysis_files=%s orphans=%s",
             summary["cortes_cleaned"],
             summary["job_outputs_cleaned"],
             summary["analysis_files_cleaned"],

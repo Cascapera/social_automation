@@ -1,5 +1,5 @@
 .env
-# Cookies yt-dlp exportados (manter pasta vazia com .gitkeep)
+# Exported yt-dlp cookies (keep folder empty except .gitkeep)
 secrets/*
 !secrets/.gitkeep
 *.pyc
@@ -16,11 +16,11 @@ celerybeat-schedule
 celerybeat-schedule-shm
 celerybeat-schedule-wal
 
-# Backups e dumps locais (nunca versionar)
+# Local backups and dumps (never commit)
 *.dump
 backup_*.json
 backups/
 
-# Testes / cobertura
+# Tests / coverage
 .coverage
 htmlcov/

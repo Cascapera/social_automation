@@ -1,4 +1,4 @@
-"""Tasks Celery para análise de cortes automáticos."""
+"""Celery tasks for automatic cut analysis."""
 
 import logging
 import os
@@ -36,14 +36,14 @@ from apps.jobs.services.subtitles import burn_subtitles, generate_subtitles, seg
 
 logger = logging.getLogger(__name__)
 
-# Vídeos maiores que isso usam transcrição por chunks (evita crash de memória)
+# Videos longer than this use chunked transcription (avoids OOM)
 CHUNKED_TRANSCRIPTION_THRESHOLD_SEC = 10 * 60  # 10 min
 VIRAL_SHORT_MIN_SEC = 30
 VIRAL_SHORT_MAX_SEC = 60
-# Modo viral_long / viral_long_en: alvo 80–160s; cortes mais curtos podem ser mantidos se score > 95
+# viral_long / viral_long_en: target 80–160s; shorter cuts may be kept if score > 95
 VIRAL_LONG_SHORT_MIN_SEC = 80
 VIRAL_LONG_SHORT_MAX_SEC = 160
-VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT = 95  # abaixo do mínimo de duração, ainda assim manter
+VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT = 95  # keep even below min duration if score clears bar
 VIRAL_LONG_MIN_SEC = 8 * 60
 VIRAL_LONG_MAX_SEC = 15 * 60
 EDUCATIONAL_SHORT_MAX_SEC = 180
@@ -85,14 +85,14 @@ ALL_THEME_CATEGORIES = [
 
 
 def _pick_timestamp(item: dict, start: bool = True) -> str:
-    """Aceita chaves antigas e novas de timestamp."""
+    """Accept legacy and new timestamp keys."""
     if start:
         return item.get("start") or item.get("start_timestamp") or ""
     return item.get("end") or item.get("end_timestamp") or ""
 
 
 def _normalize_virality_score(value) -> int | None:
-    """Converte score em inteiro 0..100 (aceita '96%' ou número)."""
+    """Convert score to int 0..100 (accepts '96%' or number)."""
     if value is None:
         return None
     try:
@@ -103,7 +103,7 @@ def _normalize_virality_score(value) -> int | None:
 
 
 def _sort_by_virality(items: list[dict]) -> list[dict]:
-    """Ordena itens por score viral desc, com fallback para rank asc."""
+    """Sort items by viral score desc, with rank asc as tiebreaker."""
     return sorted(
         items,
         key=lambda item: (
@@ -114,7 +114,7 @@ def _sort_by_virality(items: list[dict]) -> list[dict]:
 
 
 def _estimate_short_duration_seconds(item: dict, tc_to_seconds) -> float:
-    """Duração em segundos a partir de duration_seconds no JSON ou timestamps."""
+    """Duration in seconds from duration_seconds in JSON or timecodes."""
     ds = item.get("duration") or item.get("duration_seconds")
     if ds is not None:
         try:
@@ -133,8 +133,8 @@ def _estimate_short_duration_seconds(item: dict, tc_to_seconds) -> float:
 
 def _sort_shorts_viral_long(items: list[dict], tc_to_seconds) -> list[dict]:
     """
-    Ordena shorts do modo viral_long: combina score viral e duração (até 160s).
-    Peso 50% virality_score + 50% duração normalizada — favorece clipes mais longos com bom score.
+    Sort viral_long shorts: combine viral score and duration (up to 160s).
+    50% virality_score + 50% normalized duration — favors longer clips with good score.
     """
     def composite(item: dict) -> float:
         score = float(_normalize_virality_score(item.get("virality_score")) or 0)
@@ -173,8 +173,8 @@ def _normalize_theme_category(value: str, fallback: str = "") -> str:
 
 def _safe_save_analysis(analysis, update_fields):
     """
-    Salva analysis; retorna False se o registro foi deletado (caller deve retornar).
-    Evita DatabaseError quando o job é deletado durante o processamento.
+    Save analysis; returns False if row was deleted (caller should return).
+    Avoids DatabaseError when job is deleted during processing.
     """
     try:
         analysis.save(update_fields=update_fields)
@@ -187,8 +187,8 @@ def _safe_save_analysis(analysis, update_fields):
 
 def _sanitize_long_overlay_fk(analysis) -> bool:
     """
-    Se long_overlay_asset_id aponta para um BrandAsset apagado, limpa FK e desativa overlay.
-    Evita IntegrityError ao salvar o job (ex.: após download do YouTube com file.save).
+    If long_overlay_asset_id points to deleted BrandAsset, clear FK and disable overlay.
+    Avoids IntegrityError on job save (e.g. after YouTube download with file.save).
     """
     from apps.brands.models import BrandAsset
 
@@ -204,10 +204,10 @@ def _sanitize_long_overlay_fk(analysis) -> bool:
 
 def _resolve_target_brand_for_suggestion(analysis, suggestion):
     """
-    Resolve a brand de destino via target_brand (prioridade), distribute ou categoria (Factory 1:1).
-    - target_brand definido: todos os cortes vão para esse canal.
-    - distribution_mode=distribute: envia para a brand com menos vídeos AVAILABLE no banco.
-    - distribution_mode=theme: usa theme_category da IA para mapear.
+    Resolve destination brand via target_brand (priority), distribute, or category (Factory 1:1).
+    - target_brand set: all cuts go to that channel.
+    - distribution_mode=distribute: pick brand with fewest AVAILABLE videos in bank.
+    - distribution_mode=theme: map from AI theme_category.
     """
     target_id = getattr(analysis, "target_brand_id", None)
     if target_id:
@@ -264,9 +264,9 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
 
 def _sync_inventory_item_from_corte(corte):
     """
-    Cria/atualiza item no banco de vídeos da factory ao finalizar corte.
-    Quando analysis.target_brand_id está definido, todos os cortes vão para essa brand
-    (ignora theme_category da sugestão).
+    Create/update factory video bank item when a cut is finalized.
+    When analysis.target_brand_id is set, all cuts go to that brand
+    (ignores suggestion theme_category).
     """
     if not corte or not getattr(corte, "analysis_id", None):
         return
@@ -280,14 +280,14 @@ def _sync_inventory_item_from_corte(corte):
     if not target_brand or not getattr(target_brand, "factory_id", None):
         if getattr(analysis, "target_brand_id", None):
             logger.warning(
-                "[FLUXO] Corte %s: target_brand_id=%s definido mas brand não encontrada. Verifique se a brand existe.",
+                "[FLUXO] Cut %s: target_brand_id=%s set but brand not found. Check that the brand exists.",
                 getattr(corte, "id", None),
                 analysis.target_brand_id,
             )
         else:
             logger.warning(
-                "[FLUXO] Corte %s ignorado no inventário: sem roteamento válido (theme=%s). "
-                "Use 'Direcionar todos os cortes para' para enviar todos à mesma brand.",
+                "[FLUXO] Cut %s skipped for inventory: no valid routing (theme=%s). "
+                "Use 'Direct all cuts to' to send everything to one brand.",
                 getattr(corte, "id", None),
                 getattr(suggestion, "theme_category", "") if suggestion else "",
             )
@@ -318,7 +318,7 @@ def _sync_inventory_item_from_corte(corte):
     )
     if getattr(analysis, "target_brand_id", None):
         logger.info(
-            "[FLUXO] Corte %s → inventário brand_id=%s (target_brand direcionado)",
+            "[FLUXO] Cut %s → inventory brand_id=%s (target_brand override)",
             getattr(corte, "id", None),
             target_brand.id,
         )
@@ -326,11 +326,11 @@ def _sync_inventory_item_from_corte(corte):
 
 def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[dict], int, int]:
     """
-    Em contexto de factory:
-    - remove itens sem categoria válida;
-    - remove itens cuja categoria não possui brand mapeada;
-    - retorna (itens_validos, ignorados_sem_categoria, ignorados_sem_mapeamento).
-    Quando target_brand está definido, passa todos os itens sem filtrar.
+    In factory context:
+    - drop items without valid category;
+    - drop items whose category has no mapped brand;
+    - returns (valid_items, missing_category_count, unmapped_count).
+    When target_brand is set, pass all items through without filtering.
     """
     if getattr(analysis, "target_brand_id", None):
         return list(items or []), 0, 0
@@ -368,8 +368,8 @@ def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[di
 
 def _allowed_theme_categories_for_analysis(analysis) -> list[str]:
     """
-    Em contexto de factory, retorna apenas categorias mapeadas nas brands da factory.
-    Fora de factory, retorna o conjunto completo padrão.
+    In factory context, return only categories mapped on factory brands.
+    Outside factory, return the full default set.
     """
     base_brand = getattr(analysis, "brand", None)
     factory_id = getattr(base_brand, "factory_id", None) if base_brand else None
@@ -397,9 +397,9 @@ def _is_factory_processing_paused(analysis) -> bool:
 
 def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> None:
     """
-    Fluxo para cortes prontos: vídeo já editado.
-    Transcreve, chama LLM para metadata (título, thumbnail), copia vídeo sem extrair,
-    gera thumbnail e finaliza.
+    Ready-cuts flow: video already edited.
+    Transcribe, call LLM for metadata (title, thumbnail), copy video without re-extract,
+    generate thumbnail, and finalize.
     """
     import shutil
 
@@ -417,7 +417,7 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
         tl = "pt"
     metadata = analyze_ready_cut_metadata(transcript, duration_sec, titles_language=tl)
     title = metadata.get("title") or "Vídeo"
-    # LLM retorna 1-10; normalizamos para 0-100 (escala usada no resto do sistema)
+    # LLM returns 1–10; normalize to 0–100 (scale used elsewhere)
     raw_score = metadata.get("virality_score") or 5
     virality_score = max(0, min(100, int(float(raw_score)) * 10)) if raw_score is not None else 50
     raw_data = {
@@ -495,7 +495,7 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
         horizontal_logo_x=20,
         horizontal_logo_y=20,
     )
-    logger.info("[FLUXO] Ready cuts concluído com sucesso.")
+    logger.info("[FLUXO] Ready cuts flow completed successfully.")
 
 
 def _merge_subtitle_segments_for_xfade(
@@ -503,7 +503,7 @@ def _merge_subtitle_segments_for_xfade(
     fade_duration: float,
     segments_per_chunk: list[list[dict]],
 ) -> list[dict]:
-    """Ajusta timestamps locais ao vídeo longo montado com xfade (mesma lógica que concat_with_xfade)."""
+    """Adjust segment timestamps to merged long video with xfade (same as concat_with_xfade)."""
     out = []
     fade = float(fade_duration)
     for i, segs in enumerate(segments_per_chunk):
@@ -522,7 +522,7 @@ def _merge_subtitle_segments_for_xfade(
 
 
 def _base_name_for_ready_cuts_no_transcript(chunks: list, analysis) -> str:
-    """Nome base sem transcrição: nome do job (obrigatório no upload); senão stem do 1º arquivo; senão Job #id."""
+    """Base name without transcript: job name (required on upload); else first file stem; else Job #id."""
     job = (getattr(analysis, "name", None) or "").strip()
     if job:
         return job
@@ -537,15 +537,15 @@ def _base_name_for_ready_cuts_no_transcript(chunks: list, analysis) -> str:
 
 
 def _titles_for_ready_cuts_no_transcript(chunks: list, analysis) -> dict[str, str]:
-    """Sem transcrição: '{nome do job} Part 1', 'Part 2', ... (sem LLM)."""
+    """Without transcript: '{job name} Part 1', 'Part 2', ... (no LLM)."""
     base = _base_name_for_ready_cuts_no_transcript(chunks, analysis)
     return {str(i): f"{base} Part {i + 1}"[:200] for i in range(len(chunks))}
 
 
 def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
     """
-    Vários arquivos em um único job: transcrição em fila, títulos (LLM), vídeo longo opcional (fade),
-    depois shorts; finalização automática.
+    Multiple files in one job: queued transcription, titles (LLM), optional long video (fade),
+    then shorts; automatic finalization.
     """
     from apps.auto_cuts.models import (
         AutoCutAnalysis,
@@ -659,14 +659,14 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
         parts = [Path(ch.file.path) for ch in chunks]
         long_path = cortes_dir / f"job_{analysis.id}_long_concat.mp4"
         try:
-            # Normaliza cada clip para 1920×1080 (16:9) com letterbox/pillarbox para xfade
-            # aceitar H/V e resoluções mistas.
+            # Normalize each clip to 1920×1080 (16:9) with letterbox/pillarbox for xfade
+            # to accept mixed H/V and resolutions.
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
                 normalized_paths: list[Path] = []
                 for i, p in enumerate(parts):
                     np = tmpdir_path / f"norm_{i}.mp4"
-                    # FPS/SAR/áudio unificados: xfade exige timebase igual entre clipes (ex. 60 vs 25 fps).
+                    # Unified FPS/SAR/audio: xfade needs matching timebase between clips (e.g. 60 vs 25 fps).
                     normalize_video_to_canvas(
                         p, np, use_gpu=False, target_fps=30, audio_hz=48000
                     )
@@ -678,7 +678,7 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
                     concat_with_xfade(normalized_paths, tmp_out, "fade", fade_d, False)
                     shutil.copy(tmp_out, long_path)
         except Exception as e:
-            logger.exception("[FLUXO] Falha ao montar vídeo longo: %s", e)
+            logger.exception("[FLUXO] Failed to assemble long video: %s", e)
             analysis.status = "error"
             analysis.error = f"Erro ao montar vídeo longo: {e}"
             analysis.save(update_fields=["status", "error"])
@@ -795,11 +795,11 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
         horizontal_logo_x=20,
         horizontal_logo_y=20,
     )
-    logger.info("[FLUXO] Ready cuts em lote concluído (analysis=%s, long=%s).", analysis_id, bool(create_long))
+    logger.info("[FLUXO] Ready cuts batch completed (analysis=%s, long=%s).", analysis_id, bool(create_long))
 
 
 def _is_brand_only(analysis) -> bool:
-    """True quando target_brand está definido ou a brand não tem factory (conteúdo exclusivo da marca)."""
+    """True when target_brand is set or brand has no factory (brand-only content)."""
     if getattr(analysis, "target_brand_id", None):
         return True
     brand = getattr(analysis, "brand", None)
@@ -810,29 +810,29 @@ def _is_brand_only(analysis) -> bool:
 
 @shared_task(bind=True)
 def analyze_auto_cuts_task(self, analysis_id: int) -> None:
-    """Transcreve, analisa em chunks e agrega sugestões de cortes virais."""
+    """Transcribe, analyze in chunks, and aggregate viral cut suggestions."""
     from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion
 
     try:
         analysis = AutoCutAnalysis.objects.get(id=analysis_id)
     except ObjectDoesNotExist:
-        return  # Análise deletada; ignora task da fila
+        return  # Analysis deleted; ignore queued task
 
     if _sanitize_long_overlay_fk(analysis):
         analysis.save(update_fields=["long_overlay_asset_id", "long_overlay_enabled"])
         logger.warning(
-            "[FLUXO] Analysis %s: overlay lateral (long_overlay_asset) órfão; opção desativada.",
+            "[FLUXO] Analysis %s: orphan side overlay (long_overlay_asset); option disabled.",
             analysis_id,
         )
 
-    # Idempotência: se já concluído, retorna sem reprocessar (evita loop quando Celery
-    # trava ao liberar GPU e a task é reentregue após reinício)
+    # Idempotency: if already done, skip reprocessing (avoids loop when Celery
+    # stalls freeing GPU and the task is redelivered after restart)
     if analysis.status == "done":
-        logger.info("[FLUXO] Analysis %s já concluída; ignorando reexecução.", analysis_id)
+        logger.info("[FLUXO] Analysis %s already completed; skipping re-run.", analysis_id)
         return
 
-    # Pausa cooperativa da fila: não interrompe job em execução, apenas evita
-    # iniciar novos jobs enquanto a factory estiver pausada.
+    # Cooperative queue pause: does not interrupt a running job, only prevents
+    # starting new jobs while the factory is paused.
     if _is_factory_processing_paused(analysis):
         analysis.status = "pending"
         analysis.progress_message = "Fila de jobs pausada para esta factory. Aguardando retomada..."
@@ -840,10 +840,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         analysis.error = ""
         if _safe_save_analysis(analysis, ["status", "progress_message", "progress", "error"]):
             self.apply_async(args=[analysis_id], countdown=60)
-        logger.info("[FLUXO] Analysis %s adiada: factory com processing_paused.", analysis_id)
+        logger.info("[FLUXO] Analysis %s deferred: factory has processing_paused.", analysis_id)
         return
 
-    # Cortes prontos: lote (vários arquivos → um job)
+    # Ready cuts: batch (multiple files → one job)
     if getattr(analysis, "is_ready_cuts", False):
         from apps.auto_cuts.models import AutoCutReadyChunk
 
@@ -851,7 +851,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             try:
                 _process_ready_cuts_batch_flow(analysis_id)
             except Exception as e:
-                logger.exception("[FLUXO] Erro no lote de cortes prontos: %s", e)
+                logger.exception("[FLUXO] Ready cuts batch error: %s", e)
                 AutoCutAnalysis.objects.filter(id=analysis_id).update(status="error", error=str(e))
             return
 
@@ -864,7 +864,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
     analysis.error = ""
     analysis.save(update_fields=["status", "progress_message", "progress", "error"])
 
-    # Se tem URL do YouTube, baixar primeiro
+    # If YouTube URL, download first
     if youtube_url:
         analysis.progress_message = "Baixando vídeo do YouTube..."
         analysis.progress = 2
@@ -879,24 +879,24 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             downloaded = download_youtube(youtube_url, out_path)
             with open(downloaded, "rb") as f:
                 analysis.file.save(downloaded.name, File(f), save=True)
-            # Mantém youtube_url para metadados de publicação (descrição/episódio completo).
+            # Keep youtube_url for publish metadata (full description/episode).
             analysis.save(update_fields=["file"])
-            # Remove arquivo original do yt-dlp se em outro path (ex: video_id.mp4)
+            # Remove original yt-dlp file if elsewhere (e.g. video_id.mp4)
             saved_path = Path(analysis.file.path)
             if downloaded.resolve() != saved_path.resolve() and downloaded.exists():
                 try:
                     downloaded.unlink()
                 except Exception:
                     pass
-            logger.info("[FLUXO] YouTube baixado: %s", analysis.file.name)
+            logger.info("[FLUXO] YouTube downloaded: %s", analysis.file.name)
         except Exception as e:
-            logger.exception("[FLUXO] Erro ao baixar YouTube: %s", e)
+            logger.exception("[FLUXO] YouTube download failed: %s", e)
             analysis.status = "error"
             analysis.error = f"Erro ao baixar vídeo: {e}"
             analysis.save(update_fields=["status", "error"])
             return
 
-    # Obter caminho do vídeo
+    # Resolve video path
     video_file = analysis.video_file
     if not video_file:
         analysis.status = "error"
@@ -916,8 +916,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         use_chunked = duration_sec > CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
 
         if use_chunked:
-            # Fluxo: extrai chunks → salva em cortes_processo → transcreve 1 por 1 → deleta chunk
-            # Cada chunk = 18 min (vídeos pequenos no disco, sem temp em memória)
+            # Flow: extract chunks → save under cortes_processo → transcribe one by one → delete chunk
+            # Each chunk = 18 min (small files on disk, no huge temp in memory)
             try:
                 analysis.progress_message = "Extraindo blocos de áudio..."
                 if not _safe_save_analysis(analysis, ["progress_message"]):
@@ -929,7 +929,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 all_segments = []
                 boundaries = [(s, e) for _, s, e in chunk_paths]
 
-                # Loop simples (sem gerador) - evita crash ao sair do gerador em vídeos longos
+                # Simple loop (no generator) — avoids crash when exiting generator on long videos
                 from apps.jobs.services.subtitles import load_whisper_model
                 _whisper_model, _ = load_whisper_model(model_size=os.getenv("WHISPER_MODEL", "small").strip() or "small", device=None)
 
@@ -937,7 +937,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     analysis.progress_message = f"Transcrevendo bloco {i + 1}/{total_chunks}..."
                     analysis.progress = 5 + int(15 * (i + 1) / total_chunks)
                     if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
-                        logger.info("[FLUXO] Analysis %s deletada durante transcrição; abortando.", analysis_id)
+                        logger.info("[FLUXO] Analysis %s deleted during transcription; aborting.", analysis_id)
                         return
                     chunk = transcribe_single_chunk(_whisper_model, chunk_path, start_sec, end_sec, language=transcript_lang)
                     prev_end = boundaries[i - 1][1] if i > 0 else 0
@@ -947,22 +947,22 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                         if s.get("start", 0) >= prev_end
                     ]
                     all_segments.extend(segs_to_add)
-                    chunk["segments"] = []  # Libera memória
-                    logger.info("[FLUXO] Chunk %d/%d: OK (total %d segmentos)", i + 1, total_chunks, len(all_segments))
+                    chunk["segments"] = []  # free memory
+                    logger.info("[FLUXO] Chunk %d/%d: OK (total %d segments)", i + 1, total_chunks, len(all_segments))
 
-                # Não fazer del/gc aqui - liberação explícita da GPU pode causar crash no Windows
-                logger.info("[FLUXO] Loop transcrição OK. %d segmentos. Ordenando...", len(all_segments))
+                # Do not del/gc here — explicit GPU release can crash on Windows
+                logger.info("[FLUXO] Transcription loop OK. %d segments. Sorting...", len(all_segments))
                 all_segments.sort(key=lambda s: s.get("start", 0))
-                logger.info("[FLUXO] Ordenado. Montando transcript string...")
+                logger.info("[FLUXO] Sorted. Building transcript string...")
                 analysis.transcript_segments = all_segments
                 analysis.transcript = segments_to_transcript_with_timestamps(all_segments)
-                logger.info("[FLUXO] Transcript montado (%d chars).", len(analysis.transcript or ""))
+                logger.info("[FLUXO] Transcript built (%d chars).", len(analysis.transcript or ""))
             finally:
-                logger.info("[FLUXO] Iniciando cleanup cortes_processo...")
+                logger.info("[FLUXO] Starting cortes_processo cleanup...")
                 cleanup_cortes_processo(analysis.id)
-                logger.info("[FLUXO] Transcrição por chunks concluída. Cleanup feito.")
+                logger.info("[FLUXO] Chunked transcription done. Cleanup done.")
         else:
-            # Fluxo original: transcreve vídeo inteiro
+            # Original flow: transcribe whole video
             segments = generate_subtitles(video_path, language=transcript_lang)
             if not segments:
                 analysis.status = "error"
@@ -972,7 +972,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
             analysis.transcript_segments = segments
             analysis.transcript = segments_to_transcript_with_timestamps(segments)
-            logger.info("[FLUXO] Transcrição única concluída.")
+            logger.info("[FLUXO] Single-pass transcription done.")
 
         segments = analysis.transcript_segments or []
         if not segments:
@@ -981,14 +981,14 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             analysis.save(update_fields=["status", "error"])
             return
 
-        # Fluxo "cortes prontos": vídeo já editado, só precisa de metadata (título, thumbnail)
+        # "Ready cuts" flow: video already edited, only needs metadata (title, thumbnail)
         if getattr(analysis, "is_ready_cuts", False):
             _process_ready_cuts_flow(analysis, duration_sec, segments)
             return
 
-        logger.info("[FLUXO] Iniciando chunk_transcript (%d segmentos)...", len(segments))
+        logger.info("[FLUXO] Starting chunk_transcript (%d segments)...", len(segments))
         chunks = chunk_transcript(segments, chunk_minutes=18, overlap_minutes=3)
-        logger.info("[FLUXO] chunk_transcript concluído: %d blocos.", len(chunks) if chunks else 0)
+        logger.info("[FLUXO] chunk_transcript done: %d blocks.", len(chunks) if chunks else 0)
         if not chunks:
             analysis.status = "error"
             analysis.error = "Não foi possível dividir a transcrição em blocos."
@@ -1000,7 +1000,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         analysis.progress = 20
         analysis.save(update_fields=["transcript_segments", "transcript", "status", "progress_message", "progress"])
 
-        logger.info("[FLUXO] Chamando Grok API (analyze_chunks_in_one_request)... %d blocos", len(chunks))
+        logger.info("[FLUXO] Calling Grok API (analyze_chunks_in_one_request)... %d blocks", len(chunks))
         MAX_RETRIES = 3
         brand_only = _is_brand_only(analysis)
         allowed_theme_categories = _allowed_theme_categories_for_analysis(analysis)
@@ -1010,7 +1010,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             factory_name = getattr(factory, "name", None) or "?"
             brand_name = getattr(target_brand_obj, "name", None) or f"Brand #{analysis.target_brand_id}"
             logger.info(
-                "[FLUXO] Factory (%s) : %s : theme_category da LLM será ignorado (conteúdo exclusivo da marca).",
+                "[FLUXO] Factory (%s) : %s : LLM theme_category ignored (brand-only content).",
                 factory_name,
                 brand_name,
             )
@@ -1020,14 +1020,14 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             if factory:
                 factory_name = getattr(factory, "name", None) or "?"
                 logger.info(
-                    "[FLUXO] Factory (%s) : todos : theme_category da LLM será ignorado (conteúdo exclusivo da marca).",
+                    "[FLUXO] Factory (%s) : all : LLM theme_category ignored (brand-only content).",
                     factory_name,
                 )
             else:
-                logger.info("[FLUXO] Brand sem factory: theme_category da LLM será ignorado (conteúdo exclusivo da marca).")
+                logger.info("[FLUXO] Brand without factory: LLM theme_category ignored (brand-only content).")
         else:
             logger.info(
-                "[FLUXO] Categorias permitidas para roteamento neste job: %s",
+                "[FLUXO] Allowed categories for routing in this job: %s",
                 ", ".join(allowed_theme_categories),
             )
         final = None
@@ -1051,7 +1051,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 )
                 break
             except Exception as e:
-                logger.warning("[FLUXO] Grok API falhou (tentativa %d/%d): %s", attempt + 1, MAX_RETRIES, e)
+                logger.warning("[FLUXO] Grok API failed (attempt %d/%d): %s", attempt + 1, MAX_RETRIES, e)
                 if attempt < MAX_RETRIES - 1:
                     analysis.progress_message = (
                         f"Análise falhou (tentativa {attempt + 1}/{MAX_RETRIES}), repetindo..."
@@ -1059,19 +1059,19 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     if not _safe_save_analysis(analysis, ["progress_message"]):
                         return
                 else:
-                    logger.exception("[FLUXO] Grok API falhou após %d tentativas", MAX_RETRIES)
+                    logger.exception("[FLUXO] Grok API failed after %d attempts", MAX_RETRIES)
                     analysis.status = "error"
                     analysis.error = "Falha na análise após 3 tentativas."
                     analysis.save(update_fields=["status", "error"])
                     return
 
-        logger.info("[FLUXO] Salvando sugestões e extraindo cortes...")
+        logger.info("[FLUXO] Saving suggestions and extracting cuts...")
         analysis.progress_message = "Extraindo cortes..."
         analysis.progress = 85
         if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
             return
 
-        # Salvar sugestões e extrair cortes
+        # Save suggestions and extract cuts
         AutoCutSuggestion.objects.filter(analysis=analysis).delete()
         AutoCutCorte = __import__("apps.auto_cuts.models", fromlist=["AutoCutCorte"]).AutoCutCorte
         from apps.auto_cuts.services.extract import extract_corte
@@ -1093,8 +1093,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         candidate_shorts_source = final.get("candidate_shorts") or []
         ranked_shorts_source = final.get("ranked_shorts") or []
         if is_viral_prompt:
-            # Para viral, prioriza o pool maior (candidate_shorts), pois o ranked_shorts
-            # pode vir parcial mesmo quando há muitos candidatos válidos.
+            # For viral, prefer the larger pool (candidate_shorts), since ranked_shorts
+            # can be partial even when many valid candidates exist.
             shorts_source = candidate_shorts_source or ranked_shorts_source
         else:
             shorts_source = ranked_shorts_source or candidate_shorts_source
@@ -1111,7 +1111,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         elif getattr(analysis, "id", None):
             source_asset_id = f"analysis:{analysis.id}"
 
-        # Em contexto factory, ignora itens sem categoria válida/mapeamento.
+        # In factory context, skip items without valid category/mapping.
         ranked_shorts, shorts_ignored_missing_theme, shorts_ignored_unmapped = _filter_factory_routable_items(
             analysis, ranked_shorts
         )
@@ -1126,8 +1126,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         )
         if ignored_total:
             logger.warning(
-                "[FLUXO] Analysis %s: %s corte(s) ignorado(s) por theme_category inválida/sem mapeamento "
-                "(shorts sem tema=%s, shorts sem map=%s, longs sem tema=%s, longs sem map=%s).",
+                "[FLUXO] Analysis %s: %s cut(s) skipped due to invalid theme_category / no mapping "
+                "(shorts missing theme=%s, shorts unmapped=%s, longs missing theme=%s, longs unmapped=%s).",
                 analysis.id,
                 ignored_total,
                 shorts_ignored_missing_theme,
@@ -1145,7 +1145,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             end_sec = tc_to_seconds(end_tc)
             if end_sec <= start_sec:
                 logger.info(
-                    "[FLUXO] Short inválido ignorado (end<=start): %s -> %s",
+                    "[FLUXO] Invalid short skipped (end<=start): %s -> %s",
                     start_tc,
                     end_tc,
                 )
@@ -1159,7 +1159,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     score_v = _normalize_virality_score(item.get("virality_score"))
                     if raw_duration < VIRAL_SHORT_MIN_SEC:
                         logger.info(
-                            "[FLUXO] Short viral_long ignorado: duração %.2fs < mínimo absoluto %ss (%s -> %s)",
+                            "[FLUXO] viral_long short skipped: duration %.2fs < absolute minimum %ss (%s -> %s)",
                             raw_duration,
                             VIRAL_SHORT_MIN_SEC,
                             start_tc,
@@ -1169,7 +1169,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     if raw_duration < vmin:
                         if score_v is not None and score_v > VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT:
                             logger.info(
-                                "[FLUXO] Short viral_long mantido (score=%s > %s) apesar de duração %.2fs < %ss (%s -> %s)",
+                                "[FLUXO] viral_long short kept (score=%s > %s) despite duration %.2fs < %ss (%s -> %s)",
                                 score_v,
                                 VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT,
                                 raw_duration,
@@ -1179,7 +1179,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                             )
                         else:
                             logger.info(
-                                "[FLUXO] Short viral_long ignorado: duração %.2fs < %ss e score <= %s (score=%s) (%s -> %s)",
+                                "[FLUXO] viral_long short skipped: duration %.2fs < %ss and score <= %s (score=%s) (%s -> %s)",
                                 raw_duration,
                                 vmin,
                                 VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT,
@@ -1197,7 +1197,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     vmin, vmax = VIRAL_SHORT_MIN_SEC, VIRAL_SHORT_MAX_SEC
                     if raw_duration < vmin:
                         logger.info(
-                            "[FLUXO] Short viral ignorado por duração < %ss: %.2fs (%s -> %s)",
+                            "[FLUXO] viral short skipped: duration < %ss: %.2fs (%s -> %s)",
                             vmin,
                             raw_duration,
                             start_tc,
@@ -1248,7 +1248,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             end_sec = tc_to_seconds(end_tc)
             if end_sec <= start_sec:
                 logger.info(
-                    "[FLUXO] Long inválido ignorado (end<=start): %s -> %s",
+                    "[FLUXO] Invalid long skipped (end<=start): %s -> %s",
                     start_tc,
                     end_tc,
                 )
@@ -1257,7 +1257,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 raw_duration = end_sec - start_sec
                 if raw_duration < VIRAL_LONG_MIN_SEC:
                     logger.info(
-                        "[FLUXO] Long viral ignorado por duração < %ss: %.2fs (%s -> %s)",
+                        "[FLUXO] viral long skipped: duration < %ss: %.2fs (%s -> %s)",
                         VIRAL_LONG_MIN_SEC,
                         raw_duration,
                         start_tc,
@@ -1293,19 +1293,19 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             )
             suggestions_created.append((sug, "horizontal"))
 
-        logger.info("[FLUXO] %d sugestões criadas. Iniciando extração de vídeos...", len(suggestions_created))
-        # 6. Extrair vídeo de cada sugestão e criar AutoCutCorte
+        logger.info("[FLUXO] %d suggestions created. Starting video extraction...", len(suggestions_created))
+        # 6. Extract video for each suggestion and create AutoCutCorte
         total_cortes = len(suggestions_created)
         for i, (sug, fmt) in enumerate(suggestions_created):
             analysis.progress_message = f"Extraindo corte {i + 1}/{total_cortes}..."
             analysis.progress = 85 + int(10 * (i + 1) / total_cortes)
             if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
-                logger.info("[FLUXO] Analysis %s deletada durante extração; abortando.", analysis_id)
+                logger.info("[FLUXO] Analysis %s deleted during extraction; aborting.", analysis_id)
                 return
 
             out_path = cortes_dir / f"job_{analysis.id}_sug_{sug.id}.mp4"
             try:
-                logger.info("[FLUXO] Extraindo corte %d/%d: %s -> %s", i + 1, total_cortes, sug.start_tc, sug.end_tc)
+                logger.info("[FLUXO] Extracting cut %d/%d: %s -> %s", i + 1, total_cortes, sug.start_tc, sug.end_tc)
                 extract_corte(video_path, sug.start_tc, sug.end_tc, out_path, use_gpu=False)
             except Exception as e:
                 analysis.status = "error"
@@ -1319,7 +1319,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             raw_item = getattr(sug, "raw_data", None) or {}
             subtitle_segments_pt = raw_item.get("subtitle_segments_pt") if isinstance(raw_item, dict) else []
             if pv == "viral_translate" and subtitle_segments_pt:
-                # Usar legendas traduzidas pelo Grok (timestamps absolutos → relativos ao corte)
+                # Use Grok-translated subtitles (absolute timestamps → relative to cut)
                 subtitle_segments = []
                 for seg in subtitle_segments_pt:
                     s_start = float(seg.get("start", 0))
@@ -1345,13 +1345,13 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     if text:
                         subtitle_segments.append({"start": new_start, "end": new_end, "text": text})
 
-            # Shorts e longs: legendas queimadas por padrão
+            # Shorts and longs: burned subtitles by default
             corte = AutoCutCorte.objects.create(
                 analysis=analysis,
                 suggestion=sug,
                 format=fmt,
                 needs_subtitle=True,
-                # Fluxo factory-first: cortes já entram para finalização automática.
+                # Factory-first flow: cuts enter automatic finalization.
                 user_wants_finalize=True,
                 is_finalized=False,
                 subtitle_segments=subtitle_segments,
@@ -1361,19 +1361,19 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             target_brand = _resolve_target_brand_for_suggestion(analysis, sug)
             generated_thumb = generate_auto_thumbnail(corte, target_brand=target_brand)
             if generated_thumb:
-                logger.info("[FLUXO] Thumbnail automática gerada para corte %s.", corte.id)
+                logger.info("[FLUXO] Auto thumbnail generated for cut %s.", corte.id)
             else:
-                logger.info("[FLUXO] Thumbnail automática indisponível para corte %s.", corte.id)
+                logger.info("[FLUXO] Auto thumbnail unavailable for cut %s.", corte.id)
 
-        logger.info("[FLUXO] Todos os %d cortes extraídos. Salvando status final.", total_cortes)
+        logger.info("[FLUXO] All %d cuts extracted. Saving final status.", total_cortes)
         analysis.status = "done"
         analysis.progress_message = "Concluído"
         analysis.progress = 100
         if not _safe_save_analysis(analysis, ["status", "progress_message", "progress"]):
-            logger.info("[FLUXO] Analysis %s deletada antes do save final; ignorando.", analysis_id)
+            logger.info("[FLUXO] Analysis %s deleted before final save; ignoring.", analysis_id)
             return
-        # Finaliza no mesmo fluxo para garantir que o job seja concluído
-        # (cortes finalizados + inventário) antes do próximo job pesado.
+        # Finalize in the same flow so the job completes
+        # (finalized cuts + inventory) before the next heavy job.
         vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip() or None
         if not vert_mode:
             brand = getattr(analysis, "brand", None)
@@ -1384,25 +1384,25 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             horizontal_logo_x=20,
             horizontal_logo_y=20,
         )
-        logger.info("[FLUXO] Task concluída com sucesso.")
+        logger.info("[FLUXO] Task completed successfully.")
 
     except Exception as e:
         if isinstance(e, DatabaseError) and "did not affect any rows" in str(e):
-            logger.info("[FLUXO] Analysis %s deletada durante processamento; abortando.", analysis_id)
+            logger.info("[FLUXO] Analysis %s deleted during processing; aborting.", analysis_id)
             return
         AutoCutAnalysis.objects.filter(id=analysis_id).update(status="error", error=str(e))
         raise
 
 
-# Estilo padrão para legendas (fonte com emojis).
-# size = FontSize ASS em unidades do PlayRes (≈ px na altura do vídeo).
+# Default subtitle style (emoji-capable font).
+# size = ASS FontSize in PlayRes units (≈ px relative to video height).
 _SUBTITLE_STYLE_BASE = {
     "font": "Segoe UI Emoji",
     "color": "#FFFFFF",
     "outline_color": "#000000",
     "outline": 2,
 }
-# Shorts (9:16): padrão 10 px; longos 16:9 mantêm o padrão anterior (36) quando o usuário não envia "size".
+# Shorts (9:16): default 10 px; 16:9 longs keep previous default (36) when user omits "size".
 DEFAULT_SUBTITLE_STYLE_SHORT = {**_SUBTITLE_STYLE_BASE, "size": 10}
 DEFAULT_SUBTITLE_STYLE_LONG = {**_SUBTITLE_STYLE_BASE, "size": 36}
 DEFAULT_SUBTITLE_STYLE = DEFAULT_SUBTITLE_STYLE_LONG
@@ -1431,8 +1431,8 @@ def finalizar_auto_cut_task(
     long_overlay_asset_id: int | None = None,
 ) -> None:
     """
-    Finaliza cortes: deleta os não marcados, reenquadra verticais (se 16:9),
-    queima legendas nos marcados com needs_subtitle, marca todos como finalizados.
+    Finalize cuts: delete unselected, reframe verticals (if 16:9 source),
+    burn subtitles on cuts with needs_subtitle, mark all as finalized.
     """
     from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
     from apps.auto_cuts.services.vertical_reformat import reformat_video_vertical
@@ -1453,7 +1453,7 @@ def finalizar_auto_cut_task(
     if _sanitize_long_overlay_fk(analysis):
         analysis.save(update_fields=["long_overlay_asset_id", "long_overlay_enabled"])
         logger.warning(
-            "[FLUXO] Analysis %s: overlay lateral órfão na finalização; desativado.",
+            "[FLUXO] Analysis %s: orphan side overlay during finalize; disabled.",
             analysis_id,
         )
 
@@ -1465,7 +1465,7 @@ def finalizar_auto_cut_task(
     text_font = 28 if font_size_text is None else max(12, min(72, int(font_size_text)))
     title_clr = (title_color or "#FFFFFF").strip()
     text_clr = (text_color or "#FFFFFF").strip()
-    # Logo como marca d'água: canto sup esq, 40px margem, 80% opacidade
+    # Logo as watermark: top-left, 40px margin, 80% opacity
     horiz_logo_x = max(0, min(2000, int(horizontal_logo_x or 40)))
     horiz_logo_y = max(0, min(1200, int(horizontal_logo_y or 40)))
     overlay_pos = (overlay_position or "bottom_right").strip() or "bottom_right"
@@ -1473,7 +1473,7 @@ def finalizar_auto_cut_task(
     overlay_h = max(20, min(400, int(overlay_height or 120)))
 
     def _logo_path_for_brand(brand):
-        """Retorna Path do logo da brand ou None."""
+        """Return brand logo Path or None."""
         if not brand or not getattr(brand, "id", None):
             return None
         logo_asset = BrandAsset.objects.filter(
@@ -1487,7 +1487,7 @@ def finalizar_auto_cut_task(
         return None
 
     def _animation_path_for_brand(brand, asset_id):
-        """Retorna Path da animação overlay da brand ou None."""
+        """Return brand overlay animation Path or None."""
         if not brand or not asset_id:
             return None
         anim_asset = BrandAsset.objects.filter(
@@ -1503,7 +1503,7 @@ def finalizar_auto_cut_task(
         return None
 
     def _long_overlay_path_for_brand(brand, asset_id):
-        """Retorna Path do overlay lateral (vídeo longo) da brand ou None."""
+        """Return brand side overlay (long video) Path or None."""
         if not brand or not asset_id:
             return None
         ovl = BrandAsset.objects.filter(
@@ -1576,7 +1576,7 @@ def finalizar_auto_cut_task(
             corte.save(update_fields=["is_finalized"])
             continue
 
-        # Brand de destino do corte (target_brand direcionado, distribute ou theme)
+        # Cut destination brand (target_brand override, distribute, or theme)
         target_brand = _resolve_target_brand_for_suggestion(analysis, corte.suggestion)
         brand_for_assets = target_brand or getattr(analysis, "brand", None)
         sug = corte.suggestion
@@ -1587,7 +1587,7 @@ def finalizar_auto_cut_task(
         long_logo_ok = bool(getattr(brand_for_assets, "long_video_logo_enabled", False))
         logo_path = _logo_path_for_brand(brand_for_assets)
         animation_path = _animation_path_for_brand(brand_for_assets, overlay_animation_asset_id)
-        # Overlay longo: asset sempre da brand do job (upload em Brands), não da brand roteada por tema/distribuir.
+        # Long overlay: asset always from job brand (upload in Brands), not theme/distribute-routed brand.
         overlay_brand_for_long = getattr(analysis, "brand", None)
         long_overlay_path = (
             _long_overlay_path_for_brand(overlay_brand_for_long, lo_asset_id) if lo_enabled else None
@@ -1595,7 +1595,7 @@ def finalizar_auto_cut_task(
 
         try:
             work_path = video_path
-            # 1. Reenquadrar vertical (shorts com vídeo fonte horizontal)
+            # 1. Reframe vertical (shorts with horizontal source)
             info = ffprobe_video_info(video_path)
             w, h = info.get("width", 0), info.get("height", 0)
             is_horizontal = w > 0 and h > 0 and w > h
@@ -1630,11 +1630,11 @@ def finalizar_auto_cut_task(
                                 save=True,
                             )
                         work_path = Path(corte.file.path)
-                        logger.info("Corte %s: reenquadrado para vertical (%s)", corte.id, vert_mode)
+                        logger.info("Cut %s: reframed to vertical (%s)", corte.id, vert_mode)
                 except Exception as e:
-                    logger.exception("Erro ao reenquadrar vertical corte %s: %s", corte.id, e)
+                    logger.exception("Vertical reframe failed for cut %s: %s", corte.id, e)
             elif corte.format == "vertical" and not is_horizontal:
-                # Retrato/quadrado/outra proporção: força 1080×1920 (9:16) com pad (não corta conteúdo)
+                # Portrait/square/other aspect: force 1080×1920 (9:16) with pad (no crop)
                 ar = (w / h) if h else 0.0
                 target_ar = 9 / 16
                 ok_ar = abs(ar - target_ar) < 0.02
@@ -1655,20 +1655,20 @@ def finalizar_auto_cut_task(
                                 )
                             work_path = Path(corte.file.path)
                             logger.info(
-                                "Corte %s: normalizado para 1080×1920 (9:16), origem %dx%d",
+                                "Cut %s: normalized to 1080×1920 (9:16), source %dx%d",
                                 corte.id, w, h,
                             )
                     except Exception as e:
-                        logger.exception("Erro ao normalizar vertical 9:16 corte %s: %s", corte.id, e)
+                        logger.exception("9:16 vertical normalize failed for cut %s: %s", corte.id, e)
                 else:
                     logger.info(
-                        "Corte %s (vertical): já 1080×1920 9:16; sem normalização extra",
+                        "Cut %s (vertical): already 1080×1920 9:16; no extra normalization",
                         corte.id,
                     )
 
-            # 1b. Longos 16:9: canvas 1920×1080, SAR 1:1 e 30 fps antes de animação/overlay/logo/legenda.
-            # Sem isso, vídeo anamórfico ou altura efetiva menor que 1080 faz logo (px fixos) e MarginV da
-            # legenda parecerem gigantes ou deslocados (ex.: legenda “no meio”).
+            # 1b. Long 16:9: 1920×1080 canvas, SAR 1:1 and 30 fps before animation/overlay/logo/subs.
+            # Otherwise anamorphic video or effective height < 1080 makes fixed-px logo and MarginV
+            # look huge or misplaced (e.g. subtitle “in the middle”).
             if is_long_horizontal and work_path.exists():
                 try:
                     info_long = ffprobe_video_info(work_path)
@@ -1698,7 +1698,7 @@ def finalizar_auto_cut_task(
                                 )
                             work_path = Path(corte.file.path)
                             logger.info(
-                                "Corte %s: normalizado para 1920×1080 SAR 1:1 (longo horizontal; era %d×%d sar=%s)",
+                                "Cut %s: normalized to 1920×1080 SAR 1:1 (horizontal long; was %d×%d sar=%s)",
                                 corte.id,
                                 wl,
                                 hl,
@@ -1706,12 +1706,12 @@ def finalizar_auto_cut_task(
                             )
                 except Exception as e:
                     logger.exception(
-                        "Erro ao normalizar longo horizontal (canvas 16:9) corte %s: %s",
+                        "Horizontal long normalize (16:9 canvas) failed for cut %s: %s",
                         corte.id,
                         e,
                     )
 
-            # 2. Sobrepõe animação (cortes curtos e longos, se solicitado)
+            # 2. Overlay animation (short and long cuts, when requested)
             if animation_path and animation_path.exists() and work_path.exists():
                 try:
                     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1733,11 +1733,11 @@ def finalizar_auto_cut_task(
                                 save=True,
                             )
                         work_path = Path(corte.file.path)
-                        logger.info("Corte %s: animação overlay aplicada (%s)", corte.id, overlay_pos)
+                        logger.info("Cut %s: overlay animation applied (%s)", corte.id, overlay_pos)
                 except Exception as e:
-                    logger.exception("Erro ao aplicar animação overlay corte %s: %s", corte.id, e)
+                    logger.exception("Overlay animation failed for cut %s: %s", corte.id, e)
 
-            # 2b. Overlay lateral direita (somente cortes longos horizontais)
+            # 2b. Right-side overlay (horizontal long cuts only)
             if (
                 lo_enabled
                 and long_overlay_path
@@ -1762,13 +1762,13 @@ def finalizar_auto_cut_task(
                                 save=True,
                             )
                         work_path = Path(corte.file.path)
-                        logger.info("Corte %s: overlay lateral (long) aplicado", corte.id)
+                        logger.info("Cut %s: side (long) overlay applied", corte.id)
                 except Exception as e:
                     logger.exception(
-                        "Erro ao aplicar overlay lateral longo corte %s: %s", corte.id, e
+                        "Long side overlay failed for cut %s: %s", corte.id, e
                     )
 
-            # 3. Logo em vídeo longo horizontal (16:9), se a marca tiver long_video_logo_enabled
+            # 3. Logo on horizontal long video (16:9), if brand has long_video_logo_enabled
             if (
                 is_long_horizontal
                 and long_logo_ok
@@ -1797,23 +1797,23 @@ def finalizar_auto_cut_task(
                                 save=True,
                             )
                         work_path = Path(corte.file.path)
-                        logger.info("Corte %s: logo inserido em (%d,%d)", corte.id, horiz_logo_x, horiz_logo_y)
+                        logger.info("Cut %s: logo inserted at (%d,%d)", corte.id, horiz_logo_x, horiz_logo_y)
                 except Exception as e:
-                    logger.exception("Erro ao inserir logo corte %s: %s", corte.id, e)
+                    logger.exception("Logo insert failed for cut %s: %s", corte.id, e)
 
-            # 4. Queimar legendas (shorts: se marcado; longos horizontais: só se a marca permitir)
+            # 4. Burn subtitles (shorts: if flagged; horizontal longs: only if brand allows)
             should_burn_subs = (
                 corte.needs_subtitle
                 and corte.subtitle_segments
                 and (not is_long_horizontal or long_subs_ok)
             )
             if not corte.needs_subtitle:
-                logger.info("Corte %s: pulando legendas (needs_subtitle=False)", corte.id)
+                logger.info("Cut %s: skipping subtitles (needs_subtitle=False)", corte.id)
             elif not corte.subtitle_segments:
-                logger.info("Corte %s: pulando legendas (subtitle_segments vazio)", corte.id)
+                logger.info("Cut %s: skipping subtitles (subtitle_segments empty)", corte.id)
             elif is_long_horizontal and not long_subs_ok:
                 logger.info(
-                    "Corte %s: pulando legendas (vídeo longo 16:9: desativado nas preferências da marca)",
+                    "Cut %s: skipping subtitles (16:9 long: disabled in brand preferences)",
                     corte.id,
                 )
             if should_burn_subs:
@@ -1832,8 +1832,8 @@ def finalizar_auto_cut_task(
                                 else DEFAULT_SUBTITLE_STYLE_SHORT
                             )
                             style = {**base_style, **user_subtitle_style}
-                            # Shorts: legendas na parte inferior (acima dos botões do YouTube), não no topo
-                            # MarginV = distância da borda inferior. 160px mantém ~20px acima da área dos botões.
+                            # Shorts: subtitles at bottom (above YouTube buttons), not top
+                            # MarginV = distance from bottom edge. 160px keeps ~20px above button area.
                             style["position"] = "bottom"
                             style["margin_v"] = style.get("margin_v", 160)
                             burn_subtitles(
@@ -1850,18 +1850,18 @@ def finalizar_auto_cut_task(
                                     File(f),
                                     save=True,
                                 )
-                            logger.info("Corte %s: legendas queimadas", corte.id)
+                            logger.info("Cut %s: subtitles burned", corte.id)
                     except Exception as e:
-                        logger.exception("Erro ao queimar legendas corte %s: %s", corte.id, e)
+                        logger.exception("Subtitle burn failed for cut %s: %s", corte.id, e)
         except Exception as e:
-            logger.exception("Erro ao finalizar corte %s: %s", corte.id, e)
+            logger.exception("Finalize failed for cut %s: %s", corte.id, e)
         corte.is_finalized = True
         corte.save(update_fields=["is_finalized"])
         try:
             _sync_inventory_item_from_corte(corte)
         except Exception as e:
-            logger.exception("Erro ao sincronizar inventário do corte %s: %s", corte.id, e)
+            logger.exception("Inventory sync failed for cut %s: %s", corte.id, e)
 
-    # Inventário já foi sincronizado acima. Agendamento automático ocorre SOMENTE às 19h
-    # via cron (generate_daily_factory_schedules_task). Não dispara aqui para evitar
-    # agendar novos cortes fora do horário esperado.
+    # Inventory was synced above. Automatic scheduling runs ONLY at 19:00
+    # via cron (generate_daily_factory_schedules_task). Not triggered here to avoid
+    # scheduling new cuts outside the expected window.

@@ -1,17 +1,17 @@
 """
-Testa transcrição Whisper FORA do Celery para diagnosticar crash na GPU.
+Test Whisper transcription OUTSIDE Celery to diagnose GPU crashes.
 
-Uso:
+Usage:
   python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.m4a
-  python manage.py test_whisper_gpu caminho/arquivo.m4a --device cuda
-  python manage.py test_whisper_gpu caminho/arquivo.m4a --device cpu
+  python manage.py test_whisper_gpu path/to/file.m4a --device cuda
+  python manage.py test_whisper_gpu path/to/file.m4a --device cpu
 
-Para debug com CUDA síncrono (melhor stack trace em erros):
+Debug with synchronous CUDA (clearer stack trace on errors):
   set CUDA_LAUNCH_BLOCKING=1
-  python manage.py test_whisper_gpu arquivo.m4a --device cuda
+  python manage.py test_whisper_gpu file.m4a --device cuda
 
-Para capturar stack trace quando travar (em outro terminal):
-  py-spy dump --pid <PID_DO_PROCESSO>
+Capture stack trace while stuck (in another terminal):
+  py-spy dump --pid <PROCESS_PID>
 """
 import logging
 import sys
@@ -28,48 +28,48 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Testa transcrição Whisper fora do Celery (diagnóstico de crash GPU)"
+    help = "Test Whisper transcription outside Celery (GPU crash diagnostics)"
 
     def add_arguments(self, parser):
-        parser.add_argument("path", type=str, help="Caminho do áudio/vídeo (m4a, mp4, etc.)")
+        parser.add_argument("path", type=str, help="Path to audio/video (m4a, mp4, etc.)")
         parser.add_argument(
             "--device",
             choices=["cuda", "cpu"],
             default=None,
-            help="Força device (default: usa WHISPER_DEVICE do .env ou cuda)",
+            help="Force device (default: WHISPER_DEVICE from .env or cuda)",
         )
         parser.add_argument(
             "--model",
             default="small",
-            help="Modelo: tiny, base, small, medium, large-v3 (default: small)",
+            help="Model: tiny, base, small, medium, large-v3 (default: small)",
         )
 
     def handle(self, *args, **options):
-        # Garante que logs do Whisper apareçam
+        # Ensure Whisper logs are visible
         logging.getLogger("apps.jobs.services.subtitles").setLevel(logging.INFO)
         if not logging.getLogger().handlers:
             logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
         path = Path(options["path"])
         if not path.exists():
-            self.stderr.write(self.style.ERROR(f"Arquivo não existe: {path}"))
+            self.stderr.write(self.style.ERROR(f"File does not exist: {path}"))
             return
 
         device = options["device"]
         model_size = options["model"]
 
         self.stdout.write("=" * 60)
-        self.stdout.write("TESTE WHISPER (fora do Celery)")
+        self.stdout.write("WHISPER TEST (outside Celery)")
         self.stdout.write("=" * 60)
-        self.stdout.write(f"Arquivo: {path}")
-        self.stdout.write(f"Modelo: {model_size}")
-        self.stdout.write(f"Device: {device or 'auto (env ou cuda)'}")
+        self.stdout.write(f"File: {path}")
+        self.stdout.write(f"Model: {model_size}")
+        self.stdout.write(f"Device: {device or 'auto (env or cuda)'}")
         self.stdout.write("")
 
         from apps.jobs.services.subtitles import generate_subtitles
 
         try:
-            self.stdout.write("[1/2] Carregando modelo e iniciando transcrição...")
+            self.stdout.write("[1/2] Loading model and starting transcription...")
             self.stdout.flush()
             segments = generate_subtitles(
                 path,
@@ -77,13 +77,13 @@ class Command(BaseCommand):
                 model_size=model_size,
                 device=device,
             )
-            self.stdout.write(self.style.SUCCESS(f"[2/2] OK! {len(segments)} segmentos transcritos."))
+            self.stdout.write(self.style.SUCCESS(f"[2/2] OK! {len(segments)} segments transcribed."))
             for i, seg in enumerate(segments[:5]):
                 self.stdout.write(f"  {i+1}. [{seg.get('start', 0):.1f}s] {seg.get('text', '')[:60]}...")
             if len(segments) > 5:
-                self.stdout.write(f"  ... e mais {len(segments) - 5} segmentos")
+                self.stdout.write(f"  ... and {len(segments) - 5} more segments")
         except Exception as e:
-            self.stderr.write(self.style.ERROR(f"ERRO: {e}"))
+            self.stderr.write(self.style.ERROR(f"ERROR: {e}"))
             import traceback
             traceback.print_exc()
             raise

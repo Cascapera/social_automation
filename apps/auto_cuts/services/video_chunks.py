@@ -1,4 +1,4 @@
-"""Extração de chunks de vídeo/áudio para transcrição em partes (evita crash em vídeos longos)."""
+"""Extract video/audio chunks for chunked transcription (avoids crashes on long videos)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from django.conf import settings
 
 
 def get_cortes_processo_dir(analysis_id: int) -> Path:
-    """Pasta para chunks em processamento: cortes_processo/<analysis_id>/"""
+    """Folder for chunks in progress: cortes_processo/<analysis_id>/"""
     base = Path(settings.MEDIA_ROOT) / "cortes_processo"
     return base / str(analysis_id)
 
@@ -22,8 +22,8 @@ def extract_chunks_to_folder(
     overlap_minutes: int = 3,
 ) -> list[tuple[Path, float, float]]:
     """
-    Extrai chunks de áudio do vídeo e salva em cortes_processo/<analysis_id>/.
-    Retorna lista de (chunk_path, start_sec, end_sec).
+    Extract audio chunks from video and save under cortes_processo/<analysis_id>/.
+    Returns list of (chunk_path, start_sec, end_sec).
     """
     from apps.jobs.services.ffmpeg import ffprobe_duration
 
@@ -55,7 +55,7 @@ def transcribe_single_chunk(
     end_sec: float,
     language: str = "pt",
 ) -> dict:
-    """Transcreve um chunk. Retorna {start_sec, end_sec, text, segments}."""
+    """Transcribe one chunk. Returns {start_sec, end_sec, text, segments}."""
     from apps.jobs.services.subtitles import generate_subtitles
 
     if not chunk_path.exists():
@@ -81,11 +81,11 @@ def transcribe_chunks_one_by_one(
     model=None,
 ):
     """
-    Transcreve cada chunk em disco, um por vez. Carrega o modelo UMA vez e reutiliza
-    (evita travamento na GPU ao recarregar entre chunks).
-    Yields: {"start_sec", "end_sec", "text", "segments"} para cada chunk.
-    model_size: None = WHISPER_MODEL do .env ou "small" (para vídeos longos).
-    model: se fornecido, usa em vez de carregar (evita crash ao sair do gerador em vídeos longos).
+    Transcribe each chunk on disk, one at a time. Load the model ONCE and reuse
+    (avoids GPU reload hangs between chunks).
+    Yields: {"start_sec", "end_sec", "text", "segments"} per chunk.
+    model_size: None = WHISPER_MODEL from .env or "small" (for long videos).
+    model: if provided, use instead of loading (avoids crash when exiting generator on long videos).
     """
     from apps.jobs.services.subtitles import generate_subtitles, load_whisper_model
 
@@ -111,12 +111,12 @@ def transcribe_chunks_one_by_one(
 
         text = _segments_to_chunk_text(segments)
         yield {"start_sec": start_sec, "end_sec": end_sec, "text": text, "segments": segments}
-        # Não unlink aqui - em vídeos longos pode causar crash no Windows.
-        # cleanup_cortes_processo remove a pasta inteira no final.
+        # Do not unlink here — on long videos it can crash on Windows.
+        # cleanup_cortes_processo removes the whole folder at the end.
 
 
 def cleanup_cortes_processo(analysis_id: int) -> None:
-    """Remove pasta cortes_processo/<analysis_id>/ e todo conteúdo."""
+    """Remove folder cortes_processo/<analysis_id>/ and all contents."""
     folder = get_cortes_processo_dir(analysis_id)
     if folder.exists():
         shutil.rmtree(folder, ignore_errors=True)
@@ -129,8 +129,8 @@ def get_chunk_boundaries(
     min_chunk_minutes: int = 5,
 ) -> list[tuple[float, float]]:
     """
-    Retorna lista de (start_sec, end_sec) para cada chunk com overlap.
-    Ex: 18min chunks, 3min overlap → (0,1080), (900,1980), (1800,2880)...
+    Return list of (start_sec, end_sec) per chunk with overlap.
+    E.g. 18 min chunks, 3 min overlap → (0,1080), (900,1980), (1800,2880)...
     """
     if duration_sec <= 0:
         return []
@@ -145,7 +145,7 @@ def get_chunk_boundaries(
     while start_sec < duration_sec:
         end_sec = min(start_sec + chunk_sec, duration_sec)
 
-        # Evita último chunk muito pequeno
+        # Avoid a tiny last chunk
         if boundaries and (duration_sec - start_sec) < min_chunk_sec:
             break
 
@@ -164,15 +164,15 @@ def extract_audio_chunk(
     output_path: Path,
 ) -> None:
     """
-    Extrai trecho de áudio do vídeo para transcrição (chunks).
+    Extract an audio segment from video for transcription (chunks).
 
-    Não usa -c:a copy: vídeos do YouTube com faixa EN podem vir em Opus, que o container .m4a
-    (muxer ipod) não aceita em copy — gera "Could not find tag for codec opus".
-    Reencode para AAC (leve), compatível com Whisper e M4A.
+    Does not use -c:a copy: YouTube videos with EN track may be Opus, which the .m4a
+    (ipod muxer) cannot mux in copy — yields "Could not find tag for codec opus".
+    Re-encode to AAC (light), compatible with Whisper and M4A.
     """
     import subprocess
 
-    # -ss antes de -i para seek rápido (input seeking)
+    # -ss before -i for fast seek (input seeking)
     cmd = [
         settings.FFMPEG_BIN,
         "-y",
@@ -192,7 +192,7 @@ def extract_audio_chunk(
 
 
 def _segments_to_chunk_text(segments: list[dict]) -> str:
-    """Formata segmentos como [MM:SS] ou [HH:MM:SS] texto."""
+    """Format segments as [MM:SS] or [HH:MM:SS] text."""
     def _sec_to_tc(sec: float) -> str:
         h = int(sec // 3600)
         m = int((sec % 3600) // 60)

@@ -1,39 +1,39 @@
-# Frontend - Social Automation
+# Frontend — Social Automation
 
-Aplicação React para o fluxo completo de automação de vídeos.
+React app for the full video automation workflow.
 
-## Pré-requisitos
+## Prerequisites
 
-- **Node.js** (v18+) - [Baixar em nodejs.org](https://nodejs.org)
+- **Node.js** (v18+) — [Download at nodejs.org](https://nodejs.org)
 
-## Instalação
+## Install
 
 ```bash
 cd frontend
 npm install
 ```
 
-## Desenvolvimento
+## Development
 
-1. **Backend** (em um terminal):
+1. **Backend** (one terminal):
    ```bash
    python manage.py runserver
    ```
 
-2. **Frontend** (em outro terminal):
+2. **Frontend** (another terminal):
    ```bash
    cd frontend
    npm run dev
    ```
 
-3. Acesse: **http://localhost:5173**
+3. Open **http://localhost:5173**
 
-O Vite faz proxy das requisições `/api` e `/media` para o Django em `http://127.0.0.1:8000`.
+Vite proxies `/api` and `/media` to Django at `http://127.0.0.1:8000`.
 
-## Build para produção
+## Production build
 
 ```bash
 npm run build
 ```
 
-Os arquivos estarão em `frontend/dist/`. Para servir junto ao Django, configure o `STATICFILES_DIRS` e as rotas.
+Output is in `frontend/dist/`. To serve with Django, configure `STATICFILES_DIRS` and routes.

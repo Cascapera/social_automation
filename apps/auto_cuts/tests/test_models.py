@@ -1,4 +1,4 @@
-"""Testes básicos de modelos Auto Cuts."""
+"""Basic Auto Cuts model tests."""
 
 from __future__ import annotations
 

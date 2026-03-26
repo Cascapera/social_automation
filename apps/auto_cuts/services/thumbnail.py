@@ -385,11 +385,11 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                     img = Image.alpha_composite(img_rgba, overlay_resized).convert("RGB")
                     draw = ImageDraw.Draw(img)
                 except Exception as e:
-                    logger.warning("[THUMB] Falha ao aplicar modelo %s: %s", thumb_asset_type, e)
+                    logger.warning("[THUMB] Failed to apply template %s: %s", thumb_asset_type, e)
                     has_thumb_model = False
 
             if not has_thumb_model:
-                # Faixa inferior fixa em 20% da altura (fallback quando não há modelo)
+                # Fixed bottom band at 20% of height (fallback when no template asset)
                 draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], fill=band_color)
 
             # Texto totalmente contido na faixa (quebra + redução de fonte).
@@ -453,5 +453,5 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 corte.thumbnail.save(f"autocut_{corte.id}.jpg", File(f), save=True)
             return True
     except Exception as e:
-        logger.warning("[THUMB] Falha ao gerar thumbnail para corte %s: %s", getattr(corte, "id", "?"), e)
+        logger.warning("[THUMB] Failed to generate thumbnail for cut %s: %s", getattr(corte, "id", "?"), e)
         return False

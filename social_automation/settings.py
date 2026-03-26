@@ -37,7 +37,7 @@ def _get_allowed_hosts():
     if not DEBUG:
         return [h.strip() for h in (os.getenv("ALLOWED_HOSTS", "") or "").split(",") if h.strip()]
     hosts = ["localhost", "127.0.0.1"]
-    # Permite acesso pela rede quando FRONTEND_URL aponta para IP (ex: http://192.168.1.100:5173)
+    # Allow LAN access when FRONTEND_URL points to an IP (e.g. http://192.168.1.100:5173)
     try:
         from urllib.parse import urlparse
         frontend = (os.getenv("FRONTEND_URL") or "").strip()
@@ -108,13 +108,13 @@ WSGI_APPLICATION = 'social_automation.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-# Use PostgreSQL quando DATABASE_URL estiver definido (recomendado para Celery multi-worker)
-# Ex: postgresql://user:password@host:5432/dbname
+# Use PostgreSQL when DATABASE_URL is set (recommended for multi-worker Celery)
+# e.g. postgresql://user:password@host:5432/dbname
 
 _database_url = os.getenv("DATABASE_URL", "").strip()
 if _database_url and "postgres" in _database_url.split("://")[0].lower():
     from urllib.parse import urlparse
-    # postgres:// e postgresql:// são equivalentes; psycopg2 aceita ambos
+    # postgres:// and postgresql:// are equivalent; psycopg2 accepts both
     _u = _database_url.replace("postgres://", "postgresql://", 1)
     _p = urlparse(_u)
     DATABASES = {
@@ -160,7 +160,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = os.getenv("LANGUAGE_CODE", "pt-br")
+LANGUAGE_CODE = os.getenv("LANGUAGE_CODE", "en-us")
 
 TIME_ZONE = os.getenv("TIME_ZONE", "America/Sao_Paulo")
 
@@ -184,14 +184,14 @@ MEDIA_URL = "/media/"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# Cache (OAuth pendente, etc.)
+# Cache (OAuth state, etc.)
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "OPTIONS": {"MAX_ENTRIES": 100},
     }
 }
-# Se tiver Redis: pip install django-redis e use "django_redis.cache.RedisCache"
+# With Redis: pip install django-redis and use "django_redis.cache.RedisCache"
 
 # Celery
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
@@ -200,13 +200,13 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = os.getenv("CELERY_TIMEZONE", TIME_ZONE)
-# Para alinhar scheduler/logs ao fuso local quando desejado.
+# Align scheduler/logs with local timezone when desired.
 CELERY_ENABLE_UTC = os.getenv("CELERY_ENABLE_UTC", "0").lower() in ("1", "true", "yes")
-# CELERY_EAGER=1: executa tasks no mesmo processo (sem Redis). Útil para dev sem Docker.
+# CELERY_EAGER=1: run tasks in-process (no Redis). Useful for dev without Docker.
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "").lower() in ("1", "true", "yes")
 CELERY_TASK_DEFAULT_QUEUE = "processing"
 CELERY_TASK_ROUTES = {
-    # Fila dedicada para publicação/agendamento (não deve ficar bloqueada por transcrição/render)
+    # Dedicated queue for publishing/scheduling (must not be blocked by transcription/render)
     "apps.social.tasks.check_scheduled_posts_task": {"queue": "publish"},
     "apps.social.tasks.process_brand_posting_queue_task": {"queue": "publish"},
     "apps.social.tasks.generate_daily_factory_schedules_task": {"queue": "publish"},
@@ -214,7 +214,7 @@ CELERY_TASK_ROUTES = {
     "apps.social.tasks.reconcile_youtube_schedules_task": {"queue": "publish"},
     "apps.social.tasks.upload_thumbnails_after_batch_task": {"queue": "publish"},
     "apps.social.tasks.cleanup_posted_media_task": {"queue": "processing"},
-    # Processamento pesado fica na fila padrão de processamento
+    # Heavy processing stays on the default processing queue
     "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": "processing"},
     "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": "processing"},
     "apps.jobs.tasks.process_job": {"queue": "processing"},
@@ -226,13 +226,13 @@ CELERY_TASK_ROUTES = {
 # FFmpeg
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")
-# libx264 (CPU): CRF menor = melhor qualidade (ficheiro maior); preset mais lento = melhor compressão (mais tempo).
+# libx264 (CPU): lower CRF = better quality (larger file); slower preset = better compression (more time).
 FFMPEG_LIBX264_CRF = int(os.getenv("FFMPEG_LIBX264_CRF", "20"))
 FFMPEG_LIBX264_PRESET = os.getenv("FFMPEG_LIBX264_PRESET", "veryfast")
-# Queima de legendas (subtitles filter): omissão = mesmo CRF/preset do pipeline; evita defaults do libx264.
+# Subtitle burn (subtitles filter): omit = same CRF/preset as pipeline; avoids libx264 defaults.
 FFMPEG_LIBX264_BURN_CRF = int(os.getenv("FFMPEG_LIBX264_BURN_CRF", str(FFMPEG_LIBX264_CRF)))
 FFMPEG_LIBX264_BURN_PRESET = os.getenv("FFMPEG_LIBX264_BURN_PRESET", FFMPEG_LIBX264_PRESET)
-# Overlay lateral em vídeo longo: passo sensível a artefactos — padrão mais pesado (slow + CRF 16).
+# Side overlay on long video: step sensitive to artifacts — heavier default (slow + CRF 16).
 FFMPEG_LIBX264_OVERLAY_LONG_CRF = int(os.getenv("FFMPEG_LIBX264_OVERLAY_LONG_CRF", "16"))
 FFMPEG_LIBX264_OVERLAY_LONG_PRESET = os.getenv("FFMPEG_LIBX264_OVERLAY_LONG_PRESET", "slow")
 
@@ -247,21 +247,21 @@ REST_FRAMEWORK = {
     ],
 }
 
-# Simple JWT - token válido por 1 dia
+# Simple JWT — access token valid for 1 day
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
-# CORS - React em desenvolvimento roda em localhost:5173
-# Para acesso de outro PC na rede: defina FRONTEND_URL=http://SEU_IP:5173 no .env
+# CORS — React dev server on localhost:5173
+# For access from another machine on the LAN: set FRONTEND_URL=http://YOUR_IP:5173 in .env
 _cors_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _frontend_url = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
 if _frontend_url and _frontend_url not in _cors_origins:
     _cors_origins.append(_frontend_url)
 CORS_ALLOWED_ORIGINS = _cors_origins
 
-# Reduz ruído no Celery: libs Google (file_cache, Refreshing credentials) em WARNING
+# Reduce Celery log noise: Google libs (file_cache, Refreshing credentials) at WARNING
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

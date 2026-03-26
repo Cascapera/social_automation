@@ -1,4 +1,4 @@
-"""Testes do app cuts."""
+"""Cuts app model tests."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Testes de criptografia de segredos (Fernet)."""
+"""Secret encryption tests (Fernet)."""
 
 from __future__ import annotations
 

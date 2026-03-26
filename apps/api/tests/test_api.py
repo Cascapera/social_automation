@@ -1,4 +1,4 @@
-"""Testes de integração da API REST (registro, JWT, recursos autenticados)."""
+"""REST API integration tests (registration, JWT, authenticated resources)."""
 
 from __future__ import annotations
 

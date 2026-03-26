@@ -1,4 +1,4 @@
-"""Testes das ações sobre jobs (arquivar, deletar, pending posts)."""
+"""Job action tests (archive, delete, pending posts)."""
 
 from __future__ import annotations
 

@@ -1,17 +1,17 @@
-# Arquitetura — Social Automation
+# Architecture — Social Automation
 
-Visão de alto nível para onboarding e revisão técnica. Detalhe de negócio permanece nos modelos e no código.
+High-level view for onboarding and technical review. Business detail stays in models and code.
 
-## Visão em camadas
+## Layered view
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Frontend (React + Vite) — dashboard, chamadas REST + JWT   │
+│  Frontend (React + Vite) — dashboard, REST + JWT calls      │
 └────────────────────────────┬────────────────────────────────┘
                              │ HTTPS
 ┌────────────────────────────▼────────────────────────────────┐
-│  Django — REST API (/api), admin, URLs de callback OAuth      │
-│  Autenticação: SimpleJWT + sessão onde aplicável             │
+│  Django — REST API (/api), admin, OAuth callback URLs        │
+│  Authentication: SimpleJWT + session where applicable        │
 └──────────────┬──────────────────────────────┬──────────────┘
                │                                │
      ┌─────────▼─────────┐            ┌─────────▼─────────┐
@@ -21,45 +21,45 @@ Visão de alto nível para onboarding e revisão técnica. Detalhe de negócio p
                                       └─────────┬─────────┘
                                                 │
                     ┌───────────────────────────┴───────────────────────────┐
-                    │  Celery workers (filas dedicadas — ver ADR-0001)       │
-                    │  processing: FFmpeg, Whisper, auto cuts, jobs          │
-                    │  publish: agendamentos, post APIs, reconciliação YT      │
+                    │  Celery workers (dedicated queues — see ADR-0001)       │
+                    │  processing: FFmpeg, Whisper, auto cuts, jobs           │
+                    │  publish: scheduling, social APIs, YouTube reconciliation│
                     └─────────────────────────────────────────────────────────┘
 ```
 
-**Armazenamento de ficheiros:** `MEDIA_ROOT` (ex.: vídeos exportados, cortes, thumbnails). Em Docker costuma ser volume montado.
+**File storage:** `MEDIA_ROOT` (e.g. exported videos, cuts, thumbnails). In Docker this is usually a mounted volume.
 
-## Fluxo principal (happy path)
+## Main flow (happy path)
 
-1. **Configuração:** utilizador regista-se via API, cria *Factory*, *Brands*, credenciais YouTube / canais de busca.
-2. **Ingestão:** vídeo entra por upload, URL ou *auto-fetch* (yt-dlp + políticas de idade/views no modelo).
-3. **Processamento pesado (fila `processing`):**
-   - *Jobs* manuais: cortes, concatenação, legendas (Whisper + queima FFmpeg).
-   - *Auto cuts:* transcrição, análise LLM, sugestões, render de cortes.
-4. **Inventário e agendamento:** cortes prontos entram no modelo de inventário; *scheduler* diário (ex. 19h) e *beat* geram/atualizam `ScheduledPost`.
-5. **Publicação (fila `publish`):** verificação de posts agendados, upload para YouTube / Upload-Post, reconciliação com a API do YouTube.
+1. **Setup:** user registers via API, creates *Factory*, *Brands*, YouTube credentials / search channels.
+2. **Ingestion:** video enters via upload, URL, or *auto-fetch* (yt-dlp + age/view policies on the model).
+3. **Heavy work (`processing` queue):**
+   - Manual *jobs:* cuts, concatenation, subtitles (Whisper + FFmpeg burn).
+   - *Auto cuts:* transcription, LLM analysis, suggestions, cut rendering.
+4. **Inventory and scheduling:** ready cuts enter the inventory model; daily *scheduler* (e.g. 19:00) and *beat* create/update `ScheduledPost`.
+5. **Publishing (`publish` queue):** scheduled post checks, upload to YouTube / Upload-Post, reconciliation with the YouTube API.
 
-O **Celery Beat** (`config/celery.py`) dispara tarefas periódicas: check de posts, reconciliação YouTube, geração diária de agendas, *auto-fetch* em intervalos definidos.
+**Celery Beat** (`config/celery.py`) runs periodic tasks: post checks, YouTube reconciliation, daily schedule generation, *auto-fetch* at configured intervals.
 
-## Apps Django (responsabilidade)
+## Django apps (responsibility)
 
-| App | Papel |
-|-----|--------|
-| `apps.api` | ViewSets REST, serializers, contrato HTTP |
-| `apps.brands` | Factory, Brand, ativos, OAuth por marca |
-| `apps.mediahub` | `SourceVideo` (origens de edição) |
-| `apps.cuts` | Cortes derivados do source |
-| `apps.jobs` | Jobs de edição, outputs, agendamentos, inventário |
-| `apps.auto_cuts` | Pipeline IA: análise, sugestões, cortes automáticos |
-| `apps.social` | Tasks de publicação, integrações YouTube, OAuth helpers |
+| App | Role |
+|-----|------|
+| `apps.api` | REST viewsets, serializers, HTTP contract |
+| `apps.brands` | Factory, Brand, assets, OAuth per brand |
+| `apps.mediahub` | `SourceVideo` (editing sources) |
+| `apps.cuts` | Cuts derived from source |
+| `apps.jobs` | Editing jobs, outputs, schedules, inventory |
+| `apps.auto_cuts` | AI pipeline: analysis, suggestions, automatic cuts |
+| `apps.social` | Publishing tasks, YouTube integrations, OAuth helpers |
 
-## O que ficou de fora deste documento
+## Out of scope for this document
 
-- Detalhe de cada *endpoint* HTTP — ver **[API.md](API.md)** (rotas, JWT, acções customizadas). OpenAPI/Swagger pode ser adicionado depois (ex. `drf-spectacular`).
-- Políticas exatas de *retry*, limites de API e segredos — variáveis em `.env.example` e código das tasks.
+- Detail of each HTTP *endpoint* — see **[API.md](API.md)** (routes, JWT, custom actions). OpenAPI/Swagger can be added later (e.g. `drf-spectacular`).
+- Exact *retry* policies, API limits, and secrets — variables in `.env.example` and task code.
 
 ## ADRs (Architecture Decision Records)
 
-Decisões estáveis e discutíveis ficam em [`docs/adr/`](adr/). Começar por:
+Stable, discussable decisions live in [`docs/adr/`](adr/). Start with:
 
-- [0001 — Filas Celery `processing` vs `publish`](adr/0001-celery-filas-processing-vs-publish.md)
+- [0001 — Celery queues `processing` vs `publish`](adr/0001-celery-queues-processing-vs-publish.md)

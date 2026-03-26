@@ -1,4 +1,4 @@
-# 🎬 Social Automation — Plataforma de Automação de Conteúdo Viral
+# 🎬 Social Automation — Viral Content Automation Platform
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Django](https://img.shields.io/badge/Django-5.2+-092E20?logo=django&logoColor=white)](https://djangoproject.com)
@@ -8,47 +8,49 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791?logo=postgresql&logoColor=white)](https://postgresql.org)
 [![CI](https://github.com/Cascapera/social_automation/actions/workflows/ci.yml/badge.svg)](https://github.com/Cascapera/social_automation/actions/workflows/ci.yml)
 
-> **Sistema enterprise de produção e distribuição automatizada de vídeos para redes sociais** — da transcrição com IA até a publicação agendada em YouTube, TikTok, Instagram e X.
+> **Enterprise-grade production and distribution of viral video for social networks** — from AI transcription to scheduled posting on YouTube, TikTok, Instagram, and X.
 
 ---
 
-## 📌 Destaques Técnicos
+## 📌 Highlights
 
-| Aspecto | Implementação |
-|---------|---------------|
-| **Arquitetura** | Monolito modular Django + Celery com filas dedicadas (processing × publish) |
-| **Escalabilidade** | Workers Celery separados, suporte a GPU (NVENC, Whisper), PostgreSQL com connection pooling |
-| **IA/ML** | Whisper (transcrição), Grok/OpenAI (análise viral), prompts otimizados para CTR |
-| **Integrações** | YouTube Data API v3, OAuth2 multi-conta, yt-dlp para ingestão |
-| **DevOps** | Docker Compose production-ready, healthchecks, migrações automatizadas |
-| **Segurança** | JWT (SimpleJWT), CORS configurado, credenciais por brand, variáveis de ambiente |
-| **Qualidade** | GitHub Actions (Ruff, `manage.py check`, pytest + cobertura, build do frontend), Dependabot |
-
----
-
-## Qualidade e testes
-
-- **CI**: workflow em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — lint com **Ruff**, verificação do Django, **pytest** com cobertura mínima de 70% nos módulos incluídos na métrica (modelos, `job_actions`, descrição YouTube, criptografia de segredos, URLs, etc.; exclui views/tasks pesadas de integração).
-- **Variáveis de teste**: `social_automation/settings_test.py` + flag de linha de comando `--ds=...` (ver `pyproject.toml`) garantem **SQLite** nos testes mesmo se existir `DATABASE_URL` no ambiente.
-- **Desenvolvimento**: `pip install -r requirements-dev.txt` e `pytest` / `ruff check .` na raiz do projeto.
-- **Configuração**: copie [`.env.example`](.env.example) para `.env` e preencha; **nunca** commite `.env` nem dumps de banco.
+| Area | Implementation |
+|------|----------------|
+| **Architecture** | Modular Django monolith + Celery with dedicated queues (processing × publish) |
+| **Scalability** | Separate Celery workers, GPU support (NVENC, Whisper), PostgreSQL with connection pooling |
+| **AI/ML** | Whisper (transcription), Grok/OpenAI (viral analysis), CTR-optimized prompts |
+| **Integrations** | YouTube Data API v3, multi-account OAuth2, yt-dlp for ingestion |
+| **DevOps** | Production-ready Docker Compose, healthchecks, automated migrations |
+| **Security** | JWT (SimpleJWT), configured CORS, per-brand credentials, environment variables |
+| **Quality** | GitHub Actions (Ruff, `manage.py check`, pytest + coverage, frontend build), Dependabot |
 
 ---
 
-## 🎯 O que este projeto resolve
+## Quality and tests
 
-Produção de conteúdo em escala para **factories de vídeos** — empresas que operam múltiplos canais (YouTube, Shorts, TikTok, Instagram, X) a partir de um único fluxo:
+- **CI**: workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — **Ruff** lint, Django checks, **pytest** with coverage (minimum 70% on included modules: models, `job_actions`, YouTube description, secret encryption, URLs, etc.; excludes heavy integration views/tasks).
+- **Test settings**: `social_automation/settings_test.py` + CLI `--ds=...` (see `pyproject.toml`) force **SQLite** in tests even when `DATABASE_URL` is set in the environment.
+- **Development**: `pip install -r requirements-dev.txt` then `pytest` / `ruff check .` from the project root.
+- **Configuration**: copy [`.env.example`](.env.example) to `.env` and fill in values; **never** commit `.env` or database dumps.
 
-1. **Ingestão** — Upload, URL do YouTube ou busca automática em canais configurados  
-2. **Transcrição** — Whisper (faster-whisper) com suporte a GPU  
-3. **Análise IA** — LLM identifica trechos virais, sugere títulos, hooks e thumbnails  
-4. **Edição** — Pipeline FFmpeg: cortes, reenquadramento 9:16, intro/outro, legendas queimadas  
-5. **Agendamento** — Scheduler diário por factory, slots por brand, timezone-aware  
-6. **Publicação** — YouTube (Shorts + Longos), TikTok, Instagram, X via APIs e OAuth  
+**Language policy:** backend code, operator logs, comments, and technical docs are in **English**. The **React UI** stays in **Portuguese** (`frontend/`). Strings persisted or returned for user-visible errors (e.g. `progress_message`, `last_error`, OAuth hints) may stay in **Portuguese** where they surface in the app.
 
 ---
 
-## 🏗️ Arquitetura do Sistema
+## 🎯 What this project solves
+
+Scaled content production for **video factories** — companies running multiple channels (YouTube, Shorts, TikTok, Instagram, X) from one pipeline:
+
+1. **Ingestion** — Upload, YouTube URL, or automatic fetch from configured channels  
+2. **Transcription** — Whisper (faster-whisper) with optional GPU  
+3. **AI analysis** — LLM finds viral segments, suggests titles, hooks, and thumbnails  
+4. **Editing** — FFmpeg pipeline: cuts, 9:16 reframing, intro/outro, burned subtitles  
+5. **Scheduling** — Daily factory scheduler, per-brand slots, timezone-aware  
+6. **Publishing** — YouTube (Shorts + long-form), TikTok, Instagram, X via APIs and OAuth  
+
+---
+
+## 🏗️ System architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -66,11 +68,11 @@ Produção de conteúdo em escala para **factories de vídeos** — empresas que
           ▼                             ▼                             ▼
 ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
 │  CELERY WORKER   │         │ CELERY WORKER    │         │   CELERY BEAT     │
-│  (processing)    │         │ (publish)        │         │   (scheduler)     │
-│  • Jobs FFmpeg   │         │ • Check posts    │         │ • 19h: agenda     │
-│  • Auto Cuts     │         │ • Upload YT     │         │ • 15min: fetch    │
-│  • Whisper       │         │ • Reconcile     │         │ • 1min: posts      │
-│  • Subtitles     │         │ • Thumbnails     │         │ • 4h: cleanup     │
+│  (processing)    │         │ (publish)        │         │   (scheduler)   │
+│  • Jobs FFmpeg   │         │ • Check posts    │         │ • 19h: schedule │
+│  • Auto Cuts     │         │ • Upload YT      │         │ • 15min: fetch  │
+│  • Whisper       │         │ • Reconcile      │         │ • 1min: posts   │
+│  • Subtitles     │         │ • Thumbnails     │         │ • 4h: cleanup   │
 └────────┬─────────┘         └────────┬─────────┘         └────────┬─────────┘
          │                            │                            │
          └────────────────────────────┼────────────────────────────┘
@@ -82,66 +84,66 @@ Produção de conteúdo em escala para **factories de vídeos** — empresas que
 
 ---
 
-## 📦 Stack Tecnológica
+## 📦 Technology stack
 
-| Camada | Tecnologias |
-|--------|-------------|
+| Layer | Technologies |
+|-------|----------------|
 | **Backend** | Django 5.2, Django REST Framework, SimpleJWT, django-celery-results |
-| **Filas** | Celery 5.3, Redis 7 |
-| **Banco** | PostgreSQL 16 (produção) / SQLite (dev) |
-| **IA** | faster-whisper, OpenAI API, Grok (xAI) |
-| **Mídia** | FFmpeg, yt-dlp, Pillow |
-| **Integrações** | Google API (YouTube Data v3), OAuth2 |
-| **Frontend** | React 18, Vite 5, React Router |
+| **Queues** | Celery 5.3, Redis 7 |
+| **Database** | PostgreSQL 16 (production) / SQLite (dev) |
+| **AI** | faster-whisper, OpenAI API, Grok (xAI) |
+| **Media** | FFmpeg, yt-dlp, Pillow |
+| **Integrations** | Google API (YouTube Data v3), OAuth2 |
+| **Frontend** | React 18, Vite, React Router |
 | **Infra** | Docker, Docker Compose |
 
 ---
 
-## 🚀 Funcionalidades Principais
+## 🚀 Main features
 
-### Auto Cuts (IA)
-- Transcrição automática com **Whisper** (CPU/GPU)
-- Análise de viralidade com **LLM** (Grok/OpenAI)
-- Sugestão de cortes curtos (Shorts) e longos (YouTube)
-- Thumbnails automáticas com fontes e cores customizáveis
-- Modos: viral, **viral longo** (shorts 90–160s), educacional, PT, EN, tradução EN→PT
-- Reenquadramento vertical: zoom/crop ou frame centralizado
+### Auto Cuts (AI)
+- Automatic transcription with **Whisper** (CPU/GPU)
+- Virality analysis with **LLM** (Grok/OpenAI)
+- Short (Shorts) and long (YouTube) cut suggestions
+- Auto thumbnails with configurable fonts and colors
+- Modes: viral, **viral long** (shorts 90–160s), educational, PT, EN, EN→PT translation
+- Vertical reframing: zoom/crop or centered frame
 
-### Jobs de Edição
-- Pipeline FFmpeg: cortes, concatenação, transições (fade, wipe, dissolve)
-- Intro/outro por brand
-- Legendas queimadas (Whisper + estilização)
-- Suporte a **NVENC** (aceleração GPU)
-- Export para múltiplas plataformas
+### Editing jobs
+- FFmpeg pipeline: cuts, concatenation, transitions (fade, wipe, dissolve)
+- Per-brand intro/outro
+- Burned subtitles (Whisper + styling)
+- **NVENC** support (GPU acceleration)
+- Export for multiple platforms
 
-### Factory & Brands
-- **Factory**: unidade de produção com timezone, horários de agendamento
-- **Brands**: canais por tema (Negócios, Psicologia, Histórias, Polêmicas, Comédia)
-- **Auto-fetch**: busca automática em canais YouTube configurados
-- Políticas: idade mínima do vídeo, views mínimas, deduplicação
+### Factory & brands
+- **Factory**: production unit with timezone and scheduling windows
+- **Brands**: channels by theme (Business, Psychology, Stories, Controversy, Comedy)
+- **Auto-fetch**: automatic fetch from configured YouTube channels
+- Policies: minimum video age, minimum views, deduplication
 
-### Publicação
-- Agendamento diário automático (19h)
-- YouTube Shorts + Longos, TikTok, Instagram, X
-- OAuth por brand/canal
-- Reconcilição com YouTube (status real dos vídeos)
-- Retry com backoff, deduplicação por fingerprint
+### Publishing
+- Daily automatic scheduling (19:00 default)
+- YouTube Shorts + long-form, TikTok, Instagram, X
+- OAuth per brand/channel
+- YouTube reconciliation (real video status)
+- Retry with backoff, deduplication by fingerprint
 
 ---
 
-## ⚙️ Pré-requisitos
+## ⚙️ Prerequisites
 
 - **Python 3.11+**
-- **FFmpeg** (com suporte a NVENC opcional para GPU)
-- **Redis** (para Celery)
-- **PostgreSQL** (opcional; SQLite para dev)
-- **Node.js 18+** (para o frontend)
+- **FFmpeg** (optional NVENC for GPU)
+- **Redis** (for Celery)
+- **PostgreSQL** (optional; SQLite for dev)
+- **Node.js 18+** (for the frontend)
 
 ---
 
-## 🛠️ Instalação Rápida
+## 🛠️ Quick install
 
-### 1. Clone e ambiente virtual
+### 1. Clone and virtual environment
 
 ```bash
 git clone <repo-url>
@@ -152,55 +154,55 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Variáveis de ambiente
+### 2. Environment variables
 
-Crie um arquivo `.env` na raiz do projeto e configure:
+Create a `.env` file at the project root:
 
 ```env
-DJANGO_SECRET_KEY=sua-chave-secreta
+DJANGO_SECRET_KEY=your-secret-key
 DJANGO_DEBUG=1
-DATABASE_URL=                    # vazio = SQLite
+DATABASE_URL=                    # empty = SQLite
 CELERY_BROKER_URL=redis://127.0.0.1:6379/0
 CELERY_RESULT_BACKEND=django-db
-OPENAI_API_KEY=sk-...            # para transcrição/análise
-XAI_API_KEY=xai-...              # Grok (opcional)
+OPENAI_API_KEY=sk-...            # transcription / analysis
+XAI_API_KEY=xai-...              # Grok (optional)
 # YouTube OAuth: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REDIRECT_URI
 
-# yt-dlp (download de vídeo para análise): se aparecer "Sign in / not a bot"
-# Docker: coloque o ficheiro em secrets/ (pasta ignorada pelo Git) e use o caminho dentro do contentor:
+# yt-dlp (video download for analysis): if you see "Sign in / not a bot"
+# Docker: put the file in secrets/ (gitignored) and use the path inside the container:
 # YTDLP_COOKIES_FILE=/app/secrets/youtube_cookies.txt
-# Fora do Docker (caminho absoluto no host):
+# Outside Docker (absolute path on host):
 # YTDLP_COOKIES_FILE=C:/Users/.../youtube_cookies.txt
-# Apenas worker no mesmo PC que o Chrome (não use no Docker):
+# Worker on same machine as Chrome only (not in Docker):
 # YTDLP_COOKIES_FROM_BROWSER=chrome
-# Exportar cookies: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
+# Export cookies: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
 ```
 
-### 3. Banco e migrações
+### 3. Database and migrations
 
 ```bash
 python manage.py migrate
 python manage.py createsuperuser
 ```
 
-### 4. Subir com Docker (recomendado)
+### 4. Run with Docker (recommended)
 
 ```bash
 docker compose up -d
-# Acesse: http://localhost:8000/admin
+# Open: http://localhost:8000/admin
 ```
 
-**Cookies do YouTube (yt-dlp) no Docker:** o `docker-compose` monta o projeto em `/app`. Crie a pasta `secrets/` na raiz (está no `.gitignore`), exporte os cookies no Chrome (extensão **Get cookies.txt LOCALLY** — ver [wiki yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)), guarde como `secrets/youtube_cookies.txt` e no `.env`:
+**YouTube cookies (yt-dlp) in Docker:** `docker-compose` mounts the project at `/app`. Create a `secrets/` folder at the repo root (gitignored), export cookies from Chrome (extension **Get cookies.txt LOCALLY** — see [yt-dlp wiki](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)), save as `secrets/youtube_cookies.txt`, and in `.env`:
 
 ```env
 YTDLP_COOKIES_FILE=/app/secrets/youtube_cookies.txt
 ```
 
-Reinicie o worker que faz download de vídeo (`docker compose restart celery`). `YTDLP_COOKIES_FROM_BROWSER` **não** é adequado dentro do container (não há perfil do Chrome lá); use sempre o ficheiro. Renove o `youtube_cookies.txt` quando o YouTube voltar a exigir login.
+Restart the worker that downloads video (`docker compose restart celery`). `YTDLP_COOKIES_FROM_BROWSER` is **not** suitable inside the container (no Chrome profile there); always use the file. Refresh `youtube_cookies.txt` when YouTube requires login again.
 
-**Desafio “n” / “Only images” / EJS:** o YouTube exige [EJS](https://github.com/yt-dlp/yt-dlp/wiki/EJS): (1) **`pip install "yt-dlp[default]"`** inclui o pacote **yt-dlp-ejs**; (2) a imagem Docker inclui **Deno** (runtime JS usado por omissão pelo yt-dlp). Reconstrua: `docker compose build --no-cache` e `docker compose up -d`. Com **cookies**, o yt-dlp ignora clientes `android/ios` — o código usa `web,mweb,tv_embedded`; pode ajustar com `YTDLP_YOUTUBE_PLAYER_CLIENTS`. Opcional: `YTDLP_JS_RUNTIMES=node` se preferir Node 20+ em vez de Deno.
+**“n” / “Only images” / EJS:** YouTube requires [EJS](https://github.com/yt-dlp/yt-dlp/wiki/EJS): (1) **`pip install "yt-dlp[default]"`** includes **yt-dlp-ejs**; (2) the Docker image includes **Deno** (default JS runtime for yt-dlp). Rebuild: `docker compose build --no-cache` and `docker compose up -d`. With **cookies**, yt-dlp ignores `android/ios` clients — the code uses `web,mweb,tv_embedded`; adjust with `YTDLP_YOUTUBE_PLAYER_CLIENTS`. Optional: `YTDLP_JS_RUNTIMES=node` if you prefer Node 20+ over Deno.
 
-### 5. Frontend (opcional)
+### 5. Frontend (optional)
 
 ```bash
 cd frontend
@@ -211,19 +213,19 @@ npm run dev
 
 ---
 
-## 📁 Estrutura do Projeto
+## 📁 Project structure
 
 ```
 social_automation/
 ├── apps/
 │   ├── api/              # REST API
-│   ├── auto_cuts/        # IA: transcrição, análise, sugestões
+│   ├── auto_cuts/        # AI: transcription, analysis, suggestions
 │   ├── brands/           # Factory, Brand, SearchChannel, OAuth
-│   ├── cuts/             # Cortes manuais
-│   ├── jobs/             # Pipeline de edição, ScheduledPost
+│   ├── cuts/             # Manual cuts
+│   ├── jobs/             # Editing pipeline, ScheduledPost
 │   ├── mediahub/         # SourceVideo
-│   └── social/           # Publicação, YouTube, tasks de agendamento
-├── config/               # Celery app e beat_schedule
+│   └── social/           # Publishing, YouTube, scheduling tasks
+├── config/               # Celery app and beat_schedule
 ├── social_automation/    # Settings, URLs
 ├── frontend/             # React + Vite
 ├── docker-compose.yml
@@ -233,41 +235,44 @@ social_automation/
 
 ---
 
-## 🔧 Comandos Úteis
+## 🔧 Useful commands
 
-| Comando | Descrição |
-|---------|-----------|
-| `python manage.py runserver` | Inicia o servidor Django |
-| `start_celery.bat` | Worker de processamento (jobs, auto cuts) |
-| `start_celery_publish.bat` | Worker de publicação (YouTube, Upload Post) |
-| `start_celery_beat.bat` | Scheduler (agendamentos) |
-| `celery -A config worker -l INFO -Q processing` | Worker processing (Linux) |
-| `celery -A config worker -l INFO -Q publish` | Worker publish (Linux) |
-| `celery -A config beat -l INFO` | Scheduler (agendamentos) |
-| `python manage.py run_scheduled_posts_now` | Força publicação imediata |
-| `python manage.py fix_youtube_posted_status` | Reconcilia status no YouTube |
-
----
-
-## 📐 Decisões de Arquitetura
-
-Documentação mais detalhada: **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** (visão em camadas e fluxo), **[`docs/API.md`](docs/API.md)** (REST, JWT, rotas e acções) e **[ADRs em `docs/adr/`](docs/adr/)** (decisões registadas, ex.: filas Celery).
-
-- **Filas separadas**: `processing` (pesado) e `publish` (leve) — evita que transcrição/render bloqueie agendamentos
-- **Factory/Brand**: modelo multi-tenant por unidade de negócio
-- **OAuth por brand**: credenciais isoladas por canal, fallback em ordem
-- **Deduplicação**: `ProcessedYoutubeVideo` e `upload_fingerprint` evitam reprocessamento e reenvio
-- **Idempotência**: `FactoryScheduleRun` por data evita duplicar agendamentos diários
+| Command | Description |
+|---------|-------------|
+| `python manage.py runserver` | Start Django dev server |
+| `start_celery.bat` | Processing worker (jobs, auto cuts) |
+| `start_celery_publish.bat` | Publish worker (YouTube, Upload Post) |
+| `start_celery_beat.bat` | Beat scheduler |
+| `celery -A config worker -l INFO -Q processing` | Processing worker (Linux) |
+| `celery -A config worker -l INFO -Q publish` | Publish worker (Linux) |
+| `celery -A config beat -l INFO` | Beat scheduler |
+| `python manage.py run_scheduled_posts_now` | Force immediate posting |
+| `python manage.py fix_youtube_posted_status` | Reconcile YouTube status |
 
 ---
 
-## 📄 Licença
+## 📐 Architecture decisions
 
-Projeto privado. Entre em contato para uso comercial.
+Further documentation: **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** (layers and flows), **[`docs/API.md`](docs/API.md)** (REST, JWT, routes and actions), and **[ADRs in `docs/adr/`](docs/adr/)** (recorded decisions, e.g. Celery queues).
+
+- **Separate queues**: `processing` (heavy) and `publish` (light) — prevents transcription/render from blocking scheduling
+- **Factory/Brand**: multi-tenant model per business unit
+- **OAuth per brand**: isolated credentials per channel, ordered fallback
+- **Deduplication**: `ProcessedYoutubeVideo` and `upload_fingerprint` avoid reprocessing and duplicate uploads
+- **Idempotency**: `FactoryScheduleRun` per date prevents duplicate daily schedules
 
 ---
 
-## 👤 Autor
+## 📄 License
 
-Desenvolvido com foco em **escalabilidade**, **manutenibilidade** e **boas práticas** de engenharia de software.
+Private project. Contact for commercial use.
 
+---
+
+## 👤 Author
+
+Built with a focus on **scalability**, **maintainability**, and **software engineering best practices**.
+
+---
+
+*README aimed at recruiters and technical leads — demonstrates Python backend, distributed architecture, applied AI, and API integrations.*

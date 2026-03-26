@@ -1,11 +1,11 @@
 """
-Reenquadramento vertical para cortes automáticos (16:9 → 9:16).
+Vertical reframing for automatic cuts (16:9 → 9:16).
 
-Duas opções:
-- frame_center: Enquadrar e centralizar (vídeo centralizado, bordas coloridas, logo/título/texto)
-- zoom_crop: Zoom e corte (preenche 80% da altura, 10% margem)
+Two modes:
+- frame_center: Letterbox and center (video centered, colored borders, logo/title/text)
+- zoom_crop: Zoom and crop (fills 80% height, 10% margin)
 
-Título e texto adicional: renderizados com Pillow para emojis coloridos (FFmpeg drawtext só monocromático).
+Title and extra text: rendered with Pillow for colored emojis (FFmpeg drawtext is monochrome only).
 """
 
 import logging
@@ -28,13 +28,13 @@ from apps.jobs.services.ffmpeg import (
 
 logger = logging.getLogger(__name__)
 
-# Frame vertical padrão (Shorts/Reels/TikTok)
+# Default vertical frame (Shorts/Reels/TikTok)
 OUTPUT_W = 1080
 OUTPUT_H = 1920
 
 
 def _is_emoji_char(c: str) -> bool:
-    """Verifica se o caractere é emoji (Unicode)."""
+    """Return True if character is an emoji (Unicode)."""
     if not c:
         return False
     code = ord(c)
@@ -46,13 +46,13 @@ def _is_emoji_char(c: str) -> bool:
         return True
     if 0x1FA00 <= code <= 0x1FA6F or 0x1F1E0 <= code <= 0x1F1FF:
         return True
-    if code == 0xFE0F:  # Variation selector (parte de sequência emoji)
+    if code == 0xFE0F:  # Variation selector (part of emoji sequence)
         return True
     return False
 
 
 def _get_text_emoji_runs(s: str) -> list[tuple[str, bool]]:
-    """Divide texto em runs (texto, emoji). Retorna [(run, is_emoji), ...]."""
+    """Split text into runs (text, emoji). Returns [(run, is_emoji), ...]."""
     if not s:
         return []
     runs = []
@@ -72,7 +72,7 @@ def _get_text_emoji_runs(s: str) -> list[tuple[str, bool]]:
 
 
 def _hex_to_pil_color(hex_color: str) -> tuple[int, int, int]:
-    """Converte #RRGGBB para (r, g, b)."""
+    """Convert #RRGGBB to (r, g, b)."""
     h = (hex_color or "#FFFFFF").strip().lstrip("#")
     if len(h) >= 6:
         return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
@@ -80,12 +80,12 @@ def _hex_to_pil_color(hex_color: str) -> tuple[int, int, int]:
 
 
 def _get_emoji_font_path() -> Path | None:
-    """Caminho da fonte de emoji colorido. Windows: Segoe UI Emoji."""
+    """Path to colored emoji font. Windows: Segoe UI Emoji."""
     if os.name == "nt":
         p = Path(os.environ.get("SystemRoot", "C:\\Windows")) / "Fonts" / "seguiemj.ttf"
         if p.exists():
             return p
-    # Linux: tentar Noto Color Emoji
+    # Linux: try Noto Color Emoji
     for path in [
         Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
         Path("/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf"),
@@ -96,7 +96,7 @@ def _get_emoji_font_path() -> Path | None:
 
 
 def _get_text_font_path() -> Path | None:
-    """Caminho da fonte para texto regular."""
+    """Path to regular text font."""
     if os.name == "nt":
         for name in ["segoeui.ttf", "arial.ttf"]:
             p = Path(os.environ.get("SystemRoot", "C:\\Windows")) / "Fonts" / name
@@ -117,13 +117,13 @@ def _render_text_overlay_pillow(
     text_color: str = "#FFFFFF",
 ) -> bool:
     """
-    Renderiza título e texto em PNG com emojis coloridos (Pillow).
-    Retorna True se gerou; False se fallback para drawtext.
+    Render title and text to PNG with colored emojis (Pillow).
+    Returns True if generated; False to fall back to drawtext.
     """
     emoji_font_path = _get_emoji_font_path()
     text_font_path = _get_text_font_path()
     if not emoji_font_path or not text_font_path:
-        logger.warning("Fontes para emoji colorido não encontradas; usando drawtext.")
+        logger.warning("Colored emoji fonts not found; using drawtext.")
         return False
 
     try:
@@ -132,7 +132,7 @@ def _render_text_overlay_pillow(
         text_font = ImageFont.truetype(str(text_font_path), font_size_title)
         text_font_small = ImageFont.truetype(str(text_font_path), font_size_text)
     except Exception as e:
-        logger.warning("Erro ao carregar fontes: %s", e)
+        logger.warning("Failed to load fonts: %s", e)
         return False
 
     img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
@@ -172,7 +172,7 @@ def _render_text_overlay_pillow(
 
 
 def _hex_to_ffmpeg_color(hex_color: str) -> str:
-    """Converte #RRGGBB para 0xRRGGBBAA (FFmpeg)."""
+    """Convert #RRGGBB to 0xRRGGBBAA (FFmpeg)."""
     hex_color = (hex_color or "#000000").strip().lstrip("#")
     if len(hex_color) == 6:
         return f"0x{hex_color}FF"
@@ -182,7 +182,7 @@ def _hex_to_ffmpeg_color(hex_color: str) -> str:
 
 
 def is_source_16_9(video_path: Path) -> bool:
-    """Verifica se o vídeo tem proporção ~16:9."""
+    """Return True if video is approximately 16:9."""
     info = ffprobe_video_info(video_path)
     w, h = info.get("width", 0), info.get("height", 0)
     if not w or not h:
@@ -192,14 +192,14 @@ def is_source_16_9(video_path: Path) -> bool:
 
 
 def is_source_horizontal(video_path: Path) -> bool:
-    """Verifica se o vídeo é horizontal (width > height). Usado para reenquadrar para vertical."""
+    """Return True if video is horizontal (width > height). Used before vertical reframe."""
     info = ffprobe_video_info(video_path)
     w, h = info.get("width", 0), info.get("height", 0)
     return w > 0 and h > 0 and w > h
 
 
 def _hex_to_drawtext_color(hex_color: str) -> str:
-    """Converte #RRGGBB para 0xRRGGBB (FFmpeg drawtext fontcolor)."""
+    """Convert #RRGGBB to 0xRRGGBB (FFmpeg drawtext fontcolor)."""
     h = (hex_color or "#FFFFFF").strip().lstrip("#")
     if len(h) == 6:
         return f"0x{h}"
@@ -207,23 +207,23 @@ def _hex_to_drawtext_color(hex_color: str) -> str:
 
 
 def _escape_drawtext(t: str) -> str:
-    r"""Escapa texto para FFmpeg drawtext: backslash, aspas e dois-pontos."""
+    r"""Escape text for FFmpeg drawtext: backslash, quotes, colons."""
     if not t:
         return ""
-    # : separa opções no FFmpeg; em texto precisa escapar com \:
+    # : separates options in FFmpeg; escape in text with \:
     return t.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
 
 
-# Fonte com emojis: fontfile no Windows (mais confiável que font=)
+# Emoji font: fontfile on Windows (more reliable than font=)
 def _get_emoji_font_opt() -> str:
-    """Retorna opção de fonte para drawtext (emojis). Windows: fontfile. Outros: font=."""
+    """Return font option for drawtext (emojis). Windows: fontfile. Others: font=."""
     if os.name == "nt":
         font_path = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Fonts", "seguiemj.ttf")
         if os.path.exists(font_path):
-            # FFmpeg aceita / no path no Windows
+            # FFmpeg accepts / in paths on Windows
             path_esc = font_path.replace("\\", "/").replace(":", "\\:")
             return f"fontfile='{path_esc}':"
-    return "font='Segoe UI Emoji':"  # Linux/macOS podem usar fontconfig
+    return "font='Segoe UI Emoji':"  # Linux/macOS may use fontconfig
 
 
 def _build_drawtext_filters(
@@ -237,8 +237,8 @@ def _build_drawtext_filters(
     text_color: str = "#FFFFFF",
 ) -> str:
     """
-    Constrói filtros drawtext para título e texto.
-    Usa fonte com emojis (Segoe UI Emoji no Windows).
+    Build drawtext filters for title and text.
+    Uses emoji-capable font (Segoe UI Emoji on Windows).
     """
     tc = _hex_to_drawtext_color(title_color)
     txc = _hex_to_drawtext_color(text_color)
@@ -270,12 +270,12 @@ def reformat_video_vertical(
     use_gpu: bool = False,
 ) -> None:
     """
-    Reenquadra vídeo horizontal para vertical 9:16.
+    Reframe horizontal video to vertical 9:16.
 
-    mode: "frame_center" ou "zoom_crop"
+    mode: "frame_center" or "zoom_crop"
     """
     if mode not in ("frame_center", "zoom_crop"):
-        raise ValueError(f"mode deve ser frame_center ou zoom_crop, recebido: {mode}")
+        raise ValueError(f"mode must be frame_center or zoom_crop, got: {mode}")
 
     bg = _hex_to_ffmpeg_color(background_color)
     fps = "30"
@@ -287,7 +287,7 @@ def reformat_video_vertical(
         next_idx = 1
 
         if mode == "frame_center":
-            # Corta 15% da lateral direita do vídeo original (remove painéis laterais)
+            # Crop 15% from right side of source (remove side panels)
             vf_base = (
                 f"[0:v]crop=iw*85/100:ih:0:0,"
                 f"scale={OUTPUT_W}:-2,"
@@ -295,7 +295,7 @@ def reformat_video_vertical(
                 f"fps={fps},format=yuv420p[v0]"
             )
         else:
-            # zoom_crop: corta 15% direita, preenche 80% altura, crop central
+            # zoom_crop: crop 15% right, fill 80% height, center crop
             fill_h = int(OUTPUT_H * 0.8)
             fill_w = int(fill_h * 16 / 9)
             vf_base = (
@@ -314,7 +314,7 @@ def reformat_video_vertical(
                 inputs += ["-i", str(logo_path)]
                 logo_idx = next_idx
                 next_idx += 1
-                # Logo canto sup esquerdo: 80x80 px, opacidade 80%, 40px margem topo e esquerda
+                # Logo top-left: 80x80 px, 80% opacity, 40px top/left margin
                 filter_parts.append(
                     f"[{logo_idx}:v]scale=80:80:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=0.8[logo];"
                     f"{current}[logo]overlay=40:40:format=auto[v1]"
@@ -323,8 +323,8 @@ def reformat_video_vertical(
 
             if title or custom_text:
                 y_title = 1400
-                y_text = y_title + 144  # ~100px abaixo do título para evitar sobreposição
-                # Tentar Pillow para emojis coloridos; fallback para drawtext
+                y_text = y_title + 144  # ~100px below title to avoid overlap
+                # Try Pillow for colored emojis; fallback to drawtext
                 overlay_png = tmppath / "title_overlay.png"
                 use_pillow = _render_text_overlay_pillow(
                     overlay_png,
@@ -362,7 +362,7 @@ def reformat_video_vertical(
             else:
                 filter_parts.append("[v0]scale=iw:ih[vout]")
         else:
-            # zoom_crop: marca d'água logo canto sup esquerdo (80% opacidade)
+            # zoom_crop: watermark logo top-left (80% opacity)
             if logo_path and logo_path.exists():
                 inputs += ["-i", str(logo_path)]
                 logo_idx = next_idx

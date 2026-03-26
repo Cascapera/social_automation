@@ -1,80 +1,80 @@
-# Debug: Crash/Travamento na GPU (Whisper)
+# Debug: GPU crash/hang (Whisper)
 
-Quando a transcrição trava com GPU mas funciona com CPU, siga estes passos para diagnosticar.
+When transcription hangs with GPU but works on CPU, follow these steps to diagnose.
 
-## Variáveis de ambiente (.env)
+## Environment variables (.env)
 
-| Variável | Valores | Descrição |
-|----------|---------|-----------|
-| `WHISPER_DEVICE` | `cpu` | Força CPU (evita crash em máquinas com pouca VRAM) |
-| `WHISPER_DEVICE` | `cuda` | Força GPU; se falhar, faz fallback para CPU |
-| `WHISPER_DEVICE` | (vazio) | Tenta CUDA primeiro, fallback para CPU em erro |
-| `WHISPER_DEBUG_GPU` | `1` | **Modo diagnóstico**: não faz fallback; relança exceção com traceback completo |
-| `WHISPER_MODEL` | `tiny`, `base`, `small`, `medium`, `large-v3` | Modelo Whisper. Vídeos curtos: default `large-v3`. Vídeos longos (chunked): default `small`. |
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `WHISPER_DEVICE` | `cpu` | Force CPU (avoids crash on low-VRAM machines) |
+| `WHISPER_DEVICE` | `cuda` | Force GPU; on failure, falls back to CPU |
+| `WHISPER_DEVICE` | (empty) | Try CUDA first, fall back to CPU on error |
+| `WHISPER_DEBUG_GPU` | `1` | **Diagnostic mode:** no fallback; re-raises with full traceback |
+| `WHISPER_MODEL` | `tiny`, `base`, `small`, `medium`, `large-v3` | Whisper model. Short videos: default `large-v3`. Long (chunked): default `small`. |
 
-Para **rodar com GPU e ver os erros** no Celery:
-1. Remova ou comente `WHISPER_DEVICE=cpu` no `.env` (ou defina `WHISPER_DEVICE=cuda`)
-2. Adicione `WHISPER_DEBUG_GPU=1` para não fazer fallback e ver o erro completo
-3. Reinicie o worker Celery e acompanhe os logs
+To **run with GPU and see errors** in Celery:
+1. Remove or comment `WHISPER_DEVICE=cpu` in `.env` (or set `WHISPER_DEVICE=cuda`)
+2. Add `WHISPER_DEBUG_GPU=1` to skip fallback and see the full error
+3. Restart the Celery worker and watch logs
 
-## 1. Teste isolado (fora do Celery)
+## 1. Isolated test (outside Celery)
 
-Rode a transcrição **sem** Celery para ver se o problema é específico do worker:
+Run transcription **without** Celery to see if the issue is worker-specific:
 
 ```powershell
-# Com GPU (vai travar se o problema for na transcrição)
+# With GPU (will hang if the problem is in transcription)
 python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.m4a --device cuda
 
-# Com CPU (deve funcionar)
+# With CPU (should work)
 python manage.py test_whisper_gpu storage/media/cortes_processo/1/chunk_001.m4a --device cpu
 ```
 
-Use um arquivo de áudio real (ex: um chunk de 10–18 min). Se tiver um job recente, os chunks estão em `storage/media/cortes_processo/<analysis_id>/`.
+Use a real audio file (e.g. a 10–18 min chunk). For a recent job, chunks live under `storage/media/cortes_processo/<analysis_id>/`.
 
-**Interpretação:**
-- Trava no teste isolado com GPU → problema no faster-whisper/CUDA
-- Funciona no teste isolado com GPU → problema provável no Celery + CUDA
+**Interpretation:**
+- Hangs in isolated test with GPU → issue in faster-whisper/CUDA
+- Works in isolated test with GPU → likely Celery + CUDA interaction
 
-## 2. Logs para localizar o travamento
+## 2. Logs to locate the hang
 
-Os logs indicam em que etapa parou:
+Logs show where it stopped:
 
-- `Whisper: carregando modelo X em CUDA...` → trava no carregamento
-- `Whisper: modelo carregado. Iniciando transcrição...` → trava na transcrição
+- `Whisper: loading model X on CUDA...` → hang loading model
+- `Whisper: model loaded. Starting transcription...` → hang during transcription
 
-Com as alterações de logging, o erro é registrado com traceback completo antes do fallback.
+With the current logging, errors are logged with full traceback before fallback.
 
-## 3. CUDA síncrono (melhor stack trace)
+## 3. Synchronous CUDA (clearer stack trace)
 
-Para obter um stack trace mais claro em caso de erro:
+For a clearer stack trace on error:
 
 ```powershell
 $env:CUDA_LAUNCH_BLOCKING = "1"
-python manage.py test_whisper_gpu caminho/arquivo.m4a --device cuda
+python manage.py test_whisper_gpu path/to/file.m4a --device cuda
 ```
 
-## 4. py-spy (stack trace com processo travado)
+## 4. py-spy (stack trace while process is stuck)
 
-Se o processo travar sem erro:
+If the process hangs with no error:
 
-1. Em outro terminal, descubra o PID do processo Python.
-2. Instale: `pip install py-spy`
-3. Execute: `py-spy dump --pid <PID>`
+1. In another terminal, find the Python process PID.
+2. Install: `pip install py-spy`
+3. Run: `py-spy dump --pid <PID>`
 
-Isso mostra em qual função o processo está parado.
+This shows which function the process is stuck in.
 
-## 5. Verificar uso da GPU
+## 5. Check GPU usage
 
-Enquanto o processo roda (ou trava):
+While the process runs (or hangs):
 
 ```powershell
 nvidia-smi
 ```
 
-Confira se há outros processos usando a GPU.
+Check whether other processes are using the GPU.
 
-## 6. Alternativas
+## 6. Alternatives
 
-- Usar CPU: `WHISPER_DEVICE=cpu` no `.env`
-- Usar modelo menor: `--model small` ou `medium` no teste
-- Atualizar driver NVIDIA e bibliotecas CUDA
+- Use CPU: `WHISPER_DEVICE=cpu` in `.env`
+- Use a smaller model: `--model small` or `medium` in the test
+- Update NVIDIA drivers and CUDA libraries

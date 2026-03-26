@@ -8,9 +8,9 @@ python_files = ["tests.py", "test_*.py"]
 addopts = [
   "--strict-markers",
   "-ra",
-  # Tem prioridade sobre DJANGO_SETTINGS_MODULE no ambiente (ex.: Docker/Postgres no .env)
+  # Overrides DJANGO_SETTINGS_MODULE in the environment (e.g. Docker/Postgres in .env)
   "--ds=social_automation.settings_test",
-  # Cobertura só nestes pacotes (pytest-cov ignora o resto do repo)
+  # Coverage only for these packages (pytest-cov ignores the rest of the repo)
   "--cov=apps.jobs.services.job_actions",
   "--cov=apps.social.services.youtube_description",
   "--cov=apps.social.services.secret_crypto",

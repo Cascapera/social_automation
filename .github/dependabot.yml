@@ -6,7 +6,7 @@ updates:
       interval: monthly
     open-pull-requests-limit: 5
 
-  # Um PR agregado evita vários CI em paralelo e conflitos de peer (ex.: react vs react-dom).
+  # One grouped PR avoids multiple parallel CI runs and peer dependency conflicts (e.g. react vs react-dom).
   - package-ecosystem: npm
     directory: /frontend
     schedule:

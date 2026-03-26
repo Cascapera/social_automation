@@ -1,4 +1,4 @@
-"""Geração e queima de legendas com Whisper e FFmpeg."""
+"""Subtitle generation and burn-in with Whisper and FFmpeg."""
 
 import logging
 import os
@@ -12,15 +12,15 @@ from apps.jobs.services.ffmpeg import ffprobe_video_info, run_cmd, video_encode_
 
 logger = logging.getLogger(__name__)
 
-# Fonte com suporte a emojis (Windows). Linux: Noto Color Emoji. macOS: Apple Color Emoji
+# Font with emoji support (Windows). Linux: Noto Color Emoji. macOS: Apple Color Emoji
 DEFAULT_FONT_EMOJI = "Segoe UI Emoji"
 
 
 def align_edited_to_original_words(edited_text: str, original_words: list[dict]) -> list[dict] | None:
     """
-    Alinha texto editado aos timestamps originais das palavras.
-    Preserva timestamps quando o usuário só altera pontuação ou pequenos detalhes.
-    Para mudanças maiores (mais/menos palavras), distribui proporcionalmente.
+    Align edited text to original word timestamps.
+    Preserves timestamps when the user only changes punctuation or small details.
+    For larger changes (more/fewer words), distributes time proportionally.
     """
     if not original_words:
         return None
@@ -33,14 +33,14 @@ def align_edited_to_original_words(edited_text: str, original_words: list[dict])
     total_dur = seg_end - seg_start
 
     if len(edited_tokens) == len(original_words):
-        # 1:1 – usa timestamps originais para cada token editado
+        # 1:1 — use original timestamps per edited token
         return [
             {"start": ow["start"], "end": ow["end"], "word": et}
             for et, ow in zip(edited_tokens, original_words, strict=True)
         ]
 
     if len(edited_tokens) > len(original_words):
-        # Mais tokens – distribui o tempo proporcionalmente pelo tamanho
+        # More tokens — spread time proportionally by length
         total_chars = sum(len(t) for t in edited_tokens) or 1
         result = []
         t = seg_start
@@ -54,7 +54,7 @@ def align_edited_to_original_words(edited_text: str, original_words: list[dict])
             t = end
         return result
 
-    # Menos tokens – agrupa timestamps
+    # Fewer tokens — group timestamps
     n_orig, n_edit = len(original_words), len(edited_tokens)
     result = []
     for i, tok in enumerate(edited_tokens):
@@ -69,7 +69,7 @@ def align_edited_to_original_words(edited_text: str, original_words: list[dict])
 
 
 def _transcribe_with_model(model, path: str, lang: str) -> list[dict]:
-    """Transcreve arquivo com modelo Whisper já carregado."""
+    """Transcribe file with an already-loaded Whisper model."""
     segments, _ = model.transcribe(
         path, language=lang, word_timestamps=True, without_timestamps=False
     )
@@ -90,12 +90,12 @@ def load_whisper_model(
     device: str | None = None,
 ):
     """
-    Carrega modelo Whisper uma vez. Reutilize para múltiplos arquivos (evita travamento na GPU).
-    Retorna (model, model_size). model_size: None = WHISPER_MODEL do .env.
+    Load Whisper model once. Reuse for multiple files (avoids GPU reload hangs).
+    Returns (model, model_size). model_size: None = WHISPER_MODEL from .env.
     """
     if model_size is None:
         model_size = os.getenv("WHISPER_MODEL", "large-v3").strip() or "large-v3"
-    logger.info("Whisper: importando faster_whisper...")
+    logger.info("Whisper: importing faster_whisper...")
     from faster_whisper import WhisperModel
 
     env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
@@ -107,14 +107,14 @@ def load_whisper_model(
         return WhisperModel(model_size, device=dev, compute_type=compute)
 
     logger.info(
-        "Whisper: device=%s (param=%s, env=%r), modelo=%s",
+        "Whisper: device=%s (param=%s, env=%r), model=%s",
         target_device, device, env_device or "(auto)", model_size,
     )
     try:
         if force_cpu:
-            logger.info("Whisper: carregando modelo %s em CPU...", model_size)
+            logger.info("Whisper: loading model %s on CPU...", model_size)
             return _load("cpu", "int8"), model_size
-        logger.info("Whisper: carregando modelo %s em CUDA (float16)...", model_size)
+        logger.info("Whisper: loading model %s on CUDA (float16)...", model_size)
         return _load("cuda", "float16"), model_size
     except (RuntimeError, OSError) as e:
         err_str = str(e).lower()
@@ -122,12 +122,12 @@ def load_whisper_model(
             x in err_str for x in
             ("cublas", "cuda", "dll", "cudnn", "out of memory", "cuda error")
         )
-        logger.exception("Whisper: ERRO ao carregar em %s - %s: %s", target_device, type(e).__name__, e)
+        logger.exception("Whisper: load error on %s - %s: %s", target_device, type(e).__name__, e)
         logger.info("Whisper: traceback:\n%s", traceback.format_exc())
         if debug_gpu:
             raise
         if is_cuda_error and not force_cpu:
-            logger.warning("Whisper: fallback para CPU (int8)")
+            logger.warning("Whisper: falling back to CPU (int8)")
             return _load("cpu", "int8"), model_size
         raise
 
@@ -141,21 +141,21 @@ def generate_subtitles(
     model=None,
 ) -> list[dict]:
     """
-    Transcreve o vídeo com faster-whisper e retorna segmentos.
-    Retorna: [{ "start": float, "end": float, "text": str, "words"?: [{ "start", "end", "word" }] }, ...]
+    Transcribe video with faster-whisper and return segments.
+    Returns: [{ "start": float, "end": float, "text": str, "words"?: [{ "start", "end", "word" }] }, ...]
 
-    model: se fornecido, reutiliza (evita recarregar entre chunks na GPU).
-    model_size/device: ignorados se model for fornecido.
+    model: if provided, reuse (avoids reload between chunks on GPU).
+    model_size/device: ignored if model is provided.
     """
     if model is not None:
-        logger.info("Whisper: reutilizando modelo. Transcrevendo %s...", video_path)
+        logger.info("Whisper: reusing model. Transcribing %s...", video_path)
         result = _transcribe_with_model(model, str(video_path), language)
-        logger.info("Whisper: transcrição concluída (%d segmentos)", len(result))
+        logger.info("Whisper: transcription done (%d segments)", len(result))
         return result
 
     if model_size is None:
         model_size = os.getenv("WHISPER_MODEL", "large-v3").strip() or "large-v3"
-    logger.info("Whisper: importando faster_whisper...")
+    logger.info("Whisper: importing faster_whisper...")
     from faster_whisper import WhisperModel
 
     env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
@@ -167,19 +167,19 @@ def generate_subtitles(
         return WhisperModel(model_size, device=dev, compute_type=compute)
 
     logger.info(
-        "Whisper: device=%s (param=%s, env=%r), modelo=%s",
+        "Whisper: device=%s (param=%s, env=%r), model=%s",
         target_device, device, env_device or "(auto)", model_size,
     )
     try:
         if force_cpu:
-            logger.info("Whisper: carregando modelo %s em CPU...", model_size)
+            logger.info("Whisper: loading model %s on CPU...", model_size)
             model = _load("cpu", "int8")
         else:
-            logger.info("Whisper: carregando modelo %s em CUDA (float16)...", model_size)
+            logger.info("Whisper: loading model %s on CUDA (float16)...", model_size)
             model = _load("cuda", "float16")
-        logger.info("Whisper: modelo carregado. Iniciando transcrição de %s...", video_path)
+        logger.info("Whisper: model loaded. Starting transcription of %s...", video_path)
         result = _transcribe_with_model(model, str(video_path), language)
-        logger.info("Whisper: transcrição concluída (%d segmentos)", len(result))
+        logger.info("Whisper: transcription done (%d segments)", len(result))
         return result
     except (RuntimeError, OSError) as e:
         err_str = str(e).lower()
@@ -188,23 +188,23 @@ def generate_subtitles(
             ("cublas", "cuda", "dll", "cudnn", "out of memory", "cuda error")
         )
         logger.exception(
-            "Whisper: ERRO ao usar %s - %s: %s",
+            "Whisper: error on %s - %s: %s",
             target_device, type(e).__name__, e,
         )
-        logger.info("Whisper: traceback completo:\n%s", traceback.format_exc())
+        logger.info("Whisper: full traceback:\n%s", traceback.format_exc())
         if debug_gpu:
             raise
         if is_cuda_error and not force_cpu:
-            logger.warning("Whisper: fallback para CPU (int8)")
+            logger.warning("Whisper: falling back to CPU (int8)")
             model = _load("cpu", "int8")
             result = _transcribe_with_model(model, str(video_path), language)
-            logger.info("Whisper: transcrição em CPU concluída (%d segmentos)", len(result))
+            logger.info("Whisper: CPU transcription done (%d segments)", len(result))
             return result
         raise
 
 
 def _sec_to_ass_tc(sec: float) -> str:
-    """Segundos para formato ASS: H:MM:SS.cc"""
+    """Seconds to ASS timecode: H:MM:SS.cc"""
     h = int(sec // 3600)
     m = int((sec % 3600) // 60)
     s = int(sec % 60)
@@ -219,9 +219,9 @@ def segments_to_ass_static_for_burn(
     style: dict,
 ) -> str:
     """
-    ASS estático para queima em vídeo horizontal (16:9).
-    PlayRes + Alignment=2 (base inferior) evitam legenda ao centro quando SRT+force_style
-    é mal interpretado pelo libass no filtro subtitles do FFmpeg.
+    Static ASS for burn-in on horizontal video (16:9).
+    PlayRes + Alignment=2 (bottom) avoid centered captions when SRT+force_style
+    is misinterpreted by libass in FFmpeg's subtitles filter.
     """
     font = style.get("font", DEFAULT_FONT_EMOJI)
     size = max(8, min(72, int(style.get("size", 24))))
@@ -250,13 +250,13 @@ def segments_to_ass_static_for_burn(
         start_tc = _sec_to_ass_tc(float(seg.get("start", 0)))
         end_tc = _sec_to_ass_tc(float(seg.get("end", 0)))
         safe_text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-        # {\an2} = base central (reforço; Style já Alignment=2)
+        # {\an2} = bottom center (redundant; Style already Alignment=2)
         lines.append(f"Dialogue: 0,{start_tc},{end_tc},Default,,0,0,0,,{{\\an2}}{safe_text}")
     return header + "\n".join(lines)
 
 
 def segments_to_srt(segments: list[dict]) -> str:
-    """Converte segmentos para formato SRT."""
+    """Convert segments to SRT format."""
     def sec_to_tc(sec: float) -> str:
         h = int(sec // 3600)
         m = int((sec % 3600) // 60)
@@ -277,8 +277,8 @@ def segments_to_srt(segments: list[dict]) -> str:
 
 def segments_to_ass_animated(segments: list[dict]) -> str:
     """
-    Converte segmentos com words para ASS com efeito de palavras acumulando.
-    Cada linha mostra o texto acumulado até aquela palavra, aparecendo no timestamp da palavra.
+    Convert segments with words to ASS with cumulative word highlighting.
+    Each line shows text accumulated up to that word, appearing at the word timestamp.
     """
     header = (
         "[Script Info]\n"
@@ -321,7 +321,7 @@ def segments_to_ass_animated(segments: list[dict]) -> str:
 
 
 def _hex_to_ass_color(hex_color: str) -> str:
-    """Converte #RRGGBB para &HAABBGGRR (ASS format)."""
+    """Convert #RRGGBB to &HAABBGGRR (ASS format)."""
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 6:
         r = int(hex_color[0:2], 16)
@@ -332,7 +332,7 @@ def _hex_to_ass_color(hex_color: str) -> str:
 
 
 def build_ffmpeg_force_style(style: dict | None) -> str:
-    """Constrói string force_style para FFmpeg."""
+    """Build force_style string for FFmpeg."""
     if not style:
         style = {}
     font = style.get("font", DEFAULT_FONT_EMOJI)
@@ -352,8 +352,8 @@ def build_ffmpeg_force_style(style: dict | None) -> str:
     )
 
 
-# Resolução de referência do ASS gerado a partir de SRT (libass usa 384x288 internamente).
-# Shorts verticais: escalar MarginV para essa base evita legenda “no meio” em 9:16.
+# Reference resolution for ASS generated from SRT (libass uses 384x288 internally).
+# Vertical shorts: scale MarginV to this base to avoid captions “in the middle” on 9:16.
 ASS_DEFAULT_PLAYRES_Y = 288
 
 
@@ -373,7 +373,7 @@ def _srt_tc_to_seconds(tc: str) -> float:
 
 
 def _parse_srt_to_segments(raw: str) -> list[dict]:
-    """Parse mínimo de SRT → [{start, end, text}, ...]."""
+    """Minimal SRT parse → [{start, end, text}, ...]."""
     segments: list[dict] = []
     raw = (raw or "").strip()
     if not raw:
@@ -407,7 +407,7 @@ def burn_subtitles(
     *,
     segments: list[dict] | None = None,
 ) -> None:
-    """Queima legendas no vídeo usando FFmpeg."""
+    """Burn subtitles into video using FFmpeg."""
     style = dict(style or {})
     video_w = 1920
     video_h = 1080
@@ -417,20 +417,20 @@ def burn_subtitles(
         video_h = int(info.get("height") or 1080)
         margin_desired = int(style.get("margin_v", 140))
         if video_w > video_h:
-            # Longos horizontais (16:9): margem em px do vídeo; não escalar para 288 —
-            # com original_size, libass alinha ao rodapé; escalar aqui empurrava a legenda ao centro.
+            # Horizontal long-form (16:9): margin in video px; do not scale to 288 —
+            # with original_size, libass aligns to footer; scaling here pushed caption to center.
             style["margin_v"] = max(24, margin_desired)
         else:
-            # Verticais (shorts): manter escala para PlayRes ~288
+            # Vertical (shorts): keep scale for PlayRes ~288
             style["margin_v"] = max(10, int(margin_desired * ASS_DEFAULT_PLAYRES_Y / video_h))
     except Exception:
         pass
 
     is_horizontal = video_w > video_h
-    # Longos 16:9: ASS com PlayRes + Alignment=2 — SRT+force_style no libass costuma ignorar alinhamento
-    # e colocar a legenda ao centro (meio do ecrã).
+    # Long-form 16:9: ASS with PlayRes + Alignment=2 — SRT+force_style in libass often ignores alignment
+    # and places caption in the center (middle of screen).
     if is_horizontal:
-        # Legendas animadas já vêm em .ass — não substituir por estático (preserva words/efeitos).
+        # Animated captions already in .ass — do not replace with static (preserves words/effects).
         if srt_path.suffix.lower() == ".ass":
             ass_str = str(srt_path.resolve()).replace("\\", "/")
             if ":" in ass_str:
@@ -444,7 +444,7 @@ def burn_subtitles(
                 except Exception:
                     segs = []
             if not segs:
-                raise RuntimeError("burn_subtitles: sem segmentos para vídeo horizontal")
+                raise RuntimeError("burn_subtitles: no segments for horizontal video")
             ass_text = segments_to_ass_static_for_burn(segs, video_w, video_h, style)
             ass_path = srt_path.with_suffix(".ass")
             ass_path.write_text(ass_text, encoding="utf-8")

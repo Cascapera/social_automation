@@ -1,4 +1,4 @@
-"""Testes da função pura de alinhamento de legendas."""
+"""Subtitle alignment pure-function tests."""
 
 from __future__ import annotations
 

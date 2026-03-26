@@ -1,33 +1,34 @@
-# Backup e Restauração PostgreSQL
+# PostgreSQL backup and restore
 
-O redirect `>` no PowerShell corrompe dumps binários (salva como UTF-16). Use os scripts.
+PowerShell redirect `>` corrupts binary dumps (saves as UTF-16). Use these scripts.
 
-## No PC de origem (gerar backup)
+## On the source machine (create backup)
 
 ```powershell
-cd c:\caminho\para\social_automation
+cd c:\path\to\social_automation
 .\scripts\backup_postgres.ps1
 ```
 
-Gera `backup_banco.dump` na raiz do projeto. Copie esse arquivo e a pasta `storage/media` para o outro PC.
+Creates `backup_banco.dump` at the project root. Copy that file and the `storage/media` folder to the other machine.
 
-## No PC de destino (restaurar)
+## On the destination machine (restore)
 
-1. Coloque `backup_banco.dump` na raiz do projeto
-2. Suba o PostgreSQL: `docker compose up -d postgres redis`
-3. Execute:
+1. Place `backup_banco.dump` at the project root
+2. Start PostgreSQL: `docker compose up -d postgres redis`
+3. Run:
 
 ```powershell
-cd c:\caminho\para\social_automation
+cd c:\path\to\social_automation
 .\scripts\restore_postgres.ps1
 ```
 
-4. Copie a pasta `storage/media` para o projeto
-5. Suba o restante: `docker compose up -d`
+4. Copy the `storage/media` folder into the project
+5. Start the rest: `docker compose up -d`
 
-## Parâmetros
+## Parameters
 
-Restaurar outro arquivo:
+Restore a different file:
+
 ```powershell
-.\scripts\restore_postgres.ps1 -backupFile "meu_backup.dump"
+.\scripts\restore_postgres.ps1 -backupFile "my_backup.dump"
 ```

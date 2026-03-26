@@ -1,14 +1,14 @@
 # PostgreSQL
 
-O projeto suporta **PostgreSQL** (recomendado para Celery com múltiplos workers) ou **SQLite** (desenvolvimento simples).
+The project supports **PostgreSQL** (recommended for Celery with multiple workers) or **SQLite** (simple development).
 
-## Por que PostgreSQL?
+## Why PostgreSQL?
 
-O SQLite bloqueia o banco inteiro em escritas. Com vários jobs Celery rodando ao mesmo tempo, isso pode gerar o erro `database is locked`. O PostgreSQL suporta escritas concorrentes sem esse problema.
+SQLite locks the entire database on writes. With several Celery jobs running at once, you may hit `database is locked`. PostgreSQL supports concurrent writes without that issue.
 
-## Usando PostgreSQL com Docker
+## Using PostgreSQL with Docker
 
-1. **Configure o `.env`** (opcional – há valores padrão):
+1. **Configure `.env`** (optional — defaults exist):
 
    ```
    POSTGRES_USER=postgres
@@ -16,60 +16,60 @@ O SQLite bloqueia o banco inteiro em escritas. Com vários jobs Celery rodando a
    POSTGRES_DB=social_automation
    ```
 
-2. **Suba os serviços**:
+2. **Start services:**
 
    ```bash
    docker compose up -d
    ```
 
-   O `docker-compose` define `DATABASE_URL` automaticamente para os serviços `web`, `celery`, `celery_publish` e `beat`, apontando para o PostgreSQL.
+   `docker-compose` sets `DATABASE_URL` automatically for `web`, `celery`, `celery_publish`, and `beat`, pointing at PostgreSQL.
 
-3. As migrações rodam na subida do `web` e criam as tabelas no PostgreSQL.
+3. Migrations run on `web` startup and create tables in PostgreSQL.
 
-## Migrando dados do SQLite para PostgreSQL
+## Migrating data from SQLite to PostgreSQL
 
-Se você já usa SQLite e quer migrar os dados:
+If you already use SQLite and want to migrate:
 
-1. **Subir o PostgreSQL vazio** (primeiro uso):
+1. **Start empty PostgreSQL** (first use):
 
    ```bash
    docker compose up -d postgres
    docker compose run --rm web python manage.py migrate --noinput
    ```
 
-2. **Exportar do SQLite** (com o projeto configurado para SQLite – sem `DATABASE_URL` no .env):
+2. **Export from SQLite** (with the project configured for SQLite — no `DATABASE_URL` in `.env`):
 
    ```bash
-   # Garanta que DATABASE_URL NÃO está no .env (ou use outro terminal sem Docker)
+   # Ensure DATABASE_URL is NOT in .env (or use another terminal without Docker)
    python manage.py dumpdata --natural-foreign --natural-primary -e contenttypes -e auth.Permission -o backup.json
    ```
 
-3. **Importar no PostgreSQL**:
+3. **Import into PostgreSQL:**
 
    ```bash
-   # Com DATABASE_URL apontando para o PostgreSQL (Docker)
+   # With DATABASE_URL pointing at PostgreSQL (Docker)
    docker compose run --rm web python manage.py loaddata backup.json
    ```
 
-   Ou, se estiver rodando localmente com PostgreSQL:
+   Or, if running locally against PostgreSQL:
 
    ```bash
    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/social_automation python manage.py loaddata backup.json
    ```
 
-## Rodando sem Docker
+## Running without Docker
 
-Para usar PostgreSQL sem Docker (PostgreSQL instalado localmente):
+To use PostgreSQL without Docker (local install):
 
-1. Crie o banco: `createdb social_automation`
-2. Adicione ao `.env`:
+1. Create the database: `createdb social_automation`
+2. Add to `.env`:
 
    ```
-   DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/social_automation
+   DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/social_automation
    ```
 
-3. Rode as migrações: `python manage.py migrate`
+3. Run migrations: `python manage.py migrate`
 
-## Voltar para SQLite
+## Switching back to SQLite
 
-Remova ou comente `DATABASE_URL` no `.env`. O projeto voltará a usar `db.sqlite3`.
+Remove or comment out `DATABASE_URL` in `.env`. The project will use `db.sqlite3` again.

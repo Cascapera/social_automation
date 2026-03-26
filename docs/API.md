@@ -1,25 +1,25 @@
-# API HTTP — Social Automation
+# HTTP API — Social Automation
 
-Referência para integrações e onboarding. **Contrato canónico:** código em `apps/api/` (viewsets, serializers). Este documento resume rotas e regras; campos exactos dos JSON estão nos serializers.
+Reference for integrations and onboarding. **Canonical contract:** code in `apps/api/` (viewsets, serializers). This document summarizes routes and rules; exact JSON fields are in the serializers.
 
-**Prefixo base:** `{ORIGIN}/api/`  
-Ex.: desenvolvimento `http://127.0.0.1:8000/api/`, produção conforme `ALLOWED_HOSTS` e HTTPS.
+**Base prefix:** `{ORIGIN}/api/`  
+E.g. development `http://127.0.0.1:8000/api/`, production per `ALLOWED_HOSTS` and HTTPS.
 
-**Formato:** `Content-Type: application/json` (exceto *uploads* multipart indicados abaixo).
+**Format:** `Content-Type: application/json` (except multipart *uploads* noted below).
 
 ---
 
-## Autenticação
+## Authentication
 
-A API usa **JWT** (SimpleJWT), por omissão com `IsAuthenticated` nos viewsets.
+The API uses **JWT** (SimpleJWT), by default with `IsAuthenticated` on viewsets.
 
-| Método | Caminho | Corpo / notas |
-|--------|---------|----------------|
+| Method | Path | Body / notes |
+|--------|------|----------------|
 | `POST` | `/api/auth/token/` | `{"username": "...", "password": "..."}` → `access`, `refresh` |
-| `POST` | `/api/auth/token/refresh/` | `{"refresh": "..."}` → novo `access` |
-| `POST` | `/api/register/` | Registo público: `username`, `password` (mín. 8), `email` opcional |
+| `POST` | `/api/auth/token/refresh/` | `{"refresh": "..."}` → new `access` |
+| `POST` | `/api/register/` | Public registration: `username`, `password` (min. 8), optional `email` |
 
-**Cabeçalho nas rotas protegidas:**
+**Header on protected routes:**
 
 ```http
 Authorization: Bearer <access>
@@ -27,159 +27,159 @@ Authorization: Bearer <access>
 
 ---
 
-## OAuth YouTube (callbacks)
+## YouTube OAuth (callbacks)
 
-Incluídas em `apps.api.urls` sob `/api/youtube/`:
+Included in `apps.api.urls` under `/api/youtube/`:
 
-| Caminho | Descrição |
-|---------|-----------|
-| `GET/POST` | `/api/youtube/connect/` | Início OAuth marca |
-| `GET` | `/api/youtube/callback/` | Callback OAuth |
-| … | `/api/youtube/factory-check-connect/`, `factory-check-callback/`, `pending-channels/`, `select-channel/` | Fluxos de *factory check* e canais pendentes |
+| Path | Description |
+|------|-------------|
+| `GET/POST` | `/api/youtube/connect/` | Brand OAuth start |
+| `GET` | `/api/youtube/callback/` | OAuth callback |
+| … | `/api/youtube/factory-check-connect/`, `factory-check-callback/`, `pending-channels/`, `select-channel/` | *Factory check* flows and pending channels |
 
-Detalhe de parâmetros: `apps/social/views.py`.
+Parameter detail: `apps/social/views.py`.
 
 ---
 
-## Recursos REST (router)
+## REST resources (router)
 
-O `DefaultRouter` expõe listagem e detalhe. Convenção:
+`DefaultRouter` exposes list and detail. Convention:
 
-- `GET /api/<recurso>/` — lista  
-- `POST /api/<recurso>/` — cria (onde permitido)  
-- `GET /api/<recurso>/{id}/` — detalhe  
-- `PATCH /api/<recurso>/{id}/` — actualização parcial  
-- `PUT` — só onde o viewset não restringe métodos  
-- `DELETE /api/<recurso>/{id}/` — remover (onde permitido)
+- `GET /api/<resource>/` — list  
+- `POST /api/<resource>/` — create (where allowed)  
+- `GET /api/<resource>/{id}/` — detail  
+- `PATCH /api/<resource>/{id}/` — partial update  
+- `PUT` — only where the viewset does not restrict methods  
+- `DELETE /api/<resource>/{id}/` — remove (where allowed)
 
-### Tabela de recursos (`apps/api/urls.py`)
+### Resource table (`apps/api/urls.py`)
 
-| Prefixo recurso | ViewSet | Notas |
+| Resource prefix | ViewSet | Notes |
 |-----------------|---------|--------|
-| `register` | Registo | Apenas **POST** (criação de utilizador) |
-| `factories` | Factory | **Sem DELETE**; GET, POST, PATCH |
-| `search-channels` | SearchChannel | Filtro comum: `?factory=` |
+| `register` | Registration | **POST** only (user creation) |
+| `factories` | Factory | **No DELETE**; GET, POST, PATCH |
+| `search-channels` | SearchChannel | Common filter: `?factory=` |
 | `brands` | Brand | `?factory=` |
-| `brand-assets` | BrandAsset | Upload multipart para ficheiros |
-| `social-accounts` | BrandSocialAccount | **GET, DELETE** apenas |
+| `brand-assets` | BrandAsset | Multipart upload for files |
+| `social-accounts` | BrandSocialAccount | **GET, DELETE** only |
 | `brand-youtube-credentials` | BrandYouTubeCredential | `?brand=` |
-| `sources` | SourceVideo | Vídeo fonte do utilizador |
-| `cuts` | Cut | Cortes; ver acções `upload` e *bulk* em `create` |
-| `jobs` | Job | Jobs de render; filtros `?brand=`, `?archived=` |
-| `scheduled-posts` | ScheduledPost | Agendamentos |
-| `video-inventory` | VideoInventoryItem | **Só leitura** + acções abaixo |
-| `factory-schedules` | FactoryPostingSchedule | **Só leitura** |
-| `posted-videos` | PostedVideoLog | **Só leitura** |
-| `auto-cuts` | AutoCutAnalysis | **Sem PUT/PATCH** no recurso principal; GET, POST, DELETE; `create` custom |
-| `auto-cut-suggestions` | AutoCutSuggestion | ViewSet fino: ver acções |
-| `auto-cut-cortes` | AutoCutCorte | GET, PATCH, POST, DELETE (sem PUT por padrão) |
+| `sources` | SourceVideo | User source video |
+| `cuts` | Cut | Cuts; see `upload` and *bulk* actions on `create` |
+| `jobs` | Job | Render jobs; filters `?brand=`, `?archived=` |
+| `scheduled-posts` | ScheduledPost | Schedules |
+| `video-inventory` | VideoInventoryItem | **Read-only** + actions below |
+| `factory-schedules` | FactoryPostingSchedule | **Read-only** |
+| `posted-videos` | PostedVideoLog | **Read-only** |
+| `auto-cuts` | AutoCutAnalysis | **No PUT/PATCH** on main resource; GET, POST, DELETE; custom `create` |
+| `auto-cut-suggestions` | AutoCutSuggestion | Thin viewset: see actions |
+| `auto-cut-cortes` | AutoCutCorte | GET, PATCH, POST, DELETE (no PUT by default) |
 
 ---
 
-## Acções customizadas (`@action`)
+## Custom actions (`@action`)
 
-Rotas sob `/api/<recurso>/{id}/` (ou `detail=False` na raiz do recurso). Métodos indicados.
+Routes under `/api/<resource>/{id}/` (or `detail=False` at resource root). Methods as indicated.
 
 ### Factory (`/api/factories/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `.../{id}/trigger-immediate-schedule/` | Agenda imediata; body opcional `target_date`, `brand_id` |
-| `GET` | `.../{id}/youtube-check-connect-url/` | URL OAuth para credenciais *YOUTUBE_CHECK_* |
+| `POST` | `.../{id}/trigger-immediate-schedule/` | Immediate schedule; optional body `target_date`, `brand_id` |
+| `GET` | `.../{id}/youtube-check-connect-url/` | OAuth URL for *YOUTUBE_CHECK_* credentials |
 
 ### Brand (`/api/brands/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `.../{id}/trigger-immediate-schedule/` | Idem agendamento por marca |
-| `GET` | `.../{id}/social_accounts/` | Lista contas sociais |
-| `GET` | `.../{id}/youtube_connect_url/` | URL OAuth YouTube (`?youtube_credential_id=` opcional) |
+| `POST` | `.../{id}/trigger-immediate-schedule/` | Same scheduling per brand |
+| `GET` | `.../{id}/social_accounts/` | List social accounts |
+| `GET` | `.../{id}/youtube_connect_url/` | YouTube OAuth URL (optional `?youtube_credential_id=`) |
 | `PATCH` | `.../{id}/youtube-description/` | `youtube_description_extra`, `youtube_made_for_kids` |
 
 ### Source (`/api/sources/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `.../{id}/extract_cuts/` | Body `cuts: [{start_tc, end_tc, name?, format?}]` — extrai cortes e remove o source |
+| `POST` | `.../{id}/extract_cuts/` | Body `cuts: [{start_tc, end_tc, name?, format?}]` — extracts cuts and removes source |
 
 ### Cuts (`/api/cuts/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `/api/cuts/upload/` | Multipart: upload de corte pronto |
+| `POST` | `/api/cuts/upload/` | Multipart: upload ready cut |
 
 ### Jobs (`/api/jobs/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `/api/jobs/upload/` | Multipart: vídeo pronto → job DONE com output |
-| `GET` | `.../{id}/download/` | Download do ficheiro exportado |
-| `POST` | `.../{id}/generate-subtitles/` | Inicia Whisper |
-| `PATCH` | `.../{id}/subtitles/` | Edita `segments` / `style` |
-| `POST` | `.../{id}/burn-subtitles/` | Queima legendas |
-| `POST` | `.../{id}/run/` | Enfileira `process_job` (Celery) |
+| `POST` | `/api/jobs/upload/` | Multipart: ready video → job DONE with output |
+| `GET` | `.../{id}/download/` | Download exported file |
+| `POST` | `.../{id}/generate-subtitles/` | Starts Whisper |
+| `PATCH` | `.../{id}/subtitles/` | Edit `segments` / `style` |
+| `POST` | `.../{id}/burn-subtitles/` | Burn subtitles |
+| `POST` | `.../{id}/run/` | Enqueues `process_job` (Celery) |
 
 ### Scheduled posts (`/api/scheduled-posts/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `.../{id}/reschedule/` | Reagendar falhos (`scheduled_at`) |
-| `POST` | `.../{id}/remove-awaiting/` | Remove agendamento + inventário associado |
+| `POST` | `.../{id}/reschedule/` | Reschedule failures (`scheduled_at`) |
+| `POST` | `.../{id}/remove-awaiting/` | Remove schedule + linked inventory |
 
 ### Video inventory (`/api/video-inventory/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `.../{id}/remove-awaiting/` | Remove item aguardando + mídias |
-| `POST` | `.../{id}/retry-posting/` | Reativa postagem (`scheduled_at` opcional) |
-| `GET` | `.../{id}/download-media/` | ZIP com vídeo, thumb e texto título/descrição |
-| `POST` | `.../{id}/mark-posted/` | Marca como postado manualmente |
+| `POST` | `.../{id}/remove-awaiting/` | Remove awaiting item + media |
+| `POST` | `.../{id}/retry-posting/` | Re-enable posting (optional `scheduled_at`) |
+| `GET` | `.../{id}/download-media/` | ZIP with video, thumb, title/description text |
+| `POST` | `.../{id}/mark-posted/` | Mark as posted manually |
 
-Filtros úteis na lista: `?factory=`, `?brand=`, `?status=`, `?video_type=SHORT|LONG`.
+Useful list filters: `?factory=`, `?brand=`, `?status=`, `?video_type=SHORT|LONG`.
 
-### Auto cuts — análise (`/api/auto-cuts/`)
+### Auto cuts — analysis (`/api/auto-cuts/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `/api/auto-cuts/upload-ready-cuts/` | Multipart: vários vídeos prontos (`files`, `brand`, `name`, …) |
-| `POST` | `/api/auto-cuts/reset-stuck/` | Marca análises presas como erro |
-| `POST` | `/api/auto-cuts/delete-stuck/` | Remove jobs presos e ficheiros |
-| `POST` | `.../{id}/finalizar/` | Finaliza cortes (corpo com opções de legenda, vertical, overlay, …) |
-| `POST` | `.../{id}/bulk-schedule/` | Agenda vários cortes numa janela temporal |
+| `POST` | `/api/auto-cuts/upload-ready-cuts/` | Multipart: multiple ready videos (`files`, `brand`, `name`, …) |
+| `POST` | `/api/auto-cuts/reset-stuck/` | Mark stuck analyses as error |
+| `POST` | `/api/auto-cuts/delete-stuck/` | Remove stuck jobs and files |
+| `POST` | `.../{id}/finalizar/` | Finalize cuts (body with subtitle, vertical, overlay options, …) |
+| `POST` | `.../{id}/bulk-schedule/` | Schedule multiple cuts in a time window |
 
 ### Auto cut suggestions (`/api/auto-cut-suggestions/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `DELETE` | `.../{id}/` | Remove sugestão |
-| `POST` | `.../{id}/create-cut/` | Resposta informativa (geração automática ainda limitada) |
+| `DELETE` | `.../{id}/` | Remove suggestion |
+| `POST` | `.../{id}/create-cut/` | Informational response (automatic generation still limited) |
 
 ### Auto cut cortes (`/api/auto-cut-cortes/`)
 
-| Método | Sufixo | Descrição |
+| Method | Suffix | Description |
 |--------|--------|------------|
-| `POST` | `.../{id}/schedule/` | Agenda um corte finalizado |
+| `POST` | `.../{id}/schedule/` | Schedule a finalized cut |
 
 ---
 
-## Erros e códigos
+## Errors and status codes
 
-- **`401` / `403`:** não autenticado ou sem permissão sobre o recurso.  
-- **`400`:** validação (campos em falta, estado inválido para a acção).  
-- **`404`:** recurso inexistente ou ficheiro em falta no disco.  
-- **`500` / **`503`:** erro interno ou serviço indisponível (ex.: OAuth não configurado no `.env`).
+- **`401` / `403`:** not authenticated or no permission on the resource.  
+- **`400`:** validation (missing fields, invalid state for the action).  
+- **`404`:** resource missing or file not on disk.  
+- **`500` / `503`:** internal error or service unavailable (e.g. OAuth not configured in `.env`).
 
-Corpos de erro costumam incluir chave `"error"` com mensagem legível.
-
----
-
-## Evolução: documentação máquina-legível
-
-Para **OpenAPI 3** (Swagger UI / Redoc) gerado a partir dos serializers, o passo típico em Django REST Framework é acrescentar **`drf-spectacular`** (ou equivalente) e expor `/api/schema/`. Não está ligado no repositório para manter dependências mínimas; pode ser uma melhoria futura quando a equipa quiser contratos versionados para clientes externos.
+Error bodies usually include an `"error"` key with a human-readable message.
 
 ---
 
-## Documentação relacionada
+## Evolution: machine-readable docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — visão de sistema e fluxos  
-- [README principal](../README.md) — variáveis de ambiente e execução local  
+For **OpenAPI 3** (Swagger UI / Redoc) generated from serializers, the typical Django REST Framework step is adding **`drf-spectacular`** (or equivalent) and exposing `/api/schema/`. It is not wired in this repo to keep dependencies minimal; it can be a future improvement when the team wants versioned contracts for external clients.
+
+---
+
+## Related documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system view and flows  
+- [Main README](../README.md) — environment variables and local run  

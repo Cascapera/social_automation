@@ -1,4 +1,4 @@
-"""Testes de serializers (validação e campos calculados)."""
+"""Serializer tests (validation and computed fields)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Helpers para credenciais YouTube (refresh de token)."""
+"""YouTube credential helpers (token refresh)."""
 import os
 from datetime import UTC
 
@@ -14,7 +14,7 @@ def get_credentials(
     youtube_credential: BrandYouTubeCredential | None = None,
     use_check_client: bool = False,
 ) -> Credentials:
-    """Retorna Credentials válidas, renovando access_token se expirado."""
+    """Return valid Credentials, refreshing access_token if expired."""
     brand = getattr(account, "brand", None)
     source = youtube_credential if youtube_credential is not None else brand
     source_secret = ""
@@ -27,8 +27,8 @@ def get_credentials(
             )
         except ValueError as exc:
             raise ValueError(
-                "Falha ao descriptografar client_secret do YouTube. "
-                "Verifique SOCIAL_ENCRYPTION_KEY."
+                "Failed to decrypt YouTube client_secret. "
+                "Check SOCIAL_ENCRYPTION_KEY."
             ) from exc
         source_client_id = str(
             getattr(source, "client_id", "")
@@ -64,10 +64,10 @@ def get_credentials(
         ],
         expiry=expiry,
     )
-    # Sem refresh_token não há como renovar automaticamente.
+    # Without refresh_token we cannot renew automatically.
     if not creds.refresh_token:
         raise ValueError("Conta YouTube sem refresh_token. Reconecte a conta no OAuth.")
-    # Renova quando expirado ou quando não temos token atual.
+    # Refresh when expired or when current token is missing.
     if creds.expired or not creds.token:
         creds.refresh(Request())
         token_source.access_token = creds.token

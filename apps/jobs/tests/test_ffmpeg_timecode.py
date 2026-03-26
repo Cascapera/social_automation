@@ -1,4 +1,4 @@
-"""Testes de utilitários FFmpeg (timecode)."""
+"""FFmpeg timecode utility tests."""
 
 from __future__ import annotations
 

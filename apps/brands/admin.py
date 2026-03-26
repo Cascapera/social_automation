@@ -110,11 +110,11 @@ class ProcessedYoutubeVideoAdmin(admin.ModelAdmin):
     list_display_links = ("youtube_video_id",)
 
     def has_delete_permission(self, request, obj=None):
-        """Não permite apagar: registros devem persistir para evitar reprocessamento."""
+        """Disallow delete: rows must persist to avoid reprocessing."""
         return False
 
     def has_add_permission(self, request):
-        """Adição é feita automaticamente pelo sistema."""
+        """Add is performed automatically by the system."""
         return False
 
 

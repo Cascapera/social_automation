@@ -1,4 +1,4 @@
-"""Testes da montagem de descrição YouTube (função pura + mocks)."""
+"""YouTube description assembly tests (pure function + mocks)."""
 
 from __future__ import annotations
 
