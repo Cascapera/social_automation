@@ -55,7 +55,7 @@ O **Celery Beat** (`config/celery.py`) dispara tarefas periódicas: check de pos
 
 ## O que ficou de fora deste documento
 
-- Detalhe de cada *endpoint* — usar `/api/` + serializers ou ferramenta OpenAPI se for exposto no futuro.
+- Detalhe de cada *endpoint* HTTP — ver **[API.md](API.md)** (rotas, JWT, acções customizadas). OpenAPI/Swagger pode ser adicionado depois (ex. `drf-spectacular`).
 - Políticas exatas de *retry*, limites de API e segredos — variáveis em `.env.example` e código das tasks.
 
 ## ADRs (Architecture Decision Records)
