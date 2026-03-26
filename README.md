@@ -251,6 +251,8 @@ social_automation/
 
 ## 📐 Decisões de Arquitetura
 
+Documentação mais detalhada: **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** (visão em camadas e fluxo) e **[ADRs em `docs/adr/`](docs/adr/)** (decisões registadas, ex.: filas Celery).
+
 - **Filas separadas**: `processing` (pesado) e `publish` (leve) — evita que transcrição/render bloqueie agendamentos
 - **Factory/Brand**: modelo multi-tenant por unidade de negócio
 - **OAuth por brand**: credenciais isoladas por canal, fallback em ordem
