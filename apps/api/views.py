@@ -229,6 +229,7 @@ class FactoryViewSet(viewsets.ModelViewSet):
                 target_date=target_date,
                 allow_rerun=True,
                 brand_id=brand_id,
+                enqueue_immediately=True,
             )
             return Response({
                 "created": result.get("created", 0),
@@ -383,6 +384,7 @@ class BrandViewSet(viewsets.ModelViewSet):
                 target_date=target_date,
                 allow_rerun=True,
                 brand_id=brand.id,
+                enqueue_immediately=True,
             )
             return Response({
                 "created": result.get("created", 0),
@@ -1892,6 +1894,11 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
         short_cortes = [c for c in finalized_qs if (getattr(c.suggestion, "cut_type", "") == "short")]
         long_cortes = [c for c in finalized_qs if (getattr(c.suggestion, "cut_type", "") == "long")]
 
+        # Janela efetiva = agora para o próximo ciclo do Beat enfileirar (mantém validação de start/end acima)
+        now = timezone.now()
+        start_at = now
+        end_at = now
+
         def build_times(start_dt, end_dt, count):
             if count <= 0:
                 return []
@@ -2093,14 +2100,15 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
         privacy_status = (request.data or {}).get("privacy_status") or "private"
         if privacy_status not in ("public", "private", "unlisted"):
             privacy_status = "private"
-        scheduled_at = parse_datetime(scheduled_raw or "")
-        if not scheduled_at:
-            return Response(
-                {"error": "scheduled_at inválido."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if timezone.is_naive(scheduled_at):
-            scheduled_at = timezone.make_aware(scheduled_at, timezone.get_current_timezone())
+        if scheduled_raw:
+            parsed = parse_datetime(str(scheduled_raw))
+            if not parsed:
+                return Response(
+                    {"error": "scheduled_at inválido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
 
         cut_type = getattr(corte.suggestion, "cut_type", "")
         platform = "YT" if cut_type == "short" else "YTB"
@@ -2114,6 +2122,9 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
             return Response(
                 {"created": False, "skipped": True, "message": "Este corte já possui agendamento para essa plataforma."}
             )
+
+        # Enfileira no próximo ciclo do Beat (scheduled_at <= now)
+        scheduled_at = timezone.now()
 
         post = ScheduledPost.objects.create(
             job=None,

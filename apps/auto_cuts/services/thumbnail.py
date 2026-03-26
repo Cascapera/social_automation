@@ -102,9 +102,12 @@ def _fit_text_into_box(
     max_height: int,
     initial_font_size: int,
     min_font_size: int,
+    *,
+    absolute_min_font_size: int = 8,
 ) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int]:
+    floor = max(8, absolute_min_font_size)
     font_size = max(min_font_size, initial_font_size)
-    while font_size >= min_font_size:
+    while font_size >= floor:
         font = _safe_font(preferred_font, font_size)
         lines = _wrap_text(draw, text, font, max_width)
         if not lines:
@@ -118,9 +121,9 @@ def _fit_text_into_box(
         if text_h <= max_height:
             return font, lines, line_spacing
         font_size -= 2
-    font = _safe_font(preferred_font, min_font_size)
+    font = _safe_font(preferred_font, floor)
     lines = _wrap_text(draw, text, font, max_width) or [text]
-    line_spacing = max(4, int(min_font_size * 0.2))
+    line_spacing = max(4, int(floor * 0.2))
     return font, lines, line_spacing
 
 
@@ -299,11 +302,22 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
             return min(THUMB_FALLBACK_SEC_IN_CUT, max(0.0, dur - 0.25))
 
         raw = corte.suggestion.raw_data or {}
-        thumb_text = (raw.get("thumbnail_text") or "").strip()
-        if not thumb_text:
-            fallback = (raw.get("suggested_title") or corte.suggestion.title or "").strip()
-            thumb_text = " ".join(fallback.split()[:4]).upper()[:28] or "DESTAQUE"
-        thumb_text = thumb_text.upper()
+        if is_short:
+            thumb_text = (raw.get("thumbnail_text") or "").strip()
+            if not thumb_text:
+                fallback = (raw.get("suggested_title") or corte.suggestion.title or "").strip()
+                thumb_text = " ".join(fallback.split()[:4]).upper()[:28] or "DESTAQUE"
+            thumb_text = thumb_text.upper()
+        else:
+            # Vídeo longo (16:9): texto da capa = título completo, na faixa inferior (~20%).
+            thumb_text = (
+                (raw.get("suggested_title") or raw.get("title_suggestion") or corte.suggestion.title or "")
+                .strip()
+            )
+            if not thumb_text:
+                thumb_text = (raw.get("thumbnail_text") or "").strip()
+            if not thumb_text:
+                thumb_text = "DESTAQUE"
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -384,8 +398,13 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
             text_padding_y = max(12, int(rect_h * 0.12))
             text_max_width = max(120, w - (2 * text_padding_x))
             text_max_height = max(24, rect_h - (2 * text_padding_y))
-            initial_font_size = max(26, int(w * 0.065))
-            min_font_size = max(14, int(w * 0.022))
+            if is_short:
+                initial_font_size = max(26, int(w * 0.065))
+                min_font_size = max(14, int(w * 0.022))
+            else:
+                # Título longo: começar um pouco menor e permitir reduzir mais para caber na faixa.
+                initial_font_size = max(22, min(int(w * 0.05), int(rect_h * 0.38)))
+                min_font_size = max(10, int(w * 0.014))
             font, lines, line_spacing = _fit_text_into_box(
                 draw=draw,
                 text=thumb_text,

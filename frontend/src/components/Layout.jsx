@@ -35,6 +35,7 @@ export default function Layout() {
     { to: '/gerar-cortes', label: 'Gerar cortes' },
     { to: '/editar-videos', label: 'Editar Vídeos' },
     { to: '/agendamento', label: 'Agendamento' },
+    { to: '/banco-videos', label: 'Banco de Vídeos' },
     { to: '/midias-marca', label: 'Mídias da marca' },
     { to: '/cortes-automaticos', label: 'Cortes Automáticos' },
     { to: '/contas', label: 'Contas' },

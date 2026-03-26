@@ -133,7 +133,8 @@ export default function BancoVideos() {
     [items],
   )
 
-  const needsContext = !factoryId && !brandId
+  const needsContext =
+    (viewMode === 'factory' && !factoryId) || (viewMode === 'brand' && !brandId)
 
   async function handleRemoveAwaiting(item) {
     if (!item?.id) return
@@ -230,7 +231,9 @@ export default function BancoVideos() {
 
       {needsContext && (
         <div className="form-error">
-          Selecione uma Factory ou uma Brand no menu lateral para visualizar o inventário.
+          {viewMode === 'factory'
+            ? 'Selecione uma factory no menu lateral para visualizar o inventário.'
+            : 'Selecione uma marca no menu lateral para visualizar o inventário.'}
         </div>
       )}
 
@@ -314,7 +317,7 @@ export default function BancoVideos() {
                   <table className="banco-table">
                     <thead>
                       <tr>
-                        <th>Brand</th>
+                        {viewMode === 'factory' && <th>Brand</th>}
                         <th>Tipo</th>
                         <th className="banco-titulo">Título</th>
                         <th>Score</th>
@@ -327,7 +330,9 @@ export default function BancoVideos() {
                     <tbody>
                       {awaitingItems.map((item) => (
                         <tr key={item.id}>
-                          <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
+                          {viewMode === 'factory' && (
+                            <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
+                          )}
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
                           <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>
@@ -400,7 +405,7 @@ export default function BancoVideos() {
                   <table className="banco-table">
                     <thead>
                       <tr>
-                        <th>Brand</th>
+                        {viewMode === 'factory' && <th>Brand</th>}
                         <th>Tipo</th>
                         <th className="banco-titulo">Título</th>
                         <th>Score</th>
@@ -411,7 +416,9 @@ export default function BancoVideos() {
                     <tbody>
                       {postedItems.map((item) => (
                         <tr key={item.id}>
-                          <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
+                          {viewMode === 'factory' && (
+                            <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
+                          )}
                           <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
                           <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
                           <td>{item.virality_score ?? '-'}</td>

@@ -64,6 +64,22 @@ def _build_slots_from_fixed_times(
     return sorted(slots)
 
 
+def _all_slots_for_day(
+    *,
+    brand: Brand,
+    day: date,
+    factory_tz: str,
+    slot_times: list[str],
+) -> list[datetime]:
+    """Todos os horários configurados do dia (ignora se já passaram). Usado com enqueue_immediately."""
+    slots: list[datetime] = []
+    for s in slot_times:
+        t = _parse_time_str(s)
+        if t is None:
+            continue
+        dt = _to_local_dt(factory_tz, day, t)
+        slots.append(dt)
+    return sorted(slots)
 
 
 def _order_with_source_diversity(items: list[VideoInventoryItem]) -> list[VideoInventoryItem]:
@@ -116,11 +132,15 @@ def generate_daily_schedule_for_factory(
     allow_rerun: bool = False,
     target_date: date | None = None,
     brand_id: int | None = None,
+    enqueue_immediately: bool = False,
 ) -> dict:
     """
     Gera agenda de postagens para uma factory.
     target_date: dia para o qual gerar os slots. Se None, usa o dia local atual.
     brand_id: quando informado, agenda apenas para essa brand (dentro da factory).
+    enqueue_immediately: se True (ex.: botão "agendamento imediato"), ScheduledPost fica com
+    scheduled_at = agora para o próximo ciclo do Beat enfileirar; mantém horários de slot em
+    FactoryPostingSchedule para deduplicação e calendário.
     """
     now_utc = now_utc or timezone.now()
     tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
@@ -158,20 +178,42 @@ def generate_daily_schedule_for_factory(
             long_slot_times = []
         if not long_slot_times:
             long_slot_times = DEFAULT_LONG_SLOTS
-        short_slots = _build_slots_from_fixed_times(
-            brand=brand,
-            day=local_day,
-            factory_tz=factory.timezone,
-            slot_times=short_slot_times,
-            now_local=now_local,
-        ) if short_slot_times else []
-        long_slots = _build_slots_from_fixed_times(
-            brand=brand,
-            day=local_day,
-            factory_tz=factory.timezone,
-            slot_times=long_slot_times,
-            now_local=now_local,
-        ) if long_slot_times else []
+        if enqueue_immediately:
+            short_slots = (
+                _all_slots_for_day(
+                    brand=brand,
+                    day=local_day,
+                    factory_tz=factory.timezone,
+                    slot_times=short_slot_times,
+                )
+                if short_slot_times
+                else []
+            )
+            long_slots = (
+                _all_slots_for_day(
+                    brand=brand,
+                    day=local_day,
+                    factory_tz=factory.timezone,
+                    slot_times=long_slot_times,
+                )
+                if long_slot_times
+                else []
+            )
+        else:
+            short_slots = _build_slots_from_fixed_times(
+                brand=brand,
+                day=local_day,
+                factory_tz=factory.timezone,
+                slot_times=short_slot_times,
+                now_local=now_local,
+            ) if short_slot_times else []
+            long_slots = _build_slots_from_fixed_times(
+                brand=brand,
+                day=local_day,
+                factory_tz=factory.timezone,
+                slot_times=long_slot_times,
+                now_local=now_local,
+            ) if long_slot_times else []
         for dt in short_slots:
             plans.append(SlotPlan(brand=brand, video_type="SHORT", scheduled_at=dt))
         for dt in long_slots:
@@ -217,12 +259,14 @@ def generate_daily_schedule_for_factory(
             item = queue.pop(0)
             platform = "YT" if plan.video_type == "SHORT" else "YTB"
             account = _first_social_account_for_video_type(brand, plan.video_type)
+            slot_at_utc = plan.scheduled_at.astimezone(dt_timezone.utc)
+            post_at_utc = now_utc if enqueue_immediately else slot_at_utc
             scheduled_post = ScheduledPost.objects.create(
                 job=None,
                 auto_cut_corte=item.auto_cut_corte,
                 platforms=[platform],
                 social_account=account,
-                scheduled_at=plan.scheduled_at.astimezone(dt_timezone.utc),
+                scheduled_at=post_at_utc,
                 title=(item.title or "")[:200],
                 description=item.description or "",
                 privacy_status="private",
@@ -233,12 +277,12 @@ def generate_daily_schedule_for_factory(
                 brand=brand,
                 inventory_item=item,
                 video_type=plan.video_type,
-                scheduled_at=plan.scheduled_at.astimezone(dt_timezone.utc),
+                scheduled_at=slot_at_utc,
                 status="PLANNED",
                 scheduled_post=scheduled_post,
             )
             item.status = "SCHEDULED"
-            item.scheduled_for = plan.scheduled_at.astimezone(dt_timezone.utc)
+            item.scheduled_for = post_at_utc
             item.save(update_fields=["status", "scheduled_for", "updated_at"])
             created_count += 1
     return {"factory_id": factory.id, "created": created_count, "run_id": run.id}

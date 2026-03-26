@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
+from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import serializers
 from apps.brands.models import (
@@ -494,6 +495,11 @@ class ScheduledPostSerializer(serializers.ModelSerializer):
                 return suggestion.title
             return f"Corte #{obj.auto_cut_corte_id}"
         return "-"
+
+    def create(self, validated_data):
+        # Fila de publicação: próximo ciclo do Beat (check_scheduled_posts_task) — não esperar horário futuro
+        validated_data["scheduled_at"] = timezone.now()
+        return super().create(validated_data)
 
 
 class AutoCutSuggestionSerializer(serializers.ModelSerializer):
