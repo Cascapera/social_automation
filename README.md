@@ -271,6 +271,3 @@ Projeto privado. Entre em contato para uso comercial.
 
 Desenvolvido com foco em **escalabilidade**, **manutenibilidade** e **boas práticas** de engenharia de software.
 
----
-
-*README otimizado para recrutadores e gestores técnicos — demonstra domínio em backend Python, arquitetura distribuída, IA aplicada e integrações de APIs.*
