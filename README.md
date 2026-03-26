@@ -12,7 +12,7 @@
 
 ---
 
-## 📌 Highlights
+## 📌 Project Highlights
 
 | Area | Implementation |
 |------|----------------|
@@ -272,7 +272,3 @@ Private project. Contact for commercial use.
 ## 👤 Author
 
 Built with a focus on **scalability**, **maintainability**, and **software engineering best practices**.
-
----
-
-*README aimed at recruiters and technical leads — demonstrates Python backend, distributed architecture, applied AI, and API integrations.*
