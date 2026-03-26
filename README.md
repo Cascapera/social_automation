@@ -26,6 +26,13 @@
 
 ---
 
+## 📊 Real-world usage
+
+- Processing 6000+ minutes of video per day
+- Generating 300+ short-form videos daily
+- Publishing 20+ long-form videos per day
+- Managing 40+ social media accounts
+
 ## Quality and tests
 
 - **CI**: workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — **Ruff** lint, Django checks, **pytest** with coverage (minimum 70% on included modules: models, `job_actions`, YouTube description, secret encryption, URLs, etc.; excludes heavy integration views/tasks).
