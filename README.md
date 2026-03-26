@@ -12,7 +12,7 @@
 
 ---
 
-## 📌 Destaques para Gestores Técnicos
+## 📌 Destaques Técnicos
 
 | Aspecto | Implementação |
 |---------|---------------|
