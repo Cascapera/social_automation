@@ -1,19 +1,21 @@
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 from django.conf import settings
 from django.utils import timezone
 
-from apps.jobs.models import Job, JobCut, RenderOutput
-from .paths import get_job_paths
+from apps.jobs.models import Job, RenderOutput
+
 from .ffmpeg import (
-    cut_clip,
-    make_vertical_blur,
-    normalize_part_for_concat,
     concat_videos_copy,
     concat_with_xfade,
+    cut_clip,
     has_nvenc,
+    make_vertical_blur,
+    normalize_part_for_concat,
 )
+from .paths import get_job_paths
+
 
 def _append_log(job: Job, msg: str) -> None:
     job.log = (job.log or "") + msg.rstrip() + "\n"

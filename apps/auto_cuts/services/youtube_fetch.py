@@ -2,10 +2,10 @@
 Busca vídeos de canais do YouTube via Data API v3.
 Usa YOUTUBE_API_KEY (recomendado) ou credenciais YOUTUBE_CHECK_* com OAuth.
 """
+import logging
 import os
 import re
-import logging
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -24,7 +24,6 @@ def extract_video_id(url: str) -> str | None:
     if "youtu.be/" in url:
         part = url.split("youtu.be/")[-1].split("?")[0].split("&")[0].strip()
         return part if part and len(part) == 11 else None
-    from urllib.parse import urlparse, parse_qs
     parsed = urlparse(url)
     if "youtube.com" in (parsed.netloc or ""):
         qs = parse_qs(parsed.query)
@@ -55,8 +54,8 @@ def _get_youtube_client():
     )
     if fcred:
         try:
-            from google.oauth2.credentials import Credentials
             from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
 
             check_id = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
             check_secret = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()

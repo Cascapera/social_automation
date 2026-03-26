@@ -3,15 +3,14 @@
 import logging
 import os
 import re
-import tempfile
 import traceback
 from pathlib import Path
 
 from django.conf import settings
 
-logger = logging.getLogger(__name__)
-
 from apps.jobs.services.ffmpeg import ffprobe_video_info, run_cmd, video_encode_args_burn_cpu
+
+logger = logging.getLogger(__name__)
 
 # Fonte com suporte a emojis (Windows). Linux: Noto Color Emoji. macOS: Apple Color Emoji
 DEFAULT_FONT_EMOJI = "Segoe UI Emoji"
@@ -37,7 +36,7 @@ def align_edited_to_original_words(edited_text: str, original_words: list[dict])
         # 1:1 – usa timestamps originais para cada token editado
         return [
             {"start": ow["start"], "end": ow["end"], "word": et}
-            for et, ow in zip(edited_tokens, original_words)
+            for et, ow in zip(edited_tokens, original_words, strict=True)
         ]
 
     if len(edited_tokens) > len(original_words):

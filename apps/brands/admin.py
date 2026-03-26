@@ -1,14 +1,15 @@
 from django.contrib import admin
+
 from .models import (
-    Factory,
     Brand,
     BrandAsset,
     BrandSocialAccount,
     BrandYouTubeCredential,
-    SearchChannel,
+    Factory,
+    FactoryYouTubeCheckCredential,
     ProcessedChannelVideo,
     ProcessedYoutubeVideo,
-    FactoryYouTubeCheckCredential,
+    SearchChannel,
 )
 
 

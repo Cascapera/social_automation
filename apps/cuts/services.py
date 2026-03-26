@@ -4,8 +4,8 @@ from pathlib import Path
 
 from django.conf import settings
 
+from apps.jobs.services.ffmpeg import cut_clip, has_nvenc, make_vertical_blur, tc_to_seconds
 from apps.mediahub.models import SourceVideo
-from apps.jobs.services.ffmpeg import cut_clip, make_vertical_blur, has_nvenc, tc_to_seconds
 
 
 def extract_cuts_from_source(source_id: int, cuts_data: list) -> list:

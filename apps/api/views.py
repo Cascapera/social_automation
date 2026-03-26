@@ -2,59 +2,66 @@ import io
 import os
 import re
 import zipfile
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction, IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.http import FileResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from rest_framework import viewsets, status
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
-from django.http import FileResponse
+from rest_framework.response import Response
 
-from apps.brands.models import Factory, Brand, BrandAsset, BrandSocialAccount, BrandYouTubeCredential, SearchChannel
-from apps.mediahub.models import SourceVideo
+from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutSuggestion
+from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
+from apps.brands.models import (
+    Brand,
+    BrandAsset,
+    BrandSocialAccount,
+    BrandYouTubeCredential,
+    Factory,
+    SearchChannel,
+)
 from apps.cuts.models import Cut
 from apps.jobs.models import (
+    FactoryPostingSchedule,
     Job,
+    PostedVideoLog,
     RenderOutput,
     ScheduledPost,
     VideoInventoryItem,
-    FactoryPostingSchedule,
-    PostedVideoLog,
 )
-from apps.jobs.tasks import process_job, generate_subtitles_task, burn_subtitles_task
-from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte
-from apps.social.services.youtube_description import build_youtube_description
-from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
-from django.conf import settings
+from apps.jobs.services.job_actions import archive_job as do_archive_job
+from apps.jobs.services.job_actions import delete_job as do_delete_job
 from apps.jobs.services.subtitles import align_edited_to_original_words
-from apps.jobs.services.job_actions import archive_job as do_archive_job, delete_job as do_delete_job
+from apps.jobs.tasks import burn_subtitles_task, generate_subtitles_task, process_job
+from apps.mediahub.models import SourceVideo
+from apps.social.services.youtube_description import build_youtube_description
 
 from .serializers import (
-    FactorySerializer,
-    SearchChannelSerializer,
-    BrandSerializer,
-    BrandAssetSerializer,
-    SourceVideoSerializer,
-    CutSerializer,
-    CutBulkCreateSerializer,
-    JobSerializer,
-    ScheduledPostSerializer,
-    UserRegisterSerializer,
     AutoCutAnalysisSerializer,
-    AutoCutSuggestionSerializer,
     AutoCutCorteSerializer,
+    BrandAssetSerializer,
+    BrandSerializer,
     BrandSocialAccountSerializer,
     BrandYouTubeCredentialSerializer,
-    VideoInventoryItemSerializer,
+    CutBulkCreateSerializer,
+    CutSerializer,
     FactoryPostingScheduleSerializer,
+    FactorySerializer,
+    JobSerializer,
     PostedVideoLogSerializer,
+    ScheduledPostSerializer,
+    SearchChannelSerializer,
+    SourceVideoSerializer,
+    UserRegisterSerializer,
+    VideoInventoryItemSerializer,
 )
 
 User = get_user_model()
@@ -179,10 +186,12 @@ class FactoryViewSet(viewsets.ModelViewSet):
         Respeita horários das brands e vídeos disponíveis no banco.
         Body opcional: {"target_date": "YYYY-MM-DD"}
         """
-        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
         from datetime import date, timedelta
-        from django.utils import timezone
         from zoneinfo import ZoneInfo
+
+        from django.utils import timezone
+
+        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
 
         factory = self.get_object()
         factory_tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
@@ -246,8 +255,8 @@ class FactoryViewSet(viewsets.ModelViewSet):
     def youtube_check_connect_url(self, request, pk=None):
         """Retorna URL para OAuth da API de busca (YOUTUBE_CHECK_*)."""
         from apps.social.services.youtube_oauth import (
-            get_factory_check_authorization_url,
             get_check_client_config,
+            get_factory_check_authorization_url,
         )
 
         factory = self.get_object()
@@ -292,10 +301,10 @@ class SearchChannelViewSet(viewsets.ModelViewSet):
 def _resolve_search_channel(channel: SearchChannel) -> None:
     """Resolve channel_id e channel_title a partir da URL."""
     from apps.auto_cuts.services.youtube_fetch import (
+        _get_youtube_client,
+        get_channel_info,
         parse_channel_identifier,
         resolve_channel_id,
-        get_channel_info,
-        _get_youtube_client,
     )
     youtube = _get_youtube_client()
     if not youtube:
@@ -331,11 +340,13 @@ class BrandViewSet(viewsets.ModelViewSet):
         Para marcas sem factory, cria uma factory pessoal automaticamente.
         Body: {"target_date": "YYYY-MM-DD"}
         """
-        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
-        from apps.brands.models import Factory
         from datetime import date, timedelta
-        from django.utils import timezone
         from zoneinfo import ZoneInfo
+
+        from django.utils import timezone
+
+        from apps.brands.models import Factory
+        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
 
         brand = self.get_object()
         tz_name = (brand.factory.timezone if brand.factory else None) or "America/Sao_Paulo"
@@ -576,7 +587,7 @@ class SourceVideoViewSet(viewsets.ModelViewSet):
     def extract_cuts(self, request, pk=None):
         """Extrai cortes do source, salva como arquivos, deleta o source."""
         from apps.cuts.services import extract_cuts_from_source
-        from apps.cuts.models import Cut
+
         from .serializers import CutSerializer
 
         source = self.get_object()
@@ -641,6 +652,7 @@ class CutViewSet(viewsets.ModelViewSet):
         """Upload de corte pronto. Analisa vídeo (duração, formato) e salva."""
         import tempfile
         from pathlib import Path
+
         from apps.jobs.services.ffmpeg import ffprobe_video_info, seconds_to_tc
 
         file_obj = request.FILES.get("file")
@@ -754,6 +766,7 @@ class JobViewSet(viewsets.ModelViewSet):
         """Upload de vídeo pronto. Analisa (duração, formato) e cria Job com output para agendar."""
         import tempfile
         from pathlib import Path
+
         from apps.jobs.services.ffmpeg import ffprobe_video_info
 
         file_obj = request.FILES.get("file")
@@ -1914,7 +1927,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
 
         for cortes, platform in ((short_cortes, "YT"), (long_cortes, "YTB")):
             times = build_times(start_at, end_at, len(cortes))
-            for corte, schedule_dt in zip(cortes, times):
+            for corte, schedule_dt in zip(cortes, times, strict=True):
                 exists = ScheduledPost.objects.filter(
                     auto_cut_corte=corte,
                     status__in=["PENDING", "POSTING", "DONE"],
@@ -1922,7 +1935,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 if exists:
                     skipped += 1
                     continue
-                post = ScheduledPost.objects.create(
+                ScheduledPost.objects.create(
                     job=None,
                     auto_cut_corte=corte,
                     platforms=[platform],

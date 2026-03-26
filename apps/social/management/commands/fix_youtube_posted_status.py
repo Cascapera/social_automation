@@ -14,8 +14,6 @@ from django.utils import timezone
 from apps.jobs.models import (
     FactoryPostingSchedule,
     PostedVideoLog,
-    ScheduledPost,
-    VideoInventoryItem,
 )
 
 

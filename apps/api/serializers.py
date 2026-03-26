@@ -3,29 +3,35 @@ from django.db import IntegrityError
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import serializers
+
+from apps.auto_cuts.models import (
+    AutoCutAnalysis,
+    AutoCutCorte,
+    AutoCutReadyChunk,
+    AutoCutSuggestion,
+)
 from apps.brands.models import (
-    Factory,
     Brand,
     BrandAsset,
     BrandSocialAccount,
     BrandYouTubeCredential,
+    Factory,
     SearchChannel,
 )
-from apps.social.services.secret_crypto import encrypt_secret, is_secret_configured
-
-User = get_user_model()
-from apps.mediahub.models import SourceVideo
 from apps.cuts.models import Cut
 from apps.jobs.models import (
+    FactoryPostingSchedule,
     Job,
     JobCut,
+    PostedVideoLog,
     RenderOutput,
     ScheduledPost,
     VideoInventoryItem,
-    FactoryPostingSchedule,
-    PostedVideoLog,
 )
-from apps.auto_cuts.models import AutoCutAnalysis, AutoCutSuggestion, AutoCutCorte, AutoCutReadyChunk
+from apps.mediahub.models import SourceVideo
+from apps.social.services.secret_crypto import encrypt_secret, is_secret_configured
+
+User = get_user_model()
 
 
 class FactorySerializer(serializers.ModelSerializer):
@@ -156,7 +162,7 @@ class BrandSerializer(serializers.ModelSerializer):
             if "brands_brand.slug" in str(exc):
                 raise serializers.ValidationError(
                     {"name": "Já existe uma brand com slug semelhante. Tente outro nome."}
-                )
+                ) from exc
             raise
 
     def update(self, instance, validated_data):

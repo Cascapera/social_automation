@@ -7,10 +7,10 @@ from django.conf import settings
 from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
 from .services.pipeline import run_job
 from .services.subtitles import (
-    generate_subtitles,
-    segments_to_srt,
-    segments_to_ass_animated,
     burn_subtitles,
+    generate_subtitles,
+    segments_to_ass_animated,
+    segments_to_srt,
 )
 
 
@@ -64,7 +64,7 @@ def generate_subtitles_task(self, job_id: int) -> None:
 def burn_subtitles_task(self, job_id: int) -> None:
     import shutil
 
-    from .models import Job, RenderOutput
+    from .models import Job
 
     job = Job.objects.get(id=job_id)
     try:

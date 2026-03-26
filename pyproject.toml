@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "social_automation.settings_test"
+python_files = ["tests.py", "test_*.py"]
+addopts = [
+  "--strict-markers",
+  "-ra",
+  # Tem prioridade sobre DJANGO_SETTINGS_MODULE no ambiente (ex.: Docker/Postgres no .env)
+  "--ds=social_automation.settings_test",
+  # Cobertura só nestes pacotes (pytest-cov ignora o resto do repo)
+  "--cov=apps.jobs.services.job_actions",
+  "--cov=apps.social.services.youtube_description",
+  "--cov=apps.social.services.secret_crypto",
+  "--cov=apps.brands.models",
+  "--cov=apps.cuts.models",
+  "--cov=apps.mediahub.models",
+  "--cov=apps.auto_cuts.models",
+  "--cov=apps.jobs.models",
+  "--cov=apps.api.urls",
+  "--cov=social_automation.settings",
+  "--cov=social_automation.settings_test",
+  "--cov=social_automation.urls",
+  "--cov-report=term-missing",
+  "--cov-fail-under=70",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+]
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [
+  ".venv",
+  "venv",
+  "migrations",
+  "node_modules",
+  "frontend/dist",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+]
+ignore = [
+  "E501",  # line length (handled by formatter preference)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "social_automation", "config"]

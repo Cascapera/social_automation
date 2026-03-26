@@ -1,5 +1,7 @@
 from django.contrib import admin
+
 from .models import Cut
+
 
 @admin.register(Cut)
 class CutAdmin(admin.ModelAdmin):

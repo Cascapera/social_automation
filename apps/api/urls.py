@@ -1,25 +1,25 @@
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
-    FactoryViewSet,
-    SearchChannelViewSet,
-    BrandViewSet,
+    AutoCutAnalysisViewSet,
+    AutoCutCorteViewSet,
+    AutoCutSuggestionViewSet,
     BrandAssetViewSet,
     BrandSocialAccountViewSet,
+    BrandViewSet,
     BrandYouTubeCredentialViewSet,
-    SourceVideoViewSet,
     CutViewSet,
-    JobViewSet,
-    ScheduledPostViewSet,
-    RegisterViewSet,
-    AutoCutAnalysisViewSet,
-    AutoCutSuggestionViewSet,
-    AutoCutCorteViewSet,
-    VideoInventoryItemViewSet,
     FactoryPostingScheduleViewSet,
+    FactoryViewSet,
+    JobViewSet,
     PostedVideoLogViewSet,
+    RegisterViewSet,
+    ScheduledPostViewSet,
+    SearchChannelViewSet,
+    SourceVideoViewSet,
+    VideoInventoryItemViewSet,
 )
 
 router = DefaultRouter()

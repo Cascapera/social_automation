@@ -15,3 +15,12 @@ frontend/dist/
 celerybeat-schedule
 celerybeat-schedule-shm
 celerybeat-schedule-wal
+
+# Backups e dumps locais (nunca versionar)
+*.dump
+backup_*.json
+backups/
+
+# Testes / cobertura
+.coverage
+htmlcov/

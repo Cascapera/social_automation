@@ -1,0 +1,7 @@
+# Desenvolvimento, CI e qualidade (instalar além de requirements.txt)
+-r requirements.txt
+
+pytest>=8.0,<9
+pytest-django>=4.8,<5
+pytest-cov>=5.0,<7
+ruff>=0.8,<1

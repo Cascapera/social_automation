@@ -1,18 +1,14 @@
 """Publisher para YouTube (videos longos e Shorts)."""
+import json
 import logging
 import random
 import re
 import time
-import json
-from datetime import timedelta, timezone as dt_timezone
+from datetime import UTC, timedelta
 from pathlib import Path
-from datetime import datetime
 from zoneinfo import ZoneInfo
-from types import SimpleNamespace
 
 from django.utils import timezone
-
-logger = logging.getLogger(__name__)
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
@@ -22,6 +18,8 @@ from apps.jobs.models import ScheduledPost
 from apps.social.publishers.base import BasePublisher
 from apps.social.services.youtube_credentials import get_credentials
 from apps.social.services.youtube_description import build_youtube_description
+
+logger = logging.getLogger(__name__)
 
 RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
 MAX_RETRIES = 10
@@ -250,7 +248,7 @@ class YouTubePublisher(BasePublisher):
         # YouTube rejeita publishAt no passado; usa apenas com alguma folga.
         if scheduled_at <= timezone.now() + timedelta(seconds=30):
             return None
-        return scheduled_at.astimezone(dt_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        return scheduled_at.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     def _http_error_to_publish_error(self, e: HttpError) -> YouTubePublishError:
         status_code = getattr(getattr(e, "resp", None), "status", None)
@@ -327,7 +325,7 @@ class YouTubePublisher(BasePublisher):
                     time.sleep(random.random() * (2**retry))
                 else:
                     raise
-            except (OSError, ConnectionError) as e:
+            except (OSError, ConnectionError):
                 retry += 1
                 if retry > MAX_RETRIES:
                     raise

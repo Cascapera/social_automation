@@ -1,7 +1,7 @@
 """Publisher para Upload-Post.com (TikTok, X, Instagram)."""
 import logging
 import os
-from datetime import timedelta, timezone as dt_timezone
+from datetime import UTC, timedelta
 from pathlib import Path
 
 import requests
@@ -28,7 +28,7 @@ def _format_scheduled_date(scheduled_at, tz_name: str) -> str | None:
     # Só agenda se for pelo menos 2 min no futuro
     if scheduled_at <= timezone.now() + timedelta(minutes=2):
         return None
-    utc_dt = scheduled_at.astimezone(dt_timezone.utc)
+    utc_dt = scheduled_at.astimezone(UTC)
     return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

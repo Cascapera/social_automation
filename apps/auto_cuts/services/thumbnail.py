@@ -6,14 +6,13 @@ import tempfile
 from pathlib import Path
 
 from django.conf import settings
-
-logger = logging.getLogger(__name__)
 from django.core.files import File
-
 from PIL import Image, ImageDraw, ImageFont
 
 from apps.brands.models import BrandAsset
 from apps.jobs.services.ffmpeg import ffprobe_duration, run_cmd, tc_to_seconds
+
+logger = logging.getLogger(__name__)
 
 # Se o timestamp sugerido falhar (FFmpeg), usar este instante no ficheiro de vídeo do corte (relativo ou absoluto conforme o caso).
 THUMB_FALLBACK_SEC_IN_CUT = 5.0
@@ -422,7 +421,7 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
             text_block_h = sum(line_heights) + (len(lines) - 1) * line_spacing
             cursor_y = rect_y1 + max(0, (rect_h - text_block_h) // 2)
             stroke_width = max(1, int(getattr(font, "size", min_font_size) * 0.08))
-            for ln, ln_h in zip(lines, line_heights):
+            for ln, ln_h in zip(lines, line_heights, strict=True):
                 ln_w = _text_width(draw, ln, font)
                 tx = (w - ln_w) // 2
                 draw.text(

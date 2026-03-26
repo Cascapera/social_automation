@@ -7,36 +7,34 @@ import tempfile
 from pathlib import Path
 
 from celery import shared_task
-
-logger = logging.getLogger(__name__)
 from django.conf import settings
-from django.core.files import File
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.files import File
 from django.db.utils import DatabaseError
-from django.utils import timezone
 
+from apps.auto_cuts.services.grok import (
+    analyze_chunks_in_one_request,
+    analyze_ready_cut_metadata,
+    analyze_ready_cuts_batch_titles_from_transcripts,
+)
+from apps.auto_cuts.services.transcript import (
+    chunk_transcript,
+    segments_to_transcript_with_timestamps,
+)
+from apps.auto_cuts.services.video_chunks import (
+    cleanup_cortes_processo,
+    extract_chunks_to_folder,
+    transcribe_single_chunk,
+)
 from apps.jobs.services.ffmpeg import (
     concat_with_xfade,
     ffprobe_duration,
     normalize_video_to_canvas,
     seconds_to_tc,
 )
-from apps.jobs.services.subtitles import generate_subtitles, segments_to_srt, burn_subtitles
-from apps.auto_cuts.services.transcript import (
-    chunk_transcript,
-    segments_to_transcript_with_timestamps,
-)
-from apps.auto_cuts.services.video_chunks import (
-    extract_chunks_to_folder,
-    transcribe_single_chunk,
-    cleanup_cortes_processo,
-    get_chunk_boundaries,
-)
-from apps.auto_cuts.services.grok import (
-    analyze_chunks_in_one_request,
-    analyze_ready_cut_metadata,
-    analyze_ready_cuts_batch_titles_from_transcripts,
-)
+from apps.jobs.services.subtitles import burn_subtitles, generate_subtitles, segments_to_srt
+
+logger = logging.getLogger(__name__)
 
 # Vídeos maiores que isso usam transcrição por chunks (evita crash de memória)
 CHUNKED_TRANSCRIPTION_THRESHOLD_SEC = 10 * 60  # 10 min
@@ -229,9 +227,10 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
 
     distribution_mode = getattr(analysis, "distribution_mode", "") or "theme"
     if distribution_mode == "distribute":
+        from django.db.models import Count
+
         from apps.brands.models import Brand
         from apps.jobs.models import VideoInventoryItem
-        from django.db.models import Count
 
         brands = list(Brand.objects.filter(factory_id=factory_id).values_list("id", flat=True))
         if not brands:
@@ -403,6 +402,7 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     gera thumbnail e finaliza.
     """
     import shutil
+
     from apps.auto_cuts.models import AutoCutSuggestion
     from apps.jobs.services.ffmpeg import seconds_to_tc
 
@@ -547,7 +547,12 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
     Vários arquivos em um único job: transcrição em fila, títulos (LLM), vídeo longo opcional (fade),
     depois shorts; finalização automática.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk, AutoCutSuggestion
+    from apps.auto_cuts.models import (
+        AutoCutAnalysis,
+        AutoCutCorte,
+        AutoCutReadyChunk,
+        AutoCutSuggestion,
+    )
     from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
 
     analysis = AutoCutAnalysis.objects.filter(id=analysis_id).first()
@@ -1083,7 +1088,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         is_educational_prompt = pv in ("educational", "educational_en")
         shorts_limit = max(1, min(30, int(getattr(analysis, "shorts_target", 12) or 12)))
         longs_limit = max(1, min(10, int(getattr(analysis, "longs_target", 3) or 3)))
-        from apps.jobs.services.ffmpeg import tc_to_seconds, seconds_to_tc
+        from apps.jobs.services.ffmpeg import seconds_to_tc, tc_to_seconds
 
         candidate_shorts_source = final.get("candidate_shorts") or []
         ranked_shorts_source = final.get("ranked_shorts") or []
@@ -1390,14 +1395,17 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
 
 
 # Estilo padrão para legendas (fonte com emojis).
-# size = FontSize ASS em unidades do PlayRes (≈ px na altura do vídeo); 12 em 1080p era ilegível.
-DEFAULT_SUBTITLE_STYLE = {
+# size = FontSize ASS em unidades do PlayRes (≈ px na altura do vídeo).
+_SUBTITLE_STYLE_BASE = {
     "font": "Segoe UI Emoji",
-    "size": 36,
     "color": "#FFFFFF",
     "outline_color": "#000000",
     "outline": 2,
 }
+# Shorts (9:16): padrão 10 px; longos 16:9 mantêm o padrão anterior (36) quando o usuário não envia "size".
+DEFAULT_SUBTITLE_STYLE_SHORT = {**_SUBTITLE_STYLE_BASE, "size": 10}
+DEFAULT_SUBTITLE_STYLE_LONG = {**_SUBTITLE_STYLE_BASE, "size": 36}
+DEFAULT_SUBTITLE_STYLE = DEFAULT_SUBTITLE_STYLE_LONG
 
 
 @shared_task(bind=True)
@@ -1427,13 +1435,13 @@ def finalizar_auto_cut_task(
     queima legendas nos marcados com needs_subtitle, marca todos como finalizados.
     """
     from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
-    from apps.brands.models import BrandAsset
     from apps.auto_cuts.services.vertical_reformat import reformat_video_vertical
+    from apps.brands.models import BrandAsset
     from apps.jobs.services.ffmpeg import (
-        ffprobe_video_info,
         ffprobe_sample_aspect_ratio_float,
-        overlay_logo,
+        ffprobe_video_info,
         overlay_animation,
+        overlay_logo,
         overlay_long_right,
     )
 
@@ -1449,11 +1457,7 @@ def finalizar_auto_cut_task(
             analysis_id,
         )
 
-    style = {**DEFAULT_SUBTITLE_STYLE, **(subtitle_style or {})}
-    # Shorts: legendas na parte inferior (acima dos botões do YouTube), não no topo
-    # MarginV = distância da borda inferior. 160px mantém ~20px acima da área dos botões.
-    style["position"] = "bottom"
-    style["margin_v"] = style.get("margin_v", 160)
+    user_subtitle_style = subtitle_style or {}
     vert_mode = vertical_mode or "zoom_crop"
     bg_color = (background_color or "#000000").strip()
     link_text = (custom_text or "").strip()
@@ -1822,6 +1826,16 @@ def finalizar_auto_cut_task(
                                 segments_to_srt(corte.subtitle_segments), encoding="utf-8"
                             )
                             output_tmp = tmppath / "output_with_subs.mp4"
+                            base_style = (
+                                DEFAULT_SUBTITLE_STYLE_LONG
+                                if is_long_horizontal
+                                else DEFAULT_SUBTITLE_STYLE_SHORT
+                            )
+                            style = {**base_style, **user_subtitle_style}
+                            # Shorts: legendas na parte inferior (acima dos botões do YouTube), não no topo
+                            # MarginV = distância da borda inferior. 160px mantém ~20px acima da área dos botões.
+                            style["position"] = "bottom"
+                            style["margin_v"] = style.get("margin_v", 160)
                             burn_subtitles(
                                 work_path,
                                 srt_path,

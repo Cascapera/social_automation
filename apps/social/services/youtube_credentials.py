@@ -1,9 +1,9 @@
 """Helpers para credenciais YouTube (refresh de token)."""
 import os
-from datetime import datetime, timezone
+from datetime import UTC
 
-from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 
 from apps.brands.models import BrandSocialAccount, BrandYouTubeCredential
 from apps.social.services.secret_crypto import decrypt_secret
@@ -51,7 +51,7 @@ def get_credentials(
     token_source = youtube_credential if youtube_credential is not None else account
     expiry = token_source.expires_at
     if expiry and getattr(expiry, "tzinfo", None) is None:
-        expiry = expiry.replace(tzinfo=timezone.utc)
+        expiry = expiry.replace(tzinfo=UTC)
     creds = Credentials(
         token=token_source.access_token or None,
         refresh_token=token_source.refresh_token or None,

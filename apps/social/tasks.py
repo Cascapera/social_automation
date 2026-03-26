@@ -1,9 +1,8 @@
 """Tasks de postagem em redes sociais."""
-import os
 import hashlib
 import logging
-from datetime import datetime, timedelta, time
-from datetime import timezone as dt_timezone
+import os
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -11,19 +10,19 @@ from zoneinfo import ZoneInfo
 from celery import shared_task
 from django.conf import settings
 from django.db.models import Q
-from django.utils.dateparse import parse_datetime
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
-from apps.brands.models import Brand, Factory, BrandSocialAccount, BrandYouTubeCredential
+from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential, Factory
 from apps.jobs.models import (
-    ScheduledPost,
-    FactoryPostingSchedule,
     FactoryPostingAttemptLog,
+    FactoryPostingSchedule,
     FactoryScheduleRun,
-    PostedVideoLog,
-    VideoInventoryItem,
     Job,
+    PostedVideoLog,
     RenderOutput,
+    ScheduledPost,
+    VideoInventoryItem,
 )
 from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
 
@@ -189,6 +188,7 @@ def _youtube_video_exists_on_channel(account, video_id: str, youtube_credential=
     """
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
+
     from apps.social.services.youtube_credentials import get_credentials
 
     # Usar o mesmo OAuth client que emitiu o token (brand/global). Check client causa unauthorized_client.
@@ -280,6 +280,7 @@ def _youtube_day_video_index(
     Indexa vídeos do canal no dia (publicados e agendados).
     """
     from googleapiclient.discovery import build
+
     from apps.social.services.youtube_credentials import get_credentials
 
     # Mesmo OAuth client que emitiu o token (brand/global); check client causa unauthorized_client.
@@ -619,9 +620,10 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
         logger.warning("[THUMB] Brand %s sem conta/credencial YouTube", brand_id)
         return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
 
+    from googleapiclient.discovery import build
+
     from apps.social.publishers import get_publisher
     from apps.social.services.youtube_credentials import get_credentials
-    from googleapiclient.discovery import build
 
     publisher = get_publisher("YT")
     if not publisher:
@@ -654,7 +656,6 @@ def _build_upload_post_platforms(brand, post) -> list[str]:
     platforms: list[str] = []
     post_platforms = post.platforms or []
     is_short = "YT" in post_platforms and "YTB" not in post_platforms
-    is_long = "YTB" in post_platforms
     is_youtube = "YT" in post_platforms or "YTB" in post_platforms
 
     # Shorts: TikTok, X, Instagram (Reels) + YouTube quando habilitados
@@ -1059,8 +1060,8 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
 
         day_start_local = timezone.make_aware(datetime.combine(target_day, datetime.min.time()), factory_tz)
         day_end_local = day_start_local + timedelta(days=1) - timedelta(microseconds=1)
-        day_start_utc = day_start_local.astimezone(dt_timezone.utc)
-        day_end_utc = day_end_local.astimezone(dt_timezone.utc)
+        day_start_utc = day_start_local.astimezone(UTC)
+        day_end_utc = day_end_local.astimezone(UTC)
 
         for brand in factory.brands.all().order_by("id"):
             summary["brands"] += 1
@@ -1343,9 +1344,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             )
     if not errors and brand and video_path and upload_post_platforms:
         import time as _time
+
         from apps.social.publishers.upload_post import (
-            publish_to_upload_post,
             UploadPostPublishError,
+            publish_to_upload_post,
         )
 
         title = (post.title or "").strip() or "Vídeo"
@@ -1890,7 +1892,7 @@ def cleanup_posted_media_task():
     - Arquivos órfãos: apaga arquivos físicos em storage/media sem registro no banco
     Não apaga Jobs, nem vídeos disponíveis ou agendados.
     """
-    from apps.auto_cuts.models import AutoCutCorte, AutoCutAnalysis
+    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
 
     summary = {
         "cortes_cleaned": 0,

@@ -3,8 +3,9 @@ import os
 from urllib.parse import urlencode
 
 import requests
-from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
 from apps.social.services.secret_crypto import decrypt_secret
 
 # State prefix para OAuth da factory (canais de busca)

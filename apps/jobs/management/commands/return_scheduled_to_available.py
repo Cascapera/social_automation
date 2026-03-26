@@ -5,7 +5,12 @@ Remove ScheduledPost e FactoryPostingSchedule, mas mantém o VideoInventoryItem 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.jobs.models import FactoryPostingSchedule, FactoryScheduleRun, ScheduledPost, VideoInventoryItem
+from apps.jobs.models import (
+    FactoryPostingSchedule,
+    FactoryScheduleRun,
+    ScheduledPost,
+    VideoInventoryItem,
+)
 
 
 class Command(BaseCommand):
@@ -75,8 +80,9 @@ class Command(BaseCommand):
             return
 
         from datetime import timedelta
-        from django.utils import timezone
         from zoneinfo import ZoneInfo
+
+        from django.utils import timezone
 
         factories_to_reset = {i.factory_id for i in items if i.factory_id}
 

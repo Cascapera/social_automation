@@ -12,20 +12,18 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Optional
-
-from PIL import Image, ImageDraw, ImageFont
 
 from django.conf import settings
+from PIL import Image, ImageDraw, ImageFont
 
 from apps.jobs.services.ffmpeg import (
-    run_cmd,
-    ffprobe_video_info,
-    video_encode_args,
     audio_encode_args,
-    input_has_audio,
-    ffprobe_duration,
     common_mp4_flags,
+    ffprobe_duration,
+    ffprobe_video_info,
+    input_has_audio,
+    run_cmd,
+    video_encode_args,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,7 +79,7 @@ def _hex_to_pil_color(hex_color: str) -> tuple[int, int, int]:
     return (255, 255, 255)
 
 
-def _get_emoji_font_path() -> Optional[Path]:
+def _get_emoji_font_path() -> Path | None:
     """Caminho da fonte de emoji colorido. Windows: Segoe UI Emoji."""
     if os.name == "nt":
         p = Path(os.environ.get("SystemRoot", "C:\\Windows")) / "Fonts" / "seguiemj.ttf"
@@ -97,7 +95,7 @@ def _get_emoji_font_path() -> Optional[Path]:
     return None
 
 
-def _get_text_font_path() -> Optional[Path]:
+def _get_text_font_path() -> Path | None:
     """Caminho da fonte para texto regular."""
     if os.name == "nt":
         for name in ["segoeui.ttf", "arial.ttf"]:
@@ -262,7 +260,7 @@ def reformat_video_vertical(
     mode: str,
     *,
     background_color: str = "#000000",
-    logo_path: Optional[Path] = None,
+    logo_path: Path | None = None,
     title: str = "",
     custom_text: str = "",
     font_size_title: int = 36,
@@ -393,7 +391,7 @@ def reformat_video_vertical(
         else:
             dur = ffprobe_duration(input_path)
             audio_idx = next_idx
-            inputs += ["-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=48000"]
+            inputs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
             filter_complex += f";[{audio_idx}:a]atrim=0:{dur},asetpts=PTS-STARTPTS[audio]"
             cmd = [
                 settings.FFMPEG_BIN, "-y",

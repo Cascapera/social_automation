@@ -1,8 +1,9 @@
-from django.db import models
 from django.conf import settings
-from apps.cuts.models import Cut
-from apps.brands.models import Brand, BrandAsset, BrandSocialAccount, Factory
+from django.db import models
+
 from apps.auto_cuts.models import AutoCutCorte
+from apps.brands.models import Brand, BrandAsset, BrandSocialAccount, Factory
+from apps.cuts.models import Cut
 
 
 class JobCut(models.Model):

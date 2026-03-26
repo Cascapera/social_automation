@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone as dt_timezone
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
 
-from apps.brands.models import Factory, Brand, BrandSocialAccount
+from apps.brands.models import Brand, BrandSocialAccount, Factory
 from apps.jobs.models import (
-    FactoryScheduleRun,
     FactoryPostingSchedule,
-    VideoInventoryItem,
+    FactoryScheduleRun,
     ScheduledPost,
+    VideoInventoryItem,
 )
 
 
@@ -157,8 +157,8 @@ def generate_daily_schedule_for_factory(
     created_count = 0
     day_start_local = datetime.combine(local_day, time(0, 0)).replace(tzinfo=tz)
     day_end_local = (day_start_local + timedelta(days=1)) - timedelta(microseconds=1)
-    day_start_utc = day_start_local.astimezone(dt_timezone.utc)
-    day_end_utc = day_end_local.astimezone(dt_timezone.utc)
+    day_start_utc = day_start_local.astimezone(UTC)
+    day_end_utc = day_end_local.astimezone(UTC)
     brands_qs = Brand.objects.filter(factory=factory).order_by("id")
     if brand_id:
         brands_qs = brands_qs.filter(id=brand_id)
@@ -233,7 +233,7 @@ def generate_daily_schedule_for_factory(
             p for p in plans
             if (
                 p.video_type,
-                p.scheduled_at.astimezone(dt_timezone.utc),
+                p.scheduled_at.astimezone(UTC),
             ) not in occupied
         ]
 
@@ -259,7 +259,7 @@ def generate_daily_schedule_for_factory(
             item = queue.pop(0)
             platform = "YT" if plan.video_type == "SHORT" else "YTB"
             account = _first_social_account_for_video_type(brand, plan.video_type)
-            slot_at_utc = plan.scheduled_at.astimezone(dt_timezone.utc)
+            slot_at_utc = plan.scheduled_at.astimezone(UTC)
             post_at_utc = now_utc if enqueue_immediately else slot_at_utc
             scheduled_post = ScheduledPost.objects.create(
                 job=None,

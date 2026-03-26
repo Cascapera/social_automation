@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
+
 from django.conf import settings
+
 
 @dataclass(frozen=True)
 class JobPaths:

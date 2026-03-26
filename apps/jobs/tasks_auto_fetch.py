@@ -3,22 +3,28 @@ Task Celery para buscar vídeos automaticamente nos canais de busca.
 Executada pelo Beat a cada intervalo; processa no máximo 1 job por factory.
 """
 import logging
+
+from celery import shared_task
 from django.db.models import Count
 from django.utils import timezone
-from celery import shared_task
 
-from apps.brands.models import Factory, Brand, SearchChannel, ProcessedChannelVideo, ProcessedYoutubeVideo
 from apps.auto_cuts.models import AutoCutAnalysis
-from apps.jobs.models import VideoInventoryItem
 from apps.auto_cuts.services.youtube_fetch import (
-    parse_channel_identifier,
-    resolve_channel_id,
+    _get_youtube_client,
     fetch_latest_videos,
     get_channel_info,
-    extract_video_id,
-    _get_youtube_client,
+    parse_channel_identifier,
+    resolve_channel_id,
 )
 from apps.auto_cuts.tasks import analyze_auto_cuts_task
+from apps.brands.models import (
+    Brand,
+    Factory,
+    ProcessedChannelVideo,
+    ProcessedYoutubeVideo,
+    SearchChannel,
+)
+from apps.jobs.models import VideoInventoryItem
 
 logger = logging.getLogger(__name__)
 

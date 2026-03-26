@@ -1,9 +1,9 @@
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 from django.conf import settings
+
 
 @dataclass
 class CmdResult:
@@ -12,7 +12,7 @@ class CmdResult:
     stderr: str
     returncode: int
 
-def run_cmd(cmd: List[str], cwd: Optional[Path] = None) -> CmdResult:
+def run_cmd(cmd: list[str], cwd: Path | None = None) -> CmdResult:
     p = subprocess.run(
         cmd,
         cwd=str(cwd) if cwd else None,
@@ -288,7 +288,7 @@ def normalize_part_for_concat(
         cmd = [
             settings.FFMPEG_BIN, "-y",
             "-i", str(input_file),
-            "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
             "-filter_complex",
             f"[0:v]{vf}[v];[1:a]atrim=0:{dur},asetpts=PTS-STARTPTS[a]",
             "-map", "[v]", "-map", "[a]",
@@ -302,7 +302,7 @@ def normalize_part_for_concat(
         raise RuntimeError(f"normalize failed: {res.stderr}")
 
 
-def concat_videos(files: List[Path], output_file: Path, workdir: Path, use_gpu: bool) -> None:
+def concat_videos(files: list[Path], output_file: Path, workdir: Path, use_gpu: bool) -> None:
     list_file = workdir / "concat_list.txt"
     with open(list_file, "w", encoding="utf-8", newline="\n") as f:
         for p in files:
@@ -330,8 +330,8 @@ def normalize_video_to_canvas(
     height: int = 1080,
     use_gpu: bool = False,
     *,
-    target_fps: Optional[int] = None,
-    audio_hz: Optional[int] = None,
+    target_fps: int | None = None,
+    audio_hz: int | None = None,
 ) -> None:
     """
     Coloca o vídeo em um canvas 16:9 fixo (padrão 1920×1080): escala mantendo proporção
@@ -377,7 +377,7 @@ def normalize_video_to_canvas(
 
 
 def concat_with_xfade(
-    parts: List[Path],
+    parts: list[Path],
     output_file: Path,
     transition: str,
     duration_sec: float,
@@ -436,7 +436,7 @@ def concat_with_xfade(
         raise RuntimeError(f"concat(xfade) failed: {res.stderr}")
 
 
-def concat_videos_copy(files: List[Path], output_file: Path, workdir: Path) -> None:
+def concat_videos_copy(files: list[Path], output_file: Path, workdir: Path) -> None:
     """Concatena arquivos já normalizados com -c copy (sem re-encode)."""
     list_file = workdir / "concat_list.txt"
     with open(list_file, "w", encoding="utf-8", newline="\n") as f:
@@ -573,7 +573,7 @@ def tc_to_seconds(tc: str) -> float:
         return float(parts[0] * 60 + parts[1])
     return float(parts[0] * 3600 + parts[1] * 60 + parts[2])
 
-def concat_videos_filter(parts: List[Path], output_file: Path, use_gpu: bool) -> None:
+def concat_videos_filter(parts: list[Path], output_file: Path, use_gpu: bool) -> None:
     fps = "30"  # escolha fixa para shorts; pode virar preset depois
     w, h = 1080, 1920  # formato vertical para Reels/Shorts/TikTok
 

@@ -87,7 +87,7 @@ def transcribe_chunks_one_by_one(
     model_size: None = WHISPER_MODEL do .env ou "small" (para vídeos longos).
     model: se fornecido, usa em vez de carregar (evita crash ao sair do gerador em vídeos longos).
     """
-    from apps.jobs.services.subtitles import load_whisper_model, generate_subtitles
+    from apps.jobs.services.subtitles import generate_subtitles, load_whisper_model
 
     if model is None:
         if model_size is None:

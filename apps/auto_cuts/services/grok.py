@@ -6,7 +6,6 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 THEME_CATEGORY_RETRY_THRESHOLD = 5
@@ -1106,6 +1105,7 @@ def _validate_minimum_items(
 def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
     """Chama Grok API e retorna o conteúdo da resposta."""
     import os
+
     from openai import OpenAI
 
     key = api_key or os.getenv("XAI_API_KEY")
@@ -1186,7 +1186,7 @@ def _build_context_block(
 
 def _save_grok_response_json(parsed: dict, analysis_id: int | None = None) -> None:
     """Salva a resposta parseada do Grok em JSON para análise (ativar com GROK_SAVE_RESPONSE_JSON=1)."""
-    if not (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().lower() in ("1", "true", "yes"):
+    if (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().lower() not in ("1", "true", "yes"):
         return
     try:
         from django.conf import settings

@@ -73,7 +73,7 @@ export default function CortesAutomaticos() {
   const [filters, setFilters] = useState({ date_from: '', date_to: '', format: '' })
   const [subtitleStyle, setSubtitleStyle] = useState({
     font: 'Helvetica',
-    size: 12,
+    size: 10,
     color: '#FFFFFF',
     outline_color: '#000000',
   })
@@ -1736,10 +1736,10 @@ export default function CortesAutomaticos() {
                           <span>Tamanho</span>
                           <input
                             type="number"
-                            min={12}
+                            min={8}
                             max={72}
                             value={subtitleStyle.size}
-                            onChange={(e) => setSubtitleStyle((s) => ({ ...s, size: Number(e.target.value) || 24 }))}
+                            onChange={(e) => setSubtitleStyle((s) => ({ ...s, size: Number(e.target.value) || 10 }))}
                           />
                         </label>
                         <label>

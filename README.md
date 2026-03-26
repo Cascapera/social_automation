@@ -6,6 +6,7 @@
 [![React](https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://docker.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791?logo=postgresql&logoColor=white)](https://postgresql.org)
+[![CI](https://github.com/Cascapera/social_automation/actions/workflows/ci.yml/badge.svg)](https://github.com/Cascapera/social_automation/actions/workflows/ci.yml)
 
 > **Sistema enterprise de produção e distribuição automatizada de vídeos para redes sociais** — da transcrição com IA até a publicação agendada em YouTube, TikTok, Instagram e X.
 
@@ -21,6 +22,16 @@
 | **Integrações** | YouTube Data API v3, OAuth2 multi-conta, yt-dlp para ingestão |
 | **DevOps** | Docker Compose production-ready, healthchecks, migrações automatizadas |
 | **Segurança** | JWT (SimpleJWT), CORS configurado, credenciais por brand, variáveis de ambiente |
+| **Qualidade** | GitHub Actions (Ruff, `manage.py check`, pytest + cobertura, build do frontend), Dependabot |
+
+---
+
+## Qualidade e testes
+
+- **CI**: workflow em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — lint com **Ruff**, verificação do Django, **pytest** com cobertura mínima de 70% nos módulos incluídos na métrica (modelos, `job_actions`, descrição YouTube, criptografia de segredos, URLs, etc.; exclui views/tasks pesadas de integração).
+- **Variáveis de teste**: `social_automation/settings_test.py` + flag de linha de comando `--ds=...` (ver `pyproject.toml`) garantem **SQLite** nos testes mesmo se existir `DATABASE_URL` no ambiente.
+- **Desenvolvimento**: `pip install -r requirements-dev.txt` e `pytest` / `ruff check .` na raiz do projeto.
+- **Configuração**: copie [`.env.example`](.env.example) para `.env` e preencha; **nunca** commite `.env` nem dumps de banco.
 
 ---
 

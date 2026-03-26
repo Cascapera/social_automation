@@ -1,5 +1,7 @@
 from django.contrib import admin
+
 from .models import SourceVideo
+
 
 @admin.register(SourceVideo)
 class SourceVideoAdmin(admin.ModelAdmin):

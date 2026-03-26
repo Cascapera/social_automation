@@ -1,21 +1,28 @@
 """Views para OAuth e contas sociais."""
 import uuid
+
 from django.core.cache import cache
 from django.shortcuts import redirect
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential, Factory, FactoryYouTubeCheckCredential
+from apps.brands.models import (
+    Brand,
+    BrandSocialAccount,
+    BrandYouTubeCredential,
+    Factory,
+    FactoryYouTubeCheckCredential,
+)
 from apps.social.services.youtube_oauth import (
-    get_authorization_url,
-    fetch_tokens_and_channels,
-    get_client_config,
-    parse_state_value,
-    get_factory_check_authorization_url,
-    fetch_tokens_for_factory_check,
     FACTORY_CHECK_STATE_PREFIX,
+    fetch_tokens_and_channels,
+    fetch_tokens_for_factory_check,
+    get_authorization_url,
+    get_client_config,
+    get_factory_check_authorization_url,
+    parse_state_value,
 )
 
 CACHE_PREFIX = "youtube_oauth:"

@@ -2,9 +2,6 @@
 
 from pathlib import Path
 
-from django.conf import settings
-from django.core.files import File
-
 from apps.jobs.services.ffmpeg import cut_clip
 
 
