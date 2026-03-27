@@ -379,14 +379,22 @@ export default function Agendamento() {
     }
   }
 
+  /** YYYY-MM-DD no fuso local (evita dia errado vs toISOString() que é UTC). */
+  function formatLocalDateYYYYMMDD(d) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
   function getTomorrowDateStr() {
     const d = new Date()
     d.setDate(d.getDate() + 1)
-    return d.toISOString().slice(0, 10)
+    return formatLocalDateYYYYMMDD(d)
   }
 
   function getTodayDateStr() {
-    return new Date().toISOString().slice(0, 10)
+    return formatLocalDateYYYYMMDD(new Date())
   }
 
   function handleOpenScheduleDateModal(forBrandId = null) {

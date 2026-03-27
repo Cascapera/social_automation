@@ -138,9 +138,10 @@ def generate_daily_schedule_for_factory(
     Gera agenda de postagens para uma factory.
     target_date: dia para o qual gerar os slots. Se None, usa o dia local atual.
     brand_id: quando informado, agenda apenas para essa brand (dentro da factory).
-    enqueue_immediately: se True (ex.: botão "agendamento imediato"), ScheduledPost fica com
-    scheduled_at = agora para o próximo ciclo do Beat enfileirar; mantém horários de slot em
-    FactoryPostingSchedule para deduplicação e calendário.
+    enqueue_immediately: se True (ex.: botão "agendamento imediato"), inclui todos os slots do dia
+    (mesmo os que já passaram); ScheduledPost.scheduled_at continua sendo o horário do slot em UTC,
+    para YouTube/Upload Post agendarem publicação nas horas configuradas. O worker enfileira quando
+    scheduled_at <= agora (slots passados) ou no fluxo antecipado do YouTube quando aplicável.
     """
     now_utc = now_utc or timezone.now()
     tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
@@ -260,7 +261,9 @@ def generate_daily_schedule_for_factory(
             platform = "YT" if plan.video_type == "SHORT" else "YTB"
             account = _first_social_account_for_video_type(brand, plan.video_type)
             slot_at_utc = plan.scheduled_at.astimezone(UTC)
-            post_at_utc = now_utc if enqueue_immediately else slot_at_utc
+            # Sempre usar o horário do slot: publicação (YouTube publishAt, Upload Post scheduled_date)
+            # deve seguir as horas da brand, não "agora" (que virava publicação imediata / data errada).
+            post_at_utc = slot_at_utc
             scheduled_post = ScheduledPost.objects.create(
                 job=None,
                 auto_cut_corte=item.auto_cut_corte,
