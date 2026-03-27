@@ -4,7 +4,7 @@ from pathlib import Path
 
 from django.conf import settings
 
-from apps.jobs.services.ffmpeg import cut_clip, has_nvenc, make_vertical_blur, tc_to_seconds
+from apps.jobs.services.ffmpeg import cut_clip, make_vertical_blur, tc_to_seconds
 from apps.mediahub.models import SourceVideo
 
 
@@ -21,7 +21,8 @@ def extract_cuts_from_source(source_id: int, cuts_data: list) -> list:
     if not source_file.exists():
         raise FileNotFoundError(f"Arquivo do source não encontrado: {source_file}")
 
-    use_gpu = has_nvenc()
+    # CPU encode for source extraction; NVENC reserved for final render queues (jobs/auto_cuts finalize).
+    use_gpu = False
     media_root = Path(settings.MEDIA_ROOT)
     cuts_dir = media_root / "cuts"
     cuts_dir.mkdir(parents=True, exist_ok=True)

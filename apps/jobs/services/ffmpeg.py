@@ -89,6 +89,13 @@ def video_encode_args_burn_cpu() -> list[str]:
     return ["-c:v", "libx264", "-preset", str(preset), "-crf", str(crf), "-pix_fmt", "yuv420p"]
 
 
+def video_encode_args_burn(use_gpu: bool) -> list[str]:
+    """Legendas: NVENC quando disponível, senão libx264 (ajustável via .env)."""
+    if use_gpu:
+        return video_encode_args(True)
+    return video_encode_args_burn_cpu()
+
+
 def audio_encode_args(input_file: Path) -> list[str]:
     if input_has_audio(input_file):
         return ["-c:a", "aac", "-b:a", "160k"]

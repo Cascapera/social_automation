@@ -6,6 +6,7 @@ When transcription hangs with GPU but works on CPU, follow these steps to diagno
 
 | Variable | Values | Description |
 |----------|--------|-------------|
+| `WHISPER_FORCE_CPU` | `1` (default) | When set, Whisper uses CPU only so the GPU stays free for NVENC. Set to `0` to allow CUDA again (still overridable by `python manage.py test_whisper_gpu ... --device cuda`). |
 | `WHISPER_DEVICE` | `cpu` | Force CPU (avoids crash on low-VRAM machines) |
 | `WHISPER_DEVICE` | `cuda` | Force GPU; on failure, falls back to CPU |
 | `WHISPER_DEVICE` | (empty) | Try CUDA first, fall back to CPU on error |

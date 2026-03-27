@@ -10,10 +10,11 @@ from django.conf import settings
 
 from apps.jobs.services.ffmpeg import (
     ffprobe_video_info,
+    has_nvenc,
     resilient_decode_options,
     resilient_input_demuxer_flags,
     run_cmd,
-    video_encode_args_burn_cpu,
+    video_encode_args_burn,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,12 @@ def load_whisper_model(
     from faster_whisper import WhisperModel
 
     env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
-    force_cpu = device == "cpu" or env_device == "cpu"
+    settings_force_cpu = getattr(settings, "WHISPER_FORCE_CPU", False)
+    force_cpu = (
+        device == "cpu"
+        or env_device == "cpu"
+        or (settings_force_cpu and device != "cuda")
+    )
     debug_gpu = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
     target_device = "cpu" if force_cpu else "cuda"
 
@@ -165,7 +171,12 @@ def generate_subtitles(
     from faster_whisper import WhisperModel
 
     env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
-    force_cpu = device == "cpu" or env_device == "cpu"
+    settings_force_cpu = getattr(settings, "WHISPER_FORCE_CPU", False)
+    force_cpu = (
+        device == "cpu"
+        or env_device == "cpu"
+        or (settings_force_cpu and device != "cuda")
+    )
     debug_gpu = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
     target_device = "cpu" if force_cpu else "cuda"
 
@@ -464,13 +475,14 @@ def burn_subtitles(
         if ":" in srt_str:
             srt_str = srt_str.replace(":", "\\:")
         vf = f"subtitles='{srt_str}':force_style='{force_style}':original_size={video_w}x{video_h}"
+    use_gpu = has_nvenc()
     cmd = [
         settings.FFMPEG_BIN, "-y",
         *resilient_decode_options(),
         *resilient_input_demuxer_flags(),
         "-i", str(video_path),
         "-vf", vf,
-        *video_encode_args_burn_cpu(),
+        *video_encode_args_burn(use_gpu),
         "-c:a", "copy",
         "-movflags", "+faststart",
         str(output_path),

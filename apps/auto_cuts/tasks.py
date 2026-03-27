@@ -29,6 +29,7 @@ from apps.auto_cuts.services.video_chunks import (
 from apps.jobs.services.ffmpeg import (
     concat_with_xfade,
     ffprobe_duration,
+    has_nvenc,
     normalize_video_to_canvas,
     seconds_to_tc,
 )
@@ -489,11 +490,14 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     if not vert_mode:
         brand = getattr(analysis, "brand", None)
         vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
-    finalizar_auto_cut_task.run(
-        analysis.id,
-        vertical_mode=vert_mode,
-        horizontal_logo_x=20,
-        horizontal_logo_y=20,
+    finalizar_auto_cut_task.apply_async(
+        args=[analysis.id],
+        kwargs={
+            "vertical_mode": vert_mode,
+            "horizontal_logo_x": 20,
+            "horizontal_logo_y": 20,
+        },
+        queue=settings.CELERY_QUEUE_RENDER,
     )
     logger.info("[FLUXO] Ready cuts flow completed successfully.")
 
@@ -664,18 +668,19 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
                 normalized_paths: list[Path] = []
+                _gpu = has_nvenc()
                 for i, p in enumerate(parts):
                     np = tmpdir_path / f"norm_{i}.mp4"
                     # Unified FPS/SAR/audio: xfade needs matching timebase between clips (e.g. 60 vs 25 fps).
                     normalize_video_to_canvas(
-                        p, np, use_gpu=False, target_fps=30, audio_hz=48000
+                        p, np, use_gpu=_gpu, target_fps=30, audio_hz=48000
                     )
                     normalized_paths.append(np)
                 if len(normalized_paths) == 1:
                     shutil.copy(normalized_paths[0], long_path)
                 else:
                     tmp_out = tmpdir_path / "long.mp4"
-                    concat_with_xfade(normalized_paths, tmp_out, "fade", fade_d, False)
+                    concat_with_xfade(normalized_paths, tmp_out, "fade", fade_d, _gpu)
                     shutil.copy(tmp_out, long_path)
         except Exception as e:
             logger.exception("[FLUXO] Failed to assemble long video: %s", e)
@@ -789,11 +794,14 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
     if not vert_mode:
         brand = getattr(analysis, "brand", None)
         vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
-    finalizar_auto_cut_task.run(
-        analysis.id,
-        vertical_mode=vert_mode,
-        horizontal_logo_x=20,
-        horizontal_logo_y=20,
+    finalizar_auto_cut_task.apply_async(
+        args=[analysis.id],
+        kwargs={
+            "vertical_mode": vert_mode,
+            "horizontal_logo_x": 20,
+            "horizontal_logo_y": 20,
+        },
+        queue=settings.CELERY_QUEUE_RENDER,
     )
     logger.info("[FLUXO] Ready cuts batch completed (analysis=%s, long=%s).", analysis_id, bool(create_long))
 
@@ -1378,11 +1386,14 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         if not vert_mode:
             brand = getattr(analysis, "brand", None)
             vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
-        finalizar_auto_cut_task.run(
-            analysis.id,
-            vertical_mode=vert_mode,
-            horizontal_logo_x=20,
-            horizontal_logo_y=20,
+        finalizar_auto_cut_task.apply_async(
+            args=[analysis.id],
+            kwargs={
+                "vertical_mode": vert_mode,
+                "horizontal_logo_x": 20,
+                "horizontal_logo_y": 20,
+            },
+            queue=settings.CELERY_QUEUE_RENDER,
         )
         logger.info("[FLUXO] Task completed successfully.")
 
@@ -1564,6 +1575,8 @@ def finalizar_auto_cut_task(
         )
     )
 
+    use_gpu = has_nvenc()
+
     for corte in to_finalize:
         if not corte.file:
             corte.is_finalized = True
@@ -1620,7 +1633,7 @@ def finalizar_auto_cut_task(
                             font_size_text=text_font,
                             title_color=title_clr,
                             text_color=text_clr,
-                            use_gpu=False,
+                            use_gpu=use_gpu,
                         )
                         corte.file.delete(save=False)
                         with open(reformat_out, "rb") as f:
@@ -1644,7 +1657,7 @@ def finalizar_auto_cut_task(
                         with tempfile.TemporaryDirectory() as tmpdir:
                             norm_out = Path(tmpdir) / "norm_vertical.mp4"
                             normalize_video_to_canvas(
-                                work_path, norm_out, width=1080, height=1920, use_gpu=False
+                                work_path, norm_out, width=1080, height=1920, use_gpu=use_gpu
                             )
                             corte.file.delete(save=False)
                             with open(norm_out, "rb") as f:
@@ -1685,7 +1698,7 @@ def finalizar_auto_cut_task(
                                 norm_long,
                                 width=1920,
                                 height=1080,
-                                use_gpu=False,
+                                use_gpu=use_gpu,
                                 target_fps=30,
                                 audio_hz=48000,
                             )
@@ -1723,7 +1736,7 @@ def finalizar_auto_cut_task(
                             position=overlay_pos,
                             margin=overlay_m,
                             height=overlay_h,
-                            use_gpu=False,
+                            use_gpu=use_gpu,
                         )
                         corte.file.delete(save=False)
                         with open(anim_out, "rb") as f:
@@ -1752,7 +1765,7 @@ def finalizar_auto_cut_task(
                             work_path,
                             long_overlay_path,
                             lo_out,
-                            use_gpu=False,
+                            use_gpu=use_gpu,
                         )
                         corte.file.delete(save=False)
                         with open(lo_out, "rb") as f:
@@ -1787,7 +1800,7 @@ def finalizar_auto_cut_task(
                             y=horiz_logo_y,
                             logo_height=160,
                             opacity=0.8,
-                            use_gpu=False,
+                            use_gpu=use_gpu,
                         )
                         corte.file.delete(save=False)
                         with open(logo_out, "rb") as f:

@@ -205,6 +205,9 @@ CELERY_ENABLE_UTC = os.getenv("CELERY_ENABLE_UTC", "0").lower() in ("1", "true",
 # CELERY_EAGER=1: run tasks in-process (no Redis). Useful for dev without Docker.
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_EAGER", "").lower() in ("1", "true", "yes")
 CELERY_TASK_DEFAULT_QUEUE = "processing"
+# Queue names (override via env for custom deployments)
+CELERY_QUEUE_TRANSCRIPTION = os.getenv("CELERY_QUEUE_TRANSCRIPTION", "transcription")
+CELERY_QUEUE_RENDER = os.getenv("CELERY_QUEUE_RENDER", "render")
 CELERY_TASK_ROUTES = {
     # Dedicated queue for publishing/scheduling (must not be blocked by transcription/render)
     "apps.social.tasks.check_scheduled_posts_task": {"queue": "publish"},
@@ -214,13 +217,16 @@ CELERY_TASK_ROUTES = {
     "apps.social.tasks.reconcile_youtube_schedules_task": {"queue": "publish"},
     "apps.social.tasks.upload_thumbnails_after_batch_task": {"queue": "publish"},
     "apps.social.tasks.cleanup_posted_media_task": {"queue": "processing"},
-    # Heavy processing stays on the default processing queue
-    "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": "processing"},
-    "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": "processing"},
-    "apps.jobs.tasks.process_job": {"queue": "processing"},
-    "apps.jobs.tasks.generate_subtitles_task": {"queue": "processing"},
-    "apps.jobs.tasks.burn_subtitles_task": {"queue": "processing"},
+    # Transcription (CPU) can run while another worker encodes on GPU (render queue)
+    "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    "apps.jobs.tasks.generate_subtitles_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    # FFmpeg / NVENC final output (GPU when available)
+    "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": CELERY_QUEUE_RENDER},
+    "apps.jobs.tasks.process_job": {"queue": CELERY_QUEUE_RENDER},
+    "apps.jobs.tasks.burn_subtitles_task": {"queue": CELERY_QUEUE_RENDER},
 }
+# Whisper: always CPU so GPU is free for NVENC (set WHISPER_FORCE_CPU=0 to allow .env / CUDA)
+WHISPER_FORCE_CPU = os.getenv("WHISPER_FORCE_CPU", "1").lower() in ("1", "true", "yes")
 
 
 # FFmpeg
