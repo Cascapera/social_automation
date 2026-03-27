@@ -75,6 +75,9 @@ services:
     command: celery -A config worker -l INFO -P solo -Q transcription
 
   # FFmpeg / NVENC (finalize, export, burn subs) + default processing (extract_cuts, etc.)
+  # GPU: required for h264_nvenc in parallel with CPU transcription (celery has no GPU).
+  # Host needs NVIDIA driver + Docker GPU support (Linux: nvidia-container-toolkit;
+  # Windows: Docker Desktop + WSL2 GPU enabled). If you have no GPU, remove `gpus` below.
   celery_render:
     build: .
     env_file: .env
@@ -83,6 +86,8 @@ services:
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
     volumes:
       - .:/app
     depends_on:
@@ -94,6 +99,7 @@ services:
         condition: service_started
     networks:
       - app
+    gpus: all
     command: celery -A config worker -l INFO -P solo -Q render,processing
 
   celery_publish:

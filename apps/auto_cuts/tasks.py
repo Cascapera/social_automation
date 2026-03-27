@@ -836,7 +836,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
     # Idempotency: if already done, skip reprocessing (avoids loop when Celery
     # stalls freeing GPU and the task is redelivered after restart)
     if analysis.status == "done":
-        logger.info("[FLUXO] Analysis %s already completed; skipping re-run.", analysis_id)
+        logger.debug(
+            "[FLUXO] Analysis %s already done; skip duplicate task delivery (idempotent).",
+            analysis_id,
+        )
         return
 
     # Cooperative queue pause: does not interrupt a running job, only prevents
@@ -1403,6 +1406,19 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             return
         AutoCutAnalysis.objects.filter(id=analysis_id).update(status="error", error=str(e))
         raise
+    finally:
+        # Marca vídeo YouTube só após sucesso (manual) para a busca automática não repetir.
+        try:
+            from apps.auto_cuts.services.youtube_fetch import register_manual_youtube_success
+
+            done = AutoCutAnalysis.objects.filter(id=analysis_id).first()
+            if done and done.status == "done":
+                register_manual_youtube_success(done)
+        except Exception:
+            logger.exception(
+                "[FLUXO] register_manual_youtube_success failed (analysis_id=%s)",
+                analysis_id,
+            )
 
 
 # Default subtitle style (emoji-capable font).

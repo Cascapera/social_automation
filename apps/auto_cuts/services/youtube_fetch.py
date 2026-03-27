@@ -30,6 +30,40 @@ def extract_video_id(url: str) -> str | None:
         vid = (qs.get("v") or [None])[0]
         return str(vid).strip() if vid and len(str(vid)) == 11 else None
     return None
+
+
+def register_manual_youtube_success(analysis) -> None:
+    """
+    After a **manual** analysis finishes successfully (status done), record the YouTube video id
+    so `check_and_fetch_new_videos_task` does not pick the same video again.
+
+    Do not call for auto-fetch jobs (``user_id`` is None): those already register
+    ``ProcessedYoutubeVideo`` when the job is enqueued.
+
+    Registering only on success allows a failed manual run to leave the video available
+    for automatic fetch; the user can re-run the same URL without an early duplicate row.
+    """
+    if getattr(analysis, "user_id", None) is None:
+        return
+    youtube_url = (getattr(analysis, "youtube_url", None) or "").strip()
+    if not youtube_url:
+        return
+    vid = extract_video_id(youtube_url)
+    if not vid:
+        return
+    brand = getattr(analysis, "brand", None)
+    factory_id = getattr(brand, "factory_id", None) if brand else None
+    if not factory_id:
+        return
+    from apps.brands.models import ProcessedYoutubeVideo
+
+    ProcessedYoutubeVideo.objects.get_or_create(
+        factory_id=factory_id,
+        youtube_video_id=vid,
+        defaults={"source": "manual"},
+    )
+
+
 HANDLE_PATTERN = re.compile(r"(?:youtube\.com/@|youtube\.com/c/|@)([A-Za-z0-9_.-]+)")
 
 

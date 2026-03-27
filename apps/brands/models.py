@@ -330,12 +330,12 @@ class FactoryYouTubeCheckCredential(models.Model):
 
 class ProcessedYoutubeVideo(models.Model):
     """
-    Registro global de vídeos YouTube já processados (manual ou automático).
-    Evita reprocessar o mesmo vídeo em qualquer factory.
+    Registro global de vídeos YouTube já processados com sucesso (manual ou automático).
+    A busca automática (``tasks_auto_fetch``) ignora estes IDs; jobs manuais não usam isto
+    para bloquear reprocessamento — só gravamos após análise manual concluída (``done``).
 
     IMPORTANTE: Este registro NÃO deve ser apagado ao deletar jobs ou mídias.
     Não há FK para AutoCutAnalysis — deletar job não afeta este registro.
-    Os registros permanecem para que o fluxo automático não reprocesse o mesmo vídeo.
     """
     factory = models.ForeignKey(
         Factory,

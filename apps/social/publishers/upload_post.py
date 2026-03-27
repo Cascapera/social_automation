@@ -1,8 +1,9 @@
 """Publisher para Upload-Post.com (TikTok, X, Instagram)."""
 import logging
 import os
-from datetime import UTC, timedelta
+from datetime import timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from django.conf import settings
@@ -20,7 +21,14 @@ PLATFORM_MAP = {
 
 
 def _format_scheduled_date(scheduled_at, tz_name: str) -> str | None:
-    """Formata scheduled_at para ISO-8601 em UTC. Retorna None se no passado ou muito próximo."""
+    """
+    Formata scheduled_at para Upload-Post.
+
+    Docs: quando ``timezone`` (IANA) é enviado, ``scheduled_date`` é interpretado **nesse fuso**
+    (horário de parede local), não como instante UTC com sufixo Z.
+    Enviar UTC com ``Z`` + ``timezone=America/Sao_Paulo`` fazia a API tratar ``15:00`` como
+    horário local (ex.: usuário queria 12:00 BR = 15:00 UTC no banco → aparecia 15:00 no painel).
+    """
     if not scheduled_at:
         return None
     if timezone.is_naive(scheduled_at):
@@ -28,8 +36,13 @@ def _format_scheduled_date(scheduled_at, tz_name: str) -> str | None:
     # Só agenda se for pelo menos 2 min no futuro
     if scheduled_at <= timezone.now() + timedelta(minutes=2):
         return None
-    utc_dt = scheduled_at.astimezone(UTC)
-    return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        tz = ZoneInfo((tz_name or "").strip() or "America/Sao_Paulo")
+    except Exception:
+        tz = ZoneInfo("America/Sao_Paulo")
+    local_dt = scheduled_at.astimezone(tz)
+    # ISO local sem Z — combina com o parâmetro ``timezone`` do form.
+    return local_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 class UploadPostPublishError(Exception):
@@ -88,7 +101,11 @@ def publish_to_upload_post(
             ]
             if scheduled_date_str:
                 form_data.append(("scheduled_date", scheduled_date_str))
-                logger.info("[UploadPost] Agendado para %s (timezone=%s)", scheduled_date_str, timezone_name)
+                logger.info(
+                    "[UploadPost] Agendado local %s (timezone=%s)",
+                    scheduled_date_str,
+                    timezone_name,
+                )
             for pc in platform_codes:
                 form_data.append(("platform[]", pc))
             # async_upload=true: retorna rápido com request_id, processa em background. Evita 504/499 em vídeos grandes.

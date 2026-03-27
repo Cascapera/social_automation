@@ -1595,8 +1595,10 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Bloqueio de duplicata: só na busca automática (tasks_auto_fetch).
-        # Processamento manual pode reprocessar o mesmo vídeo quantas vezes quiser.
+        # Duplicata para a busca automática: ProcessedYoutubeVideo é gravado só após análise
+        # manual concluída com sucesso (ver register_manual_youtube_success em analyze_auto_cuts_task).
+        # Assim o mesmo URL pode ser reprocessado se o job falhou; a busca automática continua
+        # ignorando vídeos já processados com sucesso (manual ou auto).
 
         # Nome do job: usuário informou, nome do vídeo, ou "Job N"
         if name and name.strip():
@@ -1634,19 +1636,6 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             long_overlay_asset_id=long_overlay_asset_id if long_overlay_enabled else None,
         )
         analysis.save()
-
-        # Registra vídeo processado (manual) para evitar reprocessamento
-        if youtube_url:
-            from apps.auto_cuts.services.youtube_fetch import extract_video_id
-            from apps.brands.models import ProcessedYoutubeVideo
-
-            video_id = extract_video_id(youtube_url)
-            if video_id and analysis.brand_id and analysis.brand.factory_id:
-                ProcessedYoutubeVideo.objects.get_or_create(
-                    factory_id=analysis.brand.factory_id,
-                    youtube_video_id=video_id,
-                    defaults={"source": "manual"},
-                )
 
         analyze_auto_cuts_task.delay(analysis.id)
 
