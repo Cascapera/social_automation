@@ -1371,8 +1371,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     if target_brand:
         brand = target_brand
 
-    _yt_platforms = [p for p in (post.platforms or []) if p in YOUTUBE_PLATFORM_CODES]
     _brand_id = brand.id if brand else None
+    # Upload Post targets (TIKTOK, X, INSTAGRAM, YOUTUBE) — same list later passed to the API.
+    upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
+    _post_platforms = list(post.platforms or [])
     log_event(
         logger,
         event="publish_started",
@@ -1382,7 +1384,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         platform="youtube",
         status="started",
         attempt_number=current_attempt,
-        platforms=_yt_platforms,
+        post_platforms=_post_platforms,
+        upload_post_platforms=list(upload_post_platforms),
     )
 
     # Factory pause: does not stop content generation, only holds scheduling/posting.
@@ -1417,7 +1420,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
 
     # Upload-Post (preferred): TikTok, X, Instagram, YouTube when enabled on brand.
     # Short and long. Retry 2x at 10s. Fallback to YouTube API on failure.
-    upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
+    # (upload_post_platforms was built above for logging; mutate in place below.)
     # Long-form above limit (~250MB): Upload-Post rejects; use native YouTube API (resumable upload).
     if upload_post_platforms and "YTB" in (post.platforms or []):
         try:
