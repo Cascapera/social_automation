@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential, Factory
+from apps.jobs.logging_utils import Timer, get_correlation_id, log_event, new_correlation_id
 from apps.jobs.models import (
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
@@ -24,7 +25,6 @@ from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
 )
-from apps.jobs.logging_utils import Timer, log_event, new_correlation_id, get_correlation_id
 from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
 
 logger = logging.getLogger(__name__)
