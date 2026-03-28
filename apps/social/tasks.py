@@ -24,6 +24,7 @@ from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
 )
+from apps.jobs.logging_utils import Timer, log_event, new_correlation_id, get_correlation_id
 from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
 
 logger = logging.getLogger(__name__)
@@ -891,16 +892,21 @@ def check_scheduled_posts_task():
     }
 
 
-@shared_task
-def generate_daily_factory_schedules_task():
+@shared_task(bind=True)
+def generate_daily_factory_schedules_task(self):
     """
     Every 30 min: for each active factory, if past fixed schedule time
     (daily_schedule_start_time, default 19:00) and next day's schedule not yet generated, generate it.
     Videos are scheduled for the following day (e.g. at 19:00 on 10/03 schedules for 11/03 8:00, 9:00...).
     """
+    task_id: str = self.request.id or ""
+    correlation_id = new_correlation_id()
+    task_timer = Timer()
+
     now = timezone.now()
     created_total = 0
     generated = 0
+
     for factory in Factory.objects.filter(is_active=True, scheduling_paused=False).order_by("id"):
         tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
         now_local = now.astimezone(tz)
@@ -911,16 +917,49 @@ def generate_daily_factory_schedules_task():
             continue
         if FactoryScheduleRun.objects.filter(factory=factory, run_date=target_date).exists():
             continue
+
+        factory_timer = Timer()
         try:
             result = generate_daily_schedule_for_factory(
-                factory, now_utc=now, target_date=target_date
+                factory,
+                now_utc=now,
+                target_date=target_date,
+                correlation_id=correlation_id,
             )
-            if result.get("created", 0):
+            posts_created = int(result.get("created", 0))
+            if posts_created:
                 generated += 1
-                created_total += int(result.get("created", 0))
-        except Exception:
+                created_total += posts_created
+            log_event(
+                logger,
+                event="schedule_run_finished",
+                correlation_id=correlation_id,
+                task_id=task_id,
+                factory_id=factory.id,
+                schedule_run_id=result.get("run_id"),
+                number_of_posts=posts_created,
+                status="success",
+                duration_ms=factory_timer.elapsed_ms(),
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                event="schedule_run_failed",
+                correlation_id=correlation_id,
+                task_id=task_id,
+                factory_id=factory.id,
+                status="error",
+                duration_ms=factory_timer.elapsed_ms(),
+                error=str(exc),
+            )
             logger.exception("Failed to generate daily schedule for factory=%s", factory.id)
-    return {"generated_factories": generated, "created_posts": created_total}
+
+    return {
+        "generated_factories": generated,
+        "created_posts": created_total,
+        "correlation_id": correlation_id,
+        "duration_ms": round(task_timer.elapsed_ms(), 2),
+    }
 
 
 @shared_task
@@ -930,24 +969,14 @@ def reconcile_youtube_schedules_task():
     If missing, re-queue without blocking others.
     Clean local media only after real confirmation.
     """
-    now = timezone.now()
-    window_start = now - timedelta(days=1)
-    window_end = now + timedelta(days=1)
-    # Only PENDING and POSTING: DONE already confirmed; re-check would waste quota.
-    candidates = (
-        ScheduledPost.objects.select_related(
-            "job",
-            "job__brand",
-            "social_account",
-            "auto_cut_corte",
-            "auto_cut_corte__analysis",
-        )
-        .filter(
-            status__in=["PENDING", "POSTING"],
-            scheduled_at__gte=window_start,
-            scheduled_at__lte=window_end,
-        )
-        .order_by("scheduled_at", "id")[:500]
+    _reconcile_cid = new_correlation_id()
+    _reconcile_timer = Timer()
+    log_event(
+        logger,
+        event="publish_reconciliation_started",
+        correlation_id=_reconcile_cid,
+        platform="youtube",
+        status="started",
     )
     checked = 0
     confirmed = 0
@@ -956,55 +985,98 @@ def reconcile_youtube_schedules_task():
     skipped = 0
     removed_missing = 0
     still_scheduled = 0
-    for post in candidates:
-        platform = _first_youtube_platform(post.platforms)
-        if not platform:
-            continue
-        video_id = str((post.external_ids or {}).get(platform) or "")
-        if not video_id:
-            # No external id — cannot reconcile on channel.
-            skipped += 1
-            continue
-        checked += 1
-        brand = _resolve_post_target_brand(post)
-        if not brand:
-            skipped += 1
-            continue
-        account = _resolve_social_account_for_platform(post, brand, platform)
-        if not account:
-            skipped += 1
-            continue
-        exists = False
-        verify_data = {}
-        exists, verify_data = _youtube_verify_exists_with_credential_fallback(account, brand, video_id)
-        if exists:
-            publish_at_raw = verify_data.get("publish_at")
-            publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
-            if publish_at and timezone.is_naive(publish_at):
-                publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-            # Confirmed on YouTube (already published or scheduled): mark POSTED
-            # and skip re-check to save API quota.
-            confirmed += 1
-            _mark_factory_posting_verified(
-                post,
-                platform=platform,
-                external_video_id=video_id,
-                metadata=verify_data,
+    try:
+        now = timezone.now()
+        window_start = now - timedelta(days=1)
+        window_end = now + timedelta(days=1)
+        # Only PENDING and POSTING: DONE already confirmed; re-check would waste quota.
+        candidates = (
+            ScheduledPost.objects.select_related(
+                "job",
+                "job__brand",
+                "social_account",
+                "auto_cut_corte",
+                "auto_cut_corte__analysis",
             )
-            _cleanup_local_media_if_possible(post)
-            continue
-        # Only remove when there is evidence of real absence.
-        if _should_remove_missing_by_verify_error(verify_data):
-            _remove_schedule_records_missing_on_youtube(post, verify_data.get("error", "unknown"))
-            removed_missing += 1
-            continue
-        # Temporary error (auth/network/etc): keep scheduled and revalidate next cycle.
-        skipped += 1
-        _mark_factory_posting_still_scheduled(
-            post,
-            publish_at_raw=None,
-            note=f"Falha temporária na confirmação YouTube: {verify_data.get('error', 'unknown')}",
+            .filter(
+                status__in=["PENDING", "POSTING"],
+                scheduled_at__gte=window_start,
+                scheduled_at__lte=window_end,
+            )
+            .order_by("scheduled_at", "id")[:500]
         )
+        for post in candidates:
+            platform = _first_youtube_platform(post.platforms)
+            if not platform:
+                continue
+            video_id = str((post.external_ids or {}).get(platform) or "")
+            if not video_id:
+                # No external id — cannot reconcile on channel.
+                skipped += 1
+                continue
+            checked += 1
+            brand = _resolve_post_target_brand(post)
+            if not brand:
+                skipped += 1
+                continue
+            account = _resolve_social_account_for_platform(post, brand, platform)
+            if not account:
+                skipped += 1
+                continue
+            exists = False
+            verify_data = {}
+            exists, verify_data = _youtube_verify_exists_with_credential_fallback(account, brand, video_id)
+            if exists:
+                publish_at_raw = verify_data.get("publish_at")
+                publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
+                if publish_at and timezone.is_naive(publish_at):
+                    publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
+                # Confirmed on YouTube (already published or scheduled): mark POSTED
+                # and skip re-check to save API quota.
+                confirmed += 1
+                _mark_factory_posting_verified(
+                    post,
+                    platform=platform,
+                    external_video_id=video_id,
+                    metadata=verify_data,
+                )
+                _cleanup_local_media_if_possible(post)
+                continue
+            # Only remove when there is evidence of real absence.
+            if _should_remove_missing_by_verify_error(verify_data):
+                _remove_schedule_records_missing_on_youtube(post, verify_data.get("error", "unknown"))
+                removed_missing += 1
+                continue
+            # Temporary error (auth/network/etc): keep scheduled and revalidate next cycle.
+            skipped += 1
+            _mark_factory_posting_still_scheduled(
+                post,
+                publish_at_raw=None,
+                note=f"Falha temporária na confirmação YouTube: {verify_data.get('error', 'unknown')}",
+            )
+    except Exception as exc:
+        log_event(
+            logger,
+            event="publish_reconciliation_failed",
+            correlation_id=_reconcile_cid,
+            platform="youtube",
+            status="error",
+            duration_ms=_reconcile_timer.elapsed_ms(),
+            error=str(exc),
+        )
+        raise
+    log_event(
+        logger,
+        event="publish_reconciliation_finished",
+        correlation_id=_reconcile_cid,
+        platform="youtube",
+        status="success",
+        duration_ms=_reconcile_timer.elapsed_ms(),
+        checked=checked,
+        confirmed=confirmed,
+        removed_missing=removed_missing,
+        skipped=skipped,
+    )
     return {
         "checked": checked,
         "confirmed": confirmed,
@@ -1236,6 +1308,9 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     Posting logic (direct call or via task).
     Do not call post_to_platforms_task.apply() from inside another task (deadlock).
     """
+    correlation_id = get_correlation_id() or new_correlation_id()
+    _timer = Timer()
+
     try:
         post = ScheduledPost.objects.select_related(
             "job",
@@ -1295,6 +1370,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     target_brand = _resolve_post_target_brand(post)
     if target_brand:
         brand = target_brand
+
+    _yt_platforms = [p for p in (post.platforms or []) if p in YOUTUBE_PLATFORM_CODES]
+    _brand_id = brand.id if brand else None
+    log_event(
+        logger,
+        event="publish_started",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=_brand_id,
+        platform="youtube",
+        status="started",
+        attempt_number=current_attempt,
+        platforms=_yt_platforms,
+    )
 
     # Factory pause: does not stop content generation, only holds scheduling/posting.
     if brand and getattr(brand, "factory_id", None):
@@ -1546,7 +1635,19 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             last_exception = None
             last_is_retriable = False
             last_reason = ""
-            for yt_cred in available_credentials:
+            for _cred_idx, yt_cred in enumerate(available_credentials, 1):
+                _attempt_timer = Timer()
+                log_event(
+                    logger,
+                    event="publish_attempt_started",
+                    correlation_id=correlation_id,
+                    scheduled_post_id=post.id,
+                    brand_id=_brand_id,
+                    platform="youtube",
+                    status="started",
+                    attempt_number=_cred_idx,
+                    youtube_credential_id=yt_cred.id,
+                )
                 try:
                     result = publisher.publish(
                         account,
@@ -1565,6 +1666,19 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         yt_cred.quota_exceeded_until = None
                         yt_cred.last_error = ""
                         yt_cred.save(update_fields=["quota_exceeded_until", "last_error", "updated_at"])
+                    log_event(
+                        logger,
+                        event="publish_attempt_succeeded",
+                        correlation_id=correlation_id,
+                        scheduled_post_id=post.id,
+                        brand_id=_brand_id,
+                        platform="youtube",
+                        status="success",
+                        attempt_number=_cred_idx,
+                        duration_ms=_attempt_timer.elapsed_ms(),
+                        external_video_id=video_id or "",
+                        youtube_credential_id=yt_cred.id,
+                    )
                     published = True
                     break
                 except Exception as e:
@@ -1574,6 +1688,21 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     last_exception = e
                     last_is_retriable = is_retriable
                     last_reason = reason
+                    log_event(
+                        logger,
+                        event="publish_attempt_failed",
+                        correlation_id=correlation_id,
+                        scheduled_post_id=post.id,
+                        brand_id=_brand_id,
+                        platform="youtube",
+                        status="error",
+                        attempt_number=_cred_idx,
+                        duration_ms=_attempt_timer.elapsed_ms(),
+                        error=msg,
+                        reason=reason,
+                        retriable=is_retriable,
+                        youtube_credential_id=yt_cred.id,
+                    )
                     if not is_retriable and (
                         "sem tokens" in msg.lower()
                         or "oauth do youtube não configurado" in msg.lower()
@@ -1723,6 +1852,19 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 )
             except Exception:
                 pass
+            log_event(
+                logger,
+                event="publish_failed",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                brand_id=_brand_id,
+                platform="youtube",
+                status="error",
+                duration_ms=_timer.elapsed_ms(),
+                error=msg,
+                attempt_number=current_attempt,
+                retry_scheduled_in_seconds=delay,
+            )
             _sync_factory_posting_schedule(post)
             return {
                 "status": post.status,
@@ -1757,6 +1899,35 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         )
     except Exception:
         pass
+    _external_video_id = str(
+        (post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or ""
+    )
+    if post.status == "DONE":
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=_brand_id,
+            platform="youtube",
+            status="success",
+            duration_ms=_timer.elapsed_ms(),
+            attempt_number=current_attempt,
+            external_video_id=_external_video_id,
+        )
+    else:
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=_brand_id,
+            platform="youtube",
+            status="error",
+            duration_ms=_timer.elapsed_ms(),
+            attempt_number=current_attempt,
+            error=post.error or "",
+        )
     _sync_factory_posting_schedule(post)
 
     # Manual posts (retry, run_scheduled_posts_now): schedule cover upload (long-form only)

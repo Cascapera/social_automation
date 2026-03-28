@@ -271,9 +271,55 @@ CORS_ALLOWED_ORIGINS = _cors_origins
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "formatters": {
+        # Plain formatter for most loggers (keeps existing behaviour).
+        "default": {
+            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        },
+        # JSON-line formatter for the schedule flow.
+        # log_event() already serialises the payload to JSON, so the
+        # message itself is a valid JSON string — this formatter just passes it
+        # through unchanged so log aggregators (Loki, CloudWatch, etc.) can
+        # parse it directly.
+        "json": {
+            "format": "%(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "default",
+        },
+        "console_json": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+        },
+    },
     "loggers": {
         "google": {"level": "WARNING"},
         "google.auth": {"level": "WARNING"},
         "googleapiclient": {"level": "WARNING"},
+        # Schedule-flow loggers emit structured JSON via log_event().
+        "apps.jobs.services.factory_scheduler": {
+            "handlers": ["console_json"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps.social.tasks": {
+            "handlers": ["console_json"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Transcription and render loggers also emit structured JSON.
+        "apps.jobs.tasks": {
+            "handlers": ["console_json"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps.auto_cuts.tasks": {
+            "handlers": ["console_json"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }

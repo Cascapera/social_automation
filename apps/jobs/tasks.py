@@ -1,3 +1,5 @@
+import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -5,6 +7,8 @@ from celery import shared_task
 from django.conf import settings
 
 from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
+from .logging_utils import Timer, log_event
+from .services.ffmpeg import has_nvenc
 from .services.pipeline import run_job
 from .services.subtitles import (
     burn_subtitles,
@@ -12,6 +16,15 @@ from .services.subtitles import (
     segments_to_ass_animated,
     segments_to_srt,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _whisper_workload_type() -> str:
+    """Return 'cpu' or 'gpu' based on the same device-selection logic as generate_subtitles."""
+    env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    force_cpu = getattr(settings, "WHISPER_FORCE_CPU", False) or env_device == "cpu"
+    return "cpu" if force_cpu else "gpu"
 
 
 @shared_task(bind=True)
@@ -47,13 +60,47 @@ def generate_subtitles_task(self, job_id: int) -> None:
     job.subtitle_error = ""
     job.save(update_fields=["subtitle_status", "subtitle_error"])
 
+    _queue = settings.CELERY_QUEUE_TRANSCRIPTION
+    _workload = _whisper_workload_type()
+    _task_id = self.request.id or ""
+    log_event(
+        logger,
+        event="transcription_started",
+        queue_name=_queue,
+        workload_type=_workload,
+        task_id=_task_id,
+        status="started",
+        source_video_id=job.id,
+    )
+    _timer = Timer()
     try:
         segments = generate_subtitles(video_path, language="pt")
         job.subtitle_segments = segments
         job.subtitle_status = "ready_for_edit"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_segments", "subtitle_status", "subtitle_error"])
+        log_event(
+            logger,
+            event="transcription_finished",
+            queue_name=_queue,
+            workload_type=_workload,
+            task_id=_task_id,
+            duration_ms=_timer.elapsed_ms(),
+            status="success",
+            source_video_id=job.id,
+        )
     except Exception as e:
+        log_event(
+            logger,
+            event="transcription_finished",
+            queue_name=_queue,
+            workload_type=_workload,
+            task_id=_task_id,
+            duration_ms=_timer.elapsed_ms(),
+            status="error",
+            error=str(e),
+            source_video_id=job.id,
+        )
         job.subtitle_status = "error"
         job.subtitle_error = str(e)
         job.save(update_fields=["subtitle_status", "subtitle_error"])
@@ -97,6 +144,19 @@ def burn_subtitles_task(self, job_id: int) -> None:
         job.save(update_fields=["subtitle_status", "subtitle_error"])
         return
 
+    _queue = settings.CELERY_QUEUE_RENDER
+    _workload = "gpu" if has_nvenc() else "cpu"
+    _task_id = self.request.id or ""
+    log_event(
+        logger,
+        event="render_started",
+        queue_name=_queue,
+        workload_type=_workload,
+        task_id=_task_id,
+        status="started",
+        job_id=job.id,
+    )
+    _timer = Timer()
     try:
         animated = (job.subtitle_style or {}).get("animated", False)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -129,7 +189,28 @@ def burn_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "burned"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        log_event(
+            logger,
+            event="render_finished",
+            queue_name=_queue,
+            workload_type=_workload,
+            task_id=_task_id,
+            duration_ms=_timer.elapsed_ms(),
+            status="success",
+            job_id=job.id,
+        )
     except Exception as e:
+        log_event(
+            logger,
+            event="render_finished",
+            queue_name=_queue,
+            workload_type=_workload,
+            task_id=_task_id,
+            duration_ms=_timer.elapsed_ms(),
+            status="error",
+            error=str(e),
+            job_id=job.id,
+        )
         job.subtitle_status = "error"
         job.subtitle_error = str(e)
         job.save(update_fields=["subtitle_status", "subtitle_error"])

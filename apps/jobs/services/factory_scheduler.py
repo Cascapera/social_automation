@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -8,12 +9,15 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.brands.models import Brand, BrandSocialAccount, Factory
+from apps.jobs.logging_utils import Timer, log_event
 from apps.jobs.models import (
     FactoryPostingSchedule,
     FactoryScheduleRun,
     ScheduledPost,
     VideoInventoryItem,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -133,6 +137,7 @@ def generate_daily_schedule_for_factory(
     target_date: date | None = None,
     brand_id: int | None = None,
     enqueue_immediately: bool = False,
+    correlation_id: str | None = None,
 ) -> dict:
     """
     Gera agenda de postagens para uma factory.
@@ -142,7 +147,9 @@ def generate_daily_schedule_for_factory(
     (mesmo os que já passaram); ScheduledPost.scheduled_at continua sendo o horário do slot em UTC,
     para YouTube/Upload Post agendarem publicação nas horas configuradas. O worker enfileira quando
     scheduled_at <= agora (slots passados) ou no fluxo antecipado do YouTube quando aplicável.
+    correlation_id: opaque token propagated from the Celery task for log correlation.
     """
+    timer = Timer()
     now_utc = now_utc or timezone.now()
     tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
     now_local = now_utc.astimezone(tz)
@@ -154,6 +161,16 @@ def generate_daily_schedule_for_factory(
     )
     if not created and not allow_rerun:
         return {"factory_id": factory.id, "created": 0, "skipped": "already_generated"}
+
+    log_event(
+        logger,
+        event="schedule_run_started",
+        correlation_id=correlation_id,
+        factory_id=factory.id,
+        schedule_run_id=run.id,
+        status="started",
+        target_date=str(local_day),
+    )
 
     created_count = 0
     day_start_local = datetime.combine(local_day, time(0, 0)).replace(tzinfo=tz)
@@ -288,4 +305,16 @@ def generate_daily_schedule_for_factory(
             item.scheduled_for = post_at_utc
             item.save(update_fields=["status", "scheduled_for", "updated_at"])
             created_count += 1
+
+    log_event(
+        logger,
+        event="scheduled_posts_generated",
+        correlation_id=correlation_id,
+        factory_id=factory.id,
+        schedule_run_id=run.id,
+        number_of_posts=created_count,
+        status="success",
+        duration_ms=timer.elapsed_ms(),
+        target_date=str(local_day),
+    )
     return {"factory_id": factory.id, "created": created_count, "run_id": run.id}

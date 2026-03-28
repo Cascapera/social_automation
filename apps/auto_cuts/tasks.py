@@ -26,6 +26,7 @@ from apps.auto_cuts.services.video_chunks import (
     extract_chunks_to_folder,
     transcribe_single_chunk,
 )
+from apps.jobs.logging_utils import Timer, log_event
 from apps.jobs.services.ffmpeg import (
     concat_with_xfade,
     ffprobe_duration,
@@ -36,6 +37,20 @@ from apps.jobs.services.ffmpeg import (
 from apps.jobs.services.subtitles import burn_subtitles, generate_subtitles, segments_to_srt
 
 logger = logging.getLogger(__name__)
+
+
+def _append_convidados(title: str, convidados: str) -> str:
+    """Append guest name(s) to a title when the analysis has convidados filled.
+
+    Example: "Sem Falsidade no Sexo! 💋🔥" + "Renato Albani"
+          -> "Sem Falsidade no Sexo! 💋🔥 + Renato Albani"
+    """
+    guest = (convidados or "").strip()
+    if not guest:
+        return title
+    base = (title or "").rstrip()
+    return f"{base} + {guest}"
+
 
 # Videos longer than this use chunked transcription (avoids OOM)
 CHUNKED_TRANSCRIPTION_THRESHOLD_SEC = 10 * 60  # 10 min
@@ -417,7 +432,7 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     if tl not in ("pt", "en"):
         tl = "pt"
     metadata = analyze_ready_cut_metadata(transcript, duration_sec, titles_language=tl)
-    title = metadata.get("title") or "Vídeo"
+    title = _append_convidados(metadata.get("title") or "Vídeo", analysis.convidados)
     # LLM returns 1–10; normalize to 0–100 (scale used elsewhere)
     raw_score = metadata.get("virality_score") or 5
     virality_score = max(0, min(100, int(float(raw_score)) * 10)) if raw_score is not None else 50
@@ -737,7 +752,10 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
     analysis.save(update_fields=["progress_message", "progress"])
 
     for i, ch in enumerate(chunks):
-        title = (title_by_index.get(str(i)) or "").strip() or f"Vídeo {i + 1}"
+        title = _append_convidados(
+            (title_by_index.get(str(i)) or "").strip() or f"Vídeo {i + 1}",
+            analysis.convidados,
+        )
         dsec = float(ch.duration_seconds or ffprobe_duration(Path(ch.file.path)))
         end_tc = seconds_to_tc(dsec)
         thumb_ts = min(4.5, max(0.5, min(dsec * 0.25, 5.0)))
@@ -922,6 +940,20 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         analysis.save(update_fields=["status", "error"])
         return
 
+    _t_queue = settings.CELERY_QUEUE_TRANSCRIPTION
+    _t_workload = "cpu" if getattr(settings, "WHISPER_FORCE_CPU", True) else "gpu"
+    _t_task_id = self.request.id or ""
+    log_event(
+        logger,
+        event="transcription_started",
+        queue_name=_t_queue,
+        workload_type=_t_workload,
+        task_id=_t_task_id,
+        status="started",
+        source_video_id=analysis_id,
+    )
+    _t_timer = Timer()
+
     try:
         duration_sec = ffprobe_duration(video_path)
         use_chunked = duration_sec > CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
@@ -991,6 +1023,18 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             analysis.error = "Transcrição vazia."
             analysis.save(update_fields=["status", "error"])
             return
+
+        log_event(
+            logger,
+            event="transcription_finished",
+            queue_name=_t_queue,
+            workload_type=_t_workload,
+            task_id=_t_task_id,
+            duration_ms=_t_timer.elapsed_ms(),
+            status="success",
+            source_video_id=analysis_id,
+            segments_count=len(segments),
+        )
 
         # "Ready cuts" flow: video already edited, only needs metadata (title, thumbnail)
         if getattr(analysis, "is_ready_cuts", False):
@@ -1240,7 +1284,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 cut_type="short",
                 start_tc=start_tc,
                 end_tc=end_tc,
-                title=item.get("title") or item.get("suggested_title", ""),
+                title=_append_convidados(
+                    item.get("title") or item.get("suggested_title", ""),
+                    analysis.convidados,
+                ),
                 reason=item.get("reason") or item.get("main_topic", ""),
                 hook=item.get("hook") or item.get("hook_sentence", ""),
                 virality_score=_normalize_virality_score(item.get("virality_score")),
@@ -1294,7 +1341,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 cut_type="long",
                 start_tc=start_tc,
                 end_tc=end_tc,
-                title=item.get("title_suggestion") or item.get("suggested_title") or item.get("title", ""),
+                title=_append_convidados(
+                    item.get("title_suggestion") or item.get("suggested_title") or item.get("title", ""),
+                    analysis.convidados,
+                ),
                 reason=item.get("reason") or item.get("main_topic", ""),
                 virality_score=_normalize_virality_score(item.get("virality_score")),
                 theme_category=theme_for_long,
@@ -1404,6 +1454,17 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         if isinstance(e, DatabaseError) and "did not affect any rows" in str(e):
             logger.info("[FLUXO] Analysis %s deleted during processing; aborting.", analysis_id)
             return
+        log_event(
+            logger,
+            event="transcription_finished",
+            queue_name=_t_queue,
+            workload_type=_t_workload,
+            task_id=_t_task_id,
+            duration_ms=_t_timer.elapsed_ms(),
+            status="error",
+            error=str(e),
+            source_video_id=analysis_id,
+        )
         AutoCutAnalysis.objects.filter(id=analysis_id).update(status="error", error=str(e))
         raise
     finally:
@@ -1592,6 +1653,20 @@ def finalizar_auto_cut_task(
     )
 
     use_gpu = has_nvenc()
+    _queue = settings.CELERY_QUEUE_RENDER
+    _workload = "gpu" if use_gpu else "cpu"
+    _task_id = self.request.id or ""
+    log_event(
+        logger,
+        event="render_started",
+        queue_name=_queue,
+        workload_type=_workload,
+        task_id=_task_id,
+        status="started",
+        analysis_id=analysis_id,
+        cuts_to_finalize=len(to_finalize),
+    )
+    _render_timer = Timer()
 
     for corte in to_finalize:
         if not corte.file:
@@ -1894,3 +1969,14 @@ def finalizar_auto_cut_task(
     # Inventory was synced above. Automatic scheduling runs ONLY at 19:00
     # via cron (generate_daily_factory_schedules_task). Not triggered here to avoid
     # scheduling new cuts outside the expected window.
+    log_event(
+        logger,
+        event="render_finished",
+        queue_name=_queue,
+        workload_type=_workload,
+        task_id=_task_id,
+        duration_ms=_render_timer.elapsed_ms(),
+        status="success",
+        analysis_id=analysis_id,
+        cuts_finalized=len(to_finalize),
+    )
