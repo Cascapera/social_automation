@@ -11,7 +11,12 @@ from django.http import HttpResponse
 
 def prometheus_metrics(request):
     try:
-        from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest, multiprocess
+        from prometheus_client import (
+            CONTENT_TYPE_LATEST,
+            CollectorRegistry,
+            generate_latest,
+            multiprocess,
+        )
     except ImportError:
         return HttpResponse(
             "# prometheus_client not installed; rebuild the Docker image (pip install -r requirements.txt)\n",
