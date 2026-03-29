@@ -14,6 +14,14 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential, Factory
+from apps.common.metrics import (
+    publish_attempts_total,
+    publish_duration_ms,
+    publish_failures_total,
+    publish_reconciliation_duration_ms,
+    publish_reconciliation_failures_total,
+    publish_reconciliation_runs_total,
+)
 from apps.jobs.logging_utils import Timer, get_correlation_id, log_event, new_correlation_id
 from apps.jobs.models import (
     FactoryPostingAttemptLog,
@@ -978,6 +986,7 @@ def reconcile_youtube_schedules_task():
         platform="youtube",
         status="started",
     )
+    publish_reconciliation_runs_total.inc()
     checked = 0
     confirmed = 0
     requeued = 0
@@ -1055,6 +1064,7 @@ def reconcile_youtube_schedules_task():
                 note=f"Falha temporária na confirmação YouTube: {verify_data.get('error', 'unknown')}",
             )
     except Exception as exc:
+        publish_reconciliation_failures_total.inc()
         log_event(
             logger,
             event="publish_reconciliation_failed",
@@ -1065,6 +1075,7 @@ def reconcile_youtube_schedules_task():
             error=str(exc),
         )
         raise
+    publish_reconciliation_duration_ms.observe(_reconcile_timer.elapsed_ms())
     log_event(
         logger,
         event="publish_reconciliation_finished",
@@ -1387,6 +1398,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         post_platforms=_post_platforms,
         upload_post_platforms=list(upload_post_platforms),
     )
+    publish_attempts_total.inc()
 
     # Factory pause: does not stop content generation, only holds scheduling/posting.
     if brand and getattr(brand, "factory_id", None):
@@ -1906,6 +1918,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         (post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or ""
     )
     if post.status == "DONE":
+        publish_duration_ms.observe(_timer.elapsed_ms())
         log_event(
             logger,
             event="publish_finished",
@@ -1919,6 +1932,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             external_video_id=_external_video_id,
         )
     else:
+        publish_failures_total.inc()
         log_event(
             logger,
             event="publish_finished",

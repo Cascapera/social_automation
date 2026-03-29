@@ -146,11 +146,17 @@ This platform automates the entire pipeline using AI and distributed systems, en
 
 ---
 
-## 🔍 Observability (in progress)
+## 🔍 Observability
 
-- Structured logging with correlation IDs
-- Distributed tracing for pipeline stages
-- Metrics for job throughput and latency
+Structured **JSON** logs (`log_event` in `apps/jobs/logging_utils.py`), **correlation IDs** across Celery task flows, and event-style records for **scheduling**, **transcription**, **render**, **publish**, and **YouTube reconciliation**.
+
+**Metrics:** Prometheus counters and histograms (`prometheus_client`, `GET /metrics/`) cover transcription, render, publish, and reconciliation. Transcription and render include a **`workload_type`** label (`cpu` / `gpu`) where applicable (Whisper and NVENC-related paths).
+
+**Multiprocess:** Task metrics are updated inside Celery worker processes; **`PROMETHEUS_MULTIPROC_DIR`** must reference a **directory shared** by the Django web process and workers so `/metrics/` can aggregate them (prometheus_client multiprocess mode). Docker Compose in this repo mounts a named volume and sets the variable—see [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
+
+**Validation:** Logs and reconciliation metrics have been checked in running environments. Publish metrics are implemented but not yet validated end-to-end in live runs, to avoid **unnecessary YouTube API quota** during testing.
+
+Further detail: [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 
 ---
 

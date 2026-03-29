@@ -19,10 +19,13 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from social_automation.metrics_view import prometheus_metrics
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("apps.api.urls")),
     path("social/youtube/", include("apps.social.urls")),
+    path("metrics/", prometheus_metrics),
 ]
 
 if settings.DEBUG:

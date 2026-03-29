@@ -6,6 +6,15 @@ from pathlib import Path
 from celery import shared_task
 from django.conf import settings
 
+from apps.common.metrics import (
+    render_duration_ms,
+    render_failures_total,
+    render_jobs_total,
+    transcription_duration_ms,
+    transcription_failures_total,
+    transcription_jobs_total,
+)
+
 from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
 from .logging_utils import Timer, log_event
 from .services.ffmpeg import has_nvenc
@@ -72,6 +81,7 @@ def generate_subtitles_task(self, job_id: int) -> None:
         status="started",
         source_video_id=job.id,
     )
+    transcription_jobs_total.labels(workload_type=_workload).inc()
     _timer = Timer()
     try:
         segments = generate_subtitles(video_path, language="pt")
@@ -79,6 +89,7 @@ def generate_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "ready_for_edit"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_segments", "subtitle_status", "subtitle_error"])
+        transcription_duration_ms.labels(workload_type=_workload).observe(_timer.elapsed_ms())
         log_event(
             logger,
             event="transcription_finished",
@@ -90,6 +101,7 @@ def generate_subtitles_task(self, job_id: int) -> None:
             source_video_id=job.id,
         )
     except Exception as e:
+        transcription_failures_total.labels(workload_type=_workload).inc()
         log_event(
             logger,
             event="transcription_finished",
@@ -156,6 +168,7 @@ def burn_subtitles_task(self, job_id: int) -> None:
         status="started",
         job_id=job.id,
     )
+    render_jobs_total.labels(workload_type=_workload).inc()
     _timer = Timer()
     try:
         animated = (job.subtitle_style or {}).get("animated", False)
@@ -189,6 +202,7 @@ def burn_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "burned"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        render_duration_ms.labels(workload_type=_workload).observe(_timer.elapsed_ms())
         log_event(
             logger,
             event="render_finished",
@@ -200,6 +214,7 @@ def burn_subtitles_task(self, job_id: int) -> None:
             job_id=job.id,
         )
     except Exception as e:
+        render_failures_total.labels(workload_type=_workload).inc()
         log_event(
             logger,
             event="render_finished",
