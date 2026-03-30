@@ -19,6 +19,12 @@ A **correlation ID** ties related log lines together within a Celery task or flo
 
 Search logs by the `correlation_id` field in each JSON line.
 
+### Persisted correlation (jobs + publish)
+
+For **jobs**, `Job.correlation_id` is created on first touch (`ensure_job_correlation_id` in `apps/jobs/logging_utils.py`) and reused by transcription, render (`burn_subtitles_task`), and pipeline (`process_job`) so one ID spans all Celery workers.
+
+For **publish**, `resolve_scheduled_post_correlation_id` uses the same **`Job.correlation_id`** when the `ScheduledPost` is linked to a job (end-to-end trace from pipeline to platforms). Posts without a job (e.g. AutoCut-only) persist a dedicated `ScheduledPost.correlation_id` on first publish attempt.
+
 ### Typical events (non-exhaustive)
 
 | Area | Examples |

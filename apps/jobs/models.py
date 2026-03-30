@@ -107,6 +107,14 @@ class Job(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
     archived = models.BooleanField(default=False)
 
+    correlation_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="ID estável para tracing deste job entre tasks Celery (transcrição, render, pipeline).",
+    )
+
     # Legendas (Whisper)
     subtitle_status = models.CharField(
         max_length=20,
@@ -197,6 +205,13 @@ class ScheduledPost(models.Model):
         help_text="IDs externos por plataforma (ex.: {'YT': 'abc123'}).",
     )
     retry_count = models.PositiveSmallIntegerField(default=0)
+    correlation_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="ID estável para tracing da publicação (AutoCut sem Job). Com Job, usa Job.correlation_id.",
+    )
     status = models.CharField(max_length=10, choices=STATUS, default="PENDING")
     error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

@@ -16,7 +16,7 @@ from apps.common.metrics import (
 )
 
 from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
-from .logging_utils import Timer, log_event
+from .logging_utils import Timer, ensure_job_correlation_id, log_event
 from .services.ffmpeg import has_nvenc
 from .services.pipeline import run_job
 from .services.subtitles import (
@@ -38,6 +38,10 @@ def _whisper_workload_type() -> str:
 
 @shared_task(bind=True)
 def process_job(self, job_id: int) -> None:
+    from .models import Job
+
+    job = Job.objects.get(id=job_id)
+    ensure_job_correlation_id(job)
     run_job(job_id)
 
 
@@ -46,6 +50,7 @@ def generate_subtitles_task(self, job_id: int) -> None:
     from .models import Job
 
     job = Job.objects.get(id=job_id)
+    ensure_job_correlation_id(job)
     try:
         out = job.output
         if not out or not out.file:
@@ -126,6 +131,7 @@ def burn_subtitles_task(self, job_id: int) -> None:
     from .models import Job
 
     job = Job.objects.get(id=job_id)
+    ensure_job_correlation_id(job)
     try:
         out = job.output
         if not out or not out.file:

@@ -84,6 +84,7 @@ class JobAdmin(admin.ModelAdmin):
     list_filter = ("status", "archived")
     search_fields = ("job_cuts__cut__source__title", "job_cuts__cut__name")
     readonly_fields = (
+        "correlation_id",
         "status", "progress", "log", "error",
         "created_at", "started_at", "finished_at",
     )

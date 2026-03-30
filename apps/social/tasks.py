@@ -22,7 +22,12 @@ from apps.common.metrics import (
     publish_reconciliation_failures_total,
     publish_reconciliation_runs_total,
 )
-from apps.jobs.logging_utils import Timer, get_correlation_id, log_event, new_correlation_id
+from apps.jobs.logging_utils import (
+    Timer,
+    log_event,
+    new_correlation_id,
+    resolve_scheduled_post_correlation_id,
+)
 from apps.jobs.models import (
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
@@ -1319,7 +1324,6 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     Posting logic (direct call or via task).
     Do not call post_to_platforms_task.apply() from inside another task (deadlock).
     """
-    correlation_id = get_correlation_id() or new_correlation_id()
     _timer = Timer()
 
     try:
@@ -1334,6 +1338,9 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         ).get(id=scheduled_post_id)
     except ScheduledPost.DoesNotExist:
         return {"error": "ScheduledPost não encontrado"}
+
+    correlation_id = resolve_scheduled_post_correlation_id(post)
+
     if post.status != "PENDING":
         return {"skipped": "status não é PENDING"}
     current_attempt = int(post.retry_count or 0) + 1

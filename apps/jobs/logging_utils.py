@@ -43,6 +43,56 @@ def new_correlation_id() -> str:
     return cid
 
 
+def ensure_job_correlation_id(job) -> str:
+    """Return a stable correlation ID for this Job (persisted on the row).
+
+    The first Celery task that touches the job creates the ID; transcription, render,
+    and pipeline tasks reuse it so logs share one ``correlation_id`` end-to-end.
+
+    Sets the ContextVar so ``log_event()`` without an explicit ID uses the same value.
+    """
+    from django.db import transaction
+
+    from apps.jobs.models import Job
+
+    with transaction.atomic():
+        locked = Job.objects.select_for_update().get(pk=job.pk)
+        if locked.correlation_id:
+            cid = locked.correlation_id
+        else:
+            cid = uuid.uuid4().hex
+            locked.correlation_id = cid
+            locked.save(update_fields=["correlation_id"])
+    job.correlation_id = cid
+    set_correlation_id(cid)
+    return cid
+
+
+def resolve_scheduled_post_correlation_id(post) -> str:
+    """Correlation ID for publish: reuse Job ID when the post is tied to a Job; otherwise persist on ScheduledPost."""
+    from django.db import transaction
+
+    from apps.jobs.models import Job, ScheduledPost
+
+    if post.job_id:
+        job = post.job
+        if job is None:
+            job = Job.objects.get(pk=post.job_id)
+        return ensure_job_correlation_id(job)
+
+    with transaction.atomic():
+        locked = ScheduledPost.objects.select_for_update().get(pk=post.pk)
+        if locked.correlation_id:
+            cid = locked.correlation_id
+        else:
+            cid = uuid.uuid4().hex
+            locked.correlation_id = cid
+            locked.save(update_fields=["correlation_id"])
+    post.correlation_id = cid
+    set_correlation_id(cid)
+    return cid
+
+
 # ---------------------------------------------------------------------------
 # Structured log emitter
 # ---------------------------------------------------------------------------
