@@ -18,6 +18,7 @@ from apps.common.metrics import (
     publish_attempts_total,
     publish_duration_ms,
     publish_failures_total,
+    publish_quota_exhaustion_attempts_total,
     publish_reconciliation_duration_ms,
     publish_reconciliation_failures_total,
     publish_reconciliation_runs_total,
@@ -462,24 +463,27 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         )
         return
     if post.status == "FAILED":
+        quota_attempts = int(getattr(post, "youtube_quota_retry_count", 0) or 0)
+        attempts = int(post.retry_count or 0) + quota_attempts
         schedule.status = "FAILED"
-        schedule.attempt_count = int(post.retry_count or 0)
+        schedule.attempt_count = attempts
         schedule.next_retry_at = None
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
         item.status = "AVAILABLE"
         item.scheduled_for = None
         item.last_error = post.error or ""
-        item.attempt_count = int(post.retry_count or 0)
+        item.attempt_count = attempts
         item.save(update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"])
         return
-    if post.status == "PENDING" and int(post.retry_count or 0) > 0:
+    quota_retries = int(getattr(post, "youtube_quota_retry_count", 0) or 0)
+    if post.status == "PENDING" and (int(post.retry_count or 0) > 0 or quota_retries > 0):
         schedule.status = "PLANNED"
-        schedule.attempt_count = int(post.retry_count or 0)
+        schedule.attempt_count = int(post.retry_count or 0) + quota_retries
         schedule.next_retry_at = post.scheduled_at
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
         item.status = "SCHEDULED"
         item.last_error = post.error or ""
-        item.attempt_count = int(post.retry_count or 0)
+        item.attempt_count = int(post.retry_count or 0) + quota_retries
         item.save(update_fields=["status", "last_error", "attempt_count", "updated_at"])
 
 
@@ -577,6 +581,8 @@ UPLOAD_INTERVAL_SECONDS = 60  # One video per minute on send queue
 THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer after last video before thumbnail uploads
 UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
 UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
+# YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
+YOUTUBE_QUOTA_MAX_RETRIES = 2
 
 
 @shared_task
@@ -588,6 +594,8 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     post_ids: batch post IDs (optional; if empty, all DONE for brand).
     Shorts (YT): do not send cover to YouTube (local generation still; saves quota).
     Long-form (YTB): send cover when cut has thumbnail.
+    Skips posts with external_ids.youtube_via_upload_post (YouTube entregue pelo Upload Post;
+    capa não deve ser enviada pela API nativa — evita quota e chamadas redundantes).
     """
     try:
         brand = Brand.objects.select_related("factory").get(id=brand_id)
@@ -609,6 +617,7 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
 
     posts = list(qs.order_by("scheduled_at", "id"))
     to_upload = []
+    skipped_upload_post_youtube = 0
     for p in posts:
         b = _resolve_post_target_brand(p)
         if b and b.id == brand_id:
@@ -619,10 +628,23 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
                     continue
                 video_id = str((p.external_ids or {}).get("YT") or (p.external_ids or {}).get("YTB") or "")
                 if video_id:
+                    if (p.external_ids or {}).get("youtube_via_upload_post"):
+                        skipped_upload_post_youtube += 1
+                        logger.info(
+                            "[THUMB] Skip YouTube thumbnail (YouTube via Upload Post) post_id=%s video_id=%s",
+                            p.id,
+                            video_id,
+                        )
+                        continue
                     to_upload.append((p, video_id))
 
     if not to_upload:
-        return {"brand_id": brand_id, "uploaded": 0, "skipped": 0, "errors": 0}
+        return {
+            "brand_id": brand_id,
+            "uploaded": 0,
+            "skipped": skipped_upload_post_youtube,
+            "errors": 0,
+        }
 
     account = BrandSocialAccount.objects.filter(
         brand=brand,
@@ -632,7 +654,12 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     cred = creds_list[0] if creds_list else None
     if not account and not cred:
         logger.warning("[THUMB] Brand %s has no YouTube account/credential", brand_id)
-        return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
+        return {
+            "brand_id": brand_id,
+            "uploaded": 0,
+            "skipped": skipped_upload_post_youtube + len(to_upload),
+            "errors": 0,
+        }
 
     from googleapiclient.discovery import build
 
@@ -641,12 +668,22 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
 
     publisher = get_publisher("YT")
     if not publisher:
-        return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
+        return {
+            "brand_id": brand_id,
+            "uploaded": 0,
+            "skipped": skipped_upload_post_youtube + len(to_upload),
+            "errors": 0,
+        }
 
     token_holder = cred if cred else account
     if not token_holder.access_token and not token_holder.refresh_token:
         logger.warning("[THUMB] Brand %s: account/credential has no tokens", brand_id)
-        return {"brand_id": brand_id, "uploaded": 0, "skipped": len(to_upload), "errors": 0}
+        return {
+            "brand_id": brand_id,
+            "uploaded": 0,
+            "skipped": skipped_upload_post_youtube + len(to_upload),
+            "errors": 0,
+        }
 
     acc = account or SimpleNamespace(brand=brand, platform="YT", channel_id="")
     creds = get_credentials(acc, youtube_credential=cred if cred else None)
@@ -662,7 +699,12 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
             errors += 1
             logger.warning("[THUMB] Failed to upload cover video_id=%s: %s", video_id, e)
 
-    return {"brand_id": brand_id, "uploaded": uploaded, "skipped": len(to_upload) - uploaded - errors, "errors": errors}
+    return {
+        "brand_id": brand_id,
+        "uploaded": uploaded,
+        "skipped": skipped_upload_post_youtube + (len(to_upload) - uploaded - errors),
+        "errors": errors,
+    }
 
 
 def _build_upload_post_platforms(brand, post) -> list[str]:
@@ -1518,6 +1560,9 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     # With async_upload=true, YouTube may return no video_id yet (processing). Avoid duplicate fallback.
                     if "YOUTUBE" in upload_post_platforms and result.get("request_id"):
                         upload_post_youtube_ok = True
+                    if upload_post_youtube_ok:
+                        # Evita upload de capa pela API YouTube (thumbnails.set) em upload_thumbnails_after_batch_task.
+                        external_ids["youtube_via_upload_post"] = True
                     break
                 last_up_error = result.get("error", "error")
             except UploadPostPublishError as e:
@@ -1681,6 +1726,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     video_id = (result or {}).get("video_id")
                     if video_id:
                         external_ids[platform] = video_id
+                        external_ids.pop("youtube_via_upload_post", None)
                     warning = (result or {}).get("warning")
                     if warning:
                         warnings.append(f"{platform}: {warning}")
@@ -1781,6 +1827,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             video_id = (result or {}).get("video_id")
             if video_id:
                 external_ids[platform] = video_id
+                if platform in ("YT", "YTB"):
+                    external_ids.pop("youtube_via_upload_post", None)
             warning = (result or {}).get("warning")
             if warning:
                 warnings.append(f"{platform}: {warning}")
@@ -1808,14 +1856,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             (item.get("reason") or "").strip() == "minIntervalNotReached"
             for item in retryable_errors
         )
+        if has_quota_exceeded:
+            q = int(getattr(post, "youtube_quota_retry_count", 0) or 0) + 1
+            post.youtube_quota_retry_count = q
+            publish_quota_exhaustion_attempts_total.inc()
+            if q > YOUTUBE_QUOTA_MAX_RETRIES:
+                errors.extend([item["message"] for item in retryable_errors])
         next_retry = int(post.retry_count or 0) + 1
         should_not_consume_attempt = (
             has_quota_exceeded or has_upload_limit_exceeded or has_min_interval_not_reached
         )
         # One retry for upload/title errors; token/quota errors do not consume attempt
-        if not should_not_consume_attempt and next_retry > 1:
+        if not errors and not should_not_consume_attempt and next_retry > 1:
             errors.extend([item["message"] for item in retryable_errors])
-        else:
+        elif not errors:
             requested_delays = [
                 int(item["retry_after_seconds"])
                 for item in retryable_errors
@@ -1854,6 +1908,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             retry_fields = [
                 "status",
                 "retry_count",
+                "youtube_quota_retry_count",
                 "scheduled_at",
                 "error",
                 "upload_fingerprint",
@@ -1900,12 +1955,21 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     else:
         post.status = "DONE"
         post.retry_count = 0
+        post.youtube_quota_retry_count = 0
         post.posted_at = timezone.now()
         if warnings:
             post.error = "; ".join(warnings)
     post.upload_fingerprint = upload_fingerprint
     post.external_ids = external_ids
-    update_fields = ["status", "error", "posted_at", "upload_fingerprint", "external_ids", "retry_count"]
+    update_fields = [
+        "status",
+        "error",
+        "posted_at",
+        "upload_fingerprint",
+        "external_ids",
+        "retry_count",
+        "youtube_quota_retry_count",
+    ]
     if social_account_changed:
         update_fields.append("social_account")
     post.save(update_fields=update_fields)

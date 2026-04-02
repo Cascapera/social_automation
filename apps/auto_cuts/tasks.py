@@ -26,6 +26,14 @@ from apps.auto_cuts.services.video_chunks import (
     extract_chunks_to_folder,
     transcribe_single_chunk,
 )
+from apps.common.metrics import (
+    render_duration_ms,
+    render_failures_total,
+    render_jobs_total,
+    transcription_duration_ms,
+    transcription_failures_total,
+    transcription_jobs_total,
+)
 from apps.jobs.logging_utils import Timer, log_event
 from apps.jobs.services.ffmpeg import (
     concat_with_xfade,
@@ -952,6 +960,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         status="started",
         source_video_id=analysis_id,
     )
+    transcription_jobs_total.labels(workload_type=_t_workload).inc()
     _t_timer = Timer()
 
     try:
@@ -964,6 +973,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             try:
                 analysis.progress_message = "Extraindo blocos de áudio..."
                 if not _safe_save_analysis(analysis, ["progress_message"]):
+                    transcription_failures_total.labels(workload_type=_t_workload).inc()
                     return
                 chunk_paths = extract_chunks_to_folder(
                     video_path, analysis.id,
@@ -981,6 +991,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                     analysis.progress = 5 + int(15 * (i + 1) / total_chunks)
                     if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
                         logger.info("[FLUXO] Analysis %s deleted during transcription; aborting.", analysis_id)
+                        transcription_failures_total.labels(workload_type=_t_workload).inc()
                         return
                     chunk = transcribe_single_chunk(_whisper_model, chunk_path, start_sec, end_sec, language=transcript_lang)
                     prev_end = boundaries[i - 1][1] if i > 0 else 0
@@ -1011,6 +1022,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 analysis.status = "error"
                 analysis.error = "Nenhum segmento transcrito."
                 analysis.save(update_fields=["status", "error"])
+                transcription_failures_total.labels(workload_type=_t_workload).inc()
                 return
 
             analysis.transcript_segments = segments
@@ -1022,8 +1034,10 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             analysis.status = "error"
             analysis.error = "Transcrição vazia."
             analysis.save(update_fields=["status", "error"])
+            transcription_failures_total.labels(workload_type=_t_workload).inc()
             return
 
+        transcription_duration_ms.labels(workload_type=_t_workload).observe(_t_timer.elapsed_ms())
         log_event(
             logger,
             event="transcription_finished",
@@ -1454,6 +1468,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         if isinstance(e, DatabaseError) and "did not affect any rows" in str(e):
             logger.info("[FLUXO] Analysis %s deleted during processing; aborting.", analysis_id)
             return
+        transcription_failures_total.labels(workload_type=_t_workload).inc()
         log_event(
             logger,
             event="transcription_finished",
@@ -1923,6 +1938,8 @@ def finalizar_auto_cut_task(
             if should_burn_subs:
                 if work_path.exists():
                     try:
+                        render_jobs_total.labels(workload_type=_workload).inc()
+                        _burn_timer = Timer()
                         with tempfile.TemporaryDirectory() as tmpdir:
                             tmppath = Path(tmpdir)
                             srt_path = tmppath / "subtitles.srt"
@@ -1955,7 +1972,11 @@ def finalizar_auto_cut_task(
                                     save=True,
                                 )
                             logger.info("Cut %s: subtitles burned", corte.id)
+                        render_duration_ms.labels(workload_type=_workload).observe(
+                            _burn_timer.elapsed_ms()
+                        )
                     except Exception as e:
+                        render_failures_total.labels(workload_type=_workload).inc()
                         logger.exception("Subtitle burn failed for cut %s: %s", corte.id, e)
         except Exception as e:
             logger.exception("Finalize failed for cut %s: %s", corte.id, e)

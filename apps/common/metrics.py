@@ -92,6 +92,10 @@ publish_failures_total = Counter(
     "publish_failures_total",
     "Publish final failures (status FAILED)",
 )
+publish_quota_exhaustion_attempts_total = Counter(
+    "publish_quota_exhaustion_attempts_total",
+    "YouTube quotaExceeded handling (each reschedule or final failure after retries)",
+)
 publish_duration_ms = Histogram(
     "publish_duration_ms",
     "Successful publish duration in milliseconds",

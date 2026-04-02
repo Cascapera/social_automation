@@ -205,6 +205,10 @@ class ScheduledPost(models.Model):
         help_text="IDs externos por plataforma (ex.: {'YT': 'abc123'}).",
     )
     retry_count = models.PositiveSmallIntegerField(default=0)
+    youtube_quota_retry_count = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Tentativas por quotaExceeded (YouTube); após o máximo o post falha e o vídeo volta ao inventário.",
+    )
     correlation_id = models.CharField(
         max_length=64,
         blank=True,
