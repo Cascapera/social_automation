@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import transaction
+
 from apps.brands.models import Brand
 from apps.jobs.logging_utils import log_event
 from apps.jobs.models import DailyPostingPlan, DailyPostingPlanItem

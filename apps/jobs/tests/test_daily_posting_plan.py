@@ -9,9 +9,12 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.brands.models import Brand, Factory
-from apps.jobs.models import DailyPostingPlan, DailyPostingPlanItem
+from apps.jobs.models import DailyPostingPlan
 from apps.jobs.services.channel_schedule_config import ChannelScheduleConfig
-from apps.jobs.services.daily_posting_plan_service import DailyPostingPlanService, _rng_for_brand_day
+from apps.jobs.services.daily_posting_plan_service import (
+    DailyPostingPlanService,
+    _rng_for_brand_day,
+)
 from apps.jobs.services.posting_window_calculator import (
     compute_effective_window,
     max_posts_for_window,
