@@ -2,6 +2,8 @@ from django import forms
 from django.contrib import admin
 
 from .models import (
+    DailyPostingPlan,
+    DailyPostingPlanItem,
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
     FactoryScheduleRun,
@@ -115,6 +117,40 @@ class VideoInventoryItemAdmin(admin.ModelAdmin):
     search_fields = ("title", "source_asset_id")
 
 
+class DailyPostingPlanItemInline(admin.TabularInline):
+    model = DailyPostingPlanItem
+    extra = 0
+    readonly_fields = (
+        "order_index",
+        "video_type",
+        "scheduled_at",
+        "status",
+        "inventory_item",
+        "scheduled_post",
+        "created_at",
+        "updated_at",
+    )
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DailyPostingPlan)
+class DailyPostingPlanAdmin(admin.ModelAdmin):
+    list_display = ("id", "brand", "plan_date", "timezone", "status", "planned_posts_count", "generated_at")
+    list_filter = ("status", "timezone", "plan_date")
+    search_fields = ("brand__name", "brand__slug")
+    readonly_fields = ("generated_at", "config_snapshot", "last_error")
+    inlines = [DailyPostingPlanItemInline]
+
+
+@admin.register(DailyPostingPlanItem)
+class DailyPostingPlanItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "plan", "order_index", "video_type", "scheduled_at", "status")
+    list_filter = ("video_type", "status")
+
+
 @admin.register(FactoryScheduleRun)
 class FactoryScheduleRunAdmin(admin.ModelAdmin):
     list_display = ("id", "factory", "run_date", "timezone", "created_at")
@@ -123,7 +159,7 @@ class FactoryScheduleRunAdmin(admin.ModelAdmin):
 
 @admin.register(FactoryPostingSchedule)
 class FactoryPostingScheduleAdmin(admin.ModelAdmin):
-    list_display = ("id", "factory", "brand", "video_type", "scheduled_at", "status", "attempt_count")
+    list_display = ("id", "factory", "brand", "video_type", "scheduled_at", "status", "daily_plan_item", "attempt_count")
     list_filter = ("factory", "brand", "video_type", "status")
 
 

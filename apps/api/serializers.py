@@ -127,6 +127,20 @@ class BrandSerializer(serializers.ModelSerializer):
             "thumbnail_effect_color",
             "short_slot_times",
             "long_slot_times",
+            "scheduler_timezone",
+            "scheduler_enabled",
+            "scheduler_paused",
+            "base_start_time",
+            "base_end_time",
+            "start_jitter_minutes",
+            "end_jitter_minutes",
+            "daily_min_posts",
+            "daily_max_posts",
+            "daily_min_long_posts",
+            "daily_max_long_posts",
+            "min_gap_minutes",
+            "max_gap_minutes",
+            "active_weekdays",
             "vertical_mode",
             "upload_post_tiktok_enabled",
             "upload_post_tiktok_extra_description",
@@ -171,6 +185,27 @@ class BrandSerializer(serializers.ModelSerializer):
                 validated_data.get("youtube_client_secret", "")
             )
         return super().update(instance, validated_data)
+
+    def validate(self, attrs):
+        dmin = attrs.get("daily_min_posts")
+        dmax = attrs.get("daily_max_posts")
+        if dmin is not None and dmax is not None and dmin > dmax:
+            raise serializers.ValidationError(
+                {"daily_min_posts": "Não pode ser maior que daily_max_posts."}
+            )
+        lmin = attrs.get("daily_min_long_posts")
+        lmax = attrs.get("daily_max_long_posts")
+        if lmin is not None and lmax is not None and lmin > lmax:
+            raise serializers.ValidationError(
+                {"daily_min_long_posts": "Não pode ser maior que daily_max_long_posts."}
+            )
+        g_min = attrs.get("min_gap_minutes")
+        g_max = attrs.get("max_gap_minutes")
+        if g_min is not None and g_max is not None and g_min > g_max:
+            raise serializers.ValidationError(
+                {"min_gap_minutes": "Não pode ser maior que max_gap_minutes."}
+            )
+        return attrs
 
 
 class BrandAssetSerializer(serializers.ModelSerializer):
@@ -733,6 +768,7 @@ class FactoryPostingScheduleSerializer(serializers.ModelSerializer):
             "attempt_count",
             "next_retry_at",
             "scheduled_post",
+            "daily_plan_item",
             "posted_at",
             "posted_on_channel",
             "external_video_id",

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone as django_timezone
 
 from apps.auto_cuts.models import AutoCutCorte
 from apps.brands.models import Brand, BrandAsset, BrandSocialAccount, Factory
@@ -303,6 +304,98 @@ class FactoryScheduleRun(models.Model):
         return f"{self.factory} {self.run_date}"
 
 
+class DailyPostingPlan(models.Model):
+    """Plano diário gerado por brand (auditoria + idempotência)."""
+
+    class Status(models.TextChoices):
+        DRAFT = "DRAFT", "Rascunho"
+        GENERATED = "GENERATED", "Gerado"
+        SKIPPED = "SKIPPED", "Ignorado"
+        ERROR = "ERROR", "Erro"
+
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="daily_posting_plans",
+    )
+    plan_date = models.DateField(db_index=True)
+    timezone = models.CharField(max_length=64, default="America/Sao_Paulo")
+    generated_at = models.DateTimeField(default=django_timezone.now)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+    planned_posts_count = models.PositiveSmallIntegerField(default=0)
+    config_snapshot = models.JSONField(default=dict, blank=True)
+    last_error = models.TextField(blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["brand", "plan_date"], name="uniq_daily_plan_brand_date"),
+        ]
+        ordering = ["-plan_date", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.brand_id} {self.plan_date} ({self.status})"
+
+
+class DailyPostingPlanItem(models.Model):
+    """Item do plano (horário + tipo; vínculo após consumo pelo scheduler)."""
+
+    class Status(models.TextChoices):
+        PLANNED = "PLANNED", "Planejado"
+        CONSUMED = "CONSUMED", "Consumido"
+        SKIPPED = "SKIPPED", "Ignorado"
+        FAILED = "FAILED", "Falhou"
+
+    class VideoType(models.TextChoices):
+        SHORT = "SHORT", "Short"
+        LONG = "LONG", "Longo"
+
+    plan = models.ForeignKey(
+        DailyPostingPlan,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    order_index = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Ordem do item no dia (0..N-1).",
+    )
+    video_type = models.CharField(max_length=8, choices=VideoType.choices)
+    scheduled_at = models.DateTimeField(help_text="Instante UTC planejado para publicação.")
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PLANNED,
+    )
+    inventory_item = models.ForeignKey(
+        "VideoInventoryItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="daily_plan_items",
+    )
+    scheduled_post = models.ForeignKey(
+        "ScheduledPost",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="daily_plan_items",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan", "order_index", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "order_index"], name="uniq_daily_plan_item_order"),
+        ]
+
+    def __str__(self) -> str:
+        return f"plan={self.plan_id} #{self.order_index} {self.video_type} {self.scheduled_at}"
+
+
 class FactoryPostingSchedule(models.Model):
     STATUS = [
         ("PLANNED", "Planejado"),
@@ -342,6 +435,14 @@ class FactoryPostingSchedule(models.Model):
         null=True,
         blank=True,
         related_name="factory_schedule",
+    )
+    daily_plan_item = models.ForeignKey(
+        DailyPostingPlanItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="factory_posting_schedules",
+        help_text="Item do plano diário que originou este agendamento (auditoria).",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

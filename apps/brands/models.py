@@ -179,12 +179,73 @@ class Brand(models.Model):
     short_slot_times = models.JSONField(
         default=list,
         blank=True,
-        help_text="Horários fixos de shorts por dia (ex: ['10:00', '14:00', '18:00']). Obrigatório.",
+        help_text="Legado: não usado pelo scheduler atual. Mantido para migração/histórico.",
     )
     long_slot_times = models.JSONField(
         default=list,
         blank=True,
-        help_text="Horários fixos de vídeos longos por dia (ex: ['20:00']). Obrigatório para agendar longos.",
+        help_text='Horários alvo para vídeos longos (lista de strings "HH:MM"). Com lista preenchida, o plano diário ancora longos nestes horários (± jitter) e distribui shorts nos intervalos livres.',
+    )
+    scheduler_timezone = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Timezone IANA do scheduler desta brand. Vazio = usa o timezone da factory.",
+    )
+    scheduler_enabled = models.BooleanField(
+        default=True,
+        help_text="Se falso, o plano diário automático não é gerado para esta brand.",
+    )
+    scheduler_paused = models.BooleanField(
+        default=False,
+        help_text="Pausa temporária do scheduler (sem apagar configuração).",
+    )
+    base_start_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="Início base da janela operacional (hora local conforme timezone do scheduler).",
+    )
+    base_end_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="Fim base da janela operacional.",
+    )
+    start_jitter_minutes = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Jitter máximo aplicado ao início da janela (minutos).",
+    )
+    end_jitter_minutes = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Jitter máximo aplicado ao fim da janela (minutos).",
+    )
+    daily_min_posts = models.PositiveSmallIntegerField(
+        default=3,
+        help_text="Mínimo de publicações no dia (shorts + longos).",
+    )
+    daily_max_posts = models.PositiveSmallIntegerField(
+        default=4,
+        help_text="Máximo de publicações no dia.",
+    )
+    daily_min_long_posts = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Mínimo de vídeos longos por dia (dentro do total).",
+    )
+    daily_max_long_posts = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="Máximo de vídeos longos por dia (dentro do total).",
+    )
+    min_gap_minutes = models.PositiveSmallIntegerField(
+        default=60,
+        help_text="Intervalo mínimo entre posts consecutivos (minutos).",
+    )
+    max_gap_minutes = models.PositiveSmallIntegerField(
+        default=360,
+        help_text="Intervalo máximo entre posts consecutivos (minutos).",
+    )
+    active_weekdays = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Dias ativos: 0=segunda … 6=domingo (weekday() Python). Lista vazia = todos os dias.",
     )
     vertical_mode = models.CharField(
         max_length=20,

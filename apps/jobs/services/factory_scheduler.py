@@ -11,11 +11,14 @@ from django.utils import timezone
 from apps.brands.models import Brand, BrandSocialAccount, Factory
 from apps.jobs.logging_utils import Timer, log_event
 from apps.jobs.models import (
+    DailyPostingPlan,
+    DailyPostingPlanItem,
     FactoryPostingSchedule,
     FactoryScheduleRun,
     ScheduledPost,
     VideoInventoryItem,
 )
+from apps.jobs.services.daily_posting_plan_service import DailyPostingPlanService
 
 logger = logging.getLogger(__name__)
 
@@ -25,65 +28,7 @@ class SlotPlan:
     brand: Brand
     video_type: str  # SHORT | LONG
     scheduled_at: datetime
-
-
-def _to_local_dt(factory_tz: str, day: date, t: time) -> datetime:
-    tz = ZoneInfo(factory_tz)
-    return datetime.combine(day, t).replace(tzinfo=tz)
-
-
-def _parse_time_str(s: str) -> time | None:
-    """Converte 'HH:MM' ou 'HH:MM:SS' em time."""
-    s = (s or "").strip()
-    if not s:
-        return None
-    parts = s.split(":")
-    if len(parts) >= 2:
-        try:
-            h, m = int(parts[0]), int(parts[1])
-            if 0 <= h <= 23 and 0 <= m <= 59:
-                return time(h, m)
-        except (ValueError, TypeError):
-            pass
-    return None
-
-
-def _build_slots_from_fixed_times(
-    *,
-    brand: Brand,
-    day: date,
-    factory_tz: str,
-    slot_times: list[str],
-    now_local: datetime,
-) -> list[datetime]:
-    """Gera slots a partir de horários fixos (ex: ['10:00', '14:00', '18:00'])."""
-    slots: list[datetime] = []
-    for s in slot_times:
-        t = _parse_time_str(s)
-        if t is None:
-            continue
-        dt = _to_local_dt(factory_tz, day, t)
-        if dt >= now_local:
-            slots.append(dt)
-    return sorted(slots)
-
-
-def _all_slots_for_day(
-    *,
-    brand: Brand,
-    day: date,
-    factory_tz: str,
-    slot_times: list[str],
-) -> list[datetime]:
-    """Todos os horários configurados do dia (ignora se já passaram). Usado com enqueue_immediately."""
-    slots: list[datetime] = []
-    for s in slot_times:
-        t = _parse_time_str(s)
-        if t is None:
-            continue
-        dt = _to_local_dt(factory_tz, day, t)
-        slots.append(dt)
-    return sorted(slots)
+    plan_item: DailyPostingPlanItem | None = None
 
 
 def _order_with_source_diversity(items: list[VideoInventoryItem]) -> list[VideoInventoryItem]:
@@ -140,13 +85,11 @@ def generate_daily_schedule_for_factory(
     correlation_id: str | None = None,
 ) -> dict:
     """
-    Gera agenda de postagens para uma factory.
+    Gera agenda de postagens para uma factory a partir do plano diário persistido por brand.
     target_date: dia para o qual gerar os slots. Se None, usa o dia local atual.
     brand_id: quando informado, agenda apenas para essa brand (dentro da factory).
     enqueue_immediately: se True (ex.: botão "agendamento imediato"), inclui todos os slots do dia
-    (mesmo os que já passaram); ScheduledPost.scheduled_at continua sendo o horário do slot em UTC,
-    para YouTube/Upload Post agendarem publicação nas horas configuradas. O worker enfileira quando
-    scheduled_at <= agora (slots passados) ou no fluxo antecipado do YouTube quando aplicável.
+    (mesmo os que já passaram); ScheduledPost.scheduled_at continua sendo o horário do slot em UTC.
     correlation_id: opaque token propagated from the Celery task for log correlation.
     """
     timer = Timer()
@@ -181,64 +124,54 @@ def generate_daily_schedule_for_factory(
     if brand_id:
         brands_qs = brands_qs.filter(id=brand_id)
     brands = list(brands_qs)
-    DEFAULT_SHORT_SLOTS = ["10:00", "14:00", "18:00"]
-    DEFAULT_LONG_SLOTS = ["20:00"]
 
     for brand in brands:
+        if not getattr(brand, "scheduler_enabled", True) or getattr(brand, "scheduler_paused", False):
+            log_event(
+                logger,
+                event="brand_schedule_skipped",
+                correlation_id=correlation_id,
+                brand_id=brand.id,
+                factory_id=factory.id,
+                reason="scheduler_disabled_or_paused",
+            )
+            continue
+
+        day_plan = DailyPostingPlanService.get_or_generate_for_day(
+            brand,
+            local_day,
+            correlation_id=correlation_id,
+            force_regenerate=False,
+        )
+        if day_plan.status == DailyPostingPlan.Status.SKIPPED:
+            continue
+        if day_plan.status == DailyPostingPlan.Status.ERROR:
+            log_event(
+                logger,
+                event="brand_schedule_no_plan_items",
+                correlation_id=correlation_id,
+                brand_id=brand.id,
+                plan_id=day_plan.id,
+                plan_status=day_plan.status,
+                last_error=(day_plan.last_error or "")[:200],
+            )
+            continue
+
         plans: list[SlotPlan] = []
-        short_slot_times = getattr(brand, "short_slot_times", None) or []
-        if not isinstance(short_slot_times, list):
-            short_slot_times = []
-        if not short_slot_times:
-            short_slot_times = DEFAULT_SHORT_SLOTS
-        long_slot_times = getattr(brand, "long_slot_times", None) or []
-        if not isinstance(long_slot_times, list):
-            long_slot_times = []
-        if not long_slot_times:
-            long_slot_times = DEFAULT_LONG_SLOTS
-        if enqueue_immediately:
-            short_slots = (
-                _all_slots_for_day(
+        for dpi in day_plan.items.filter(status=DailyPostingPlanItem.Status.PLANNED).order_by("order_index", "id"):
+            slot_local = dpi.scheduled_at.astimezone(tz)
+            if not enqueue_immediately and slot_local < now_local:
+                continue
+            plans.append(
+                SlotPlan(
                     brand=brand,
-                    day=local_day,
-                    factory_tz=factory.timezone,
-                    slot_times=short_slot_times,
+                    video_type=dpi.video_type,
+                    scheduled_at=slot_local,
+                    plan_item=dpi,
                 )
-                if short_slot_times
-                else []
             )
-            long_slots = (
-                _all_slots_for_day(
-                    brand=brand,
-                    day=local_day,
-                    factory_tz=factory.timezone,
-                    slot_times=long_slot_times,
-                )
-                if long_slot_times
-                else []
-            )
-        else:
-            short_slots = _build_slots_from_fixed_times(
-                brand=brand,
-                day=local_day,
-                factory_tz=factory.timezone,
-                slot_times=short_slot_times,
-                now_local=now_local,
-            ) if short_slot_times else []
-            long_slots = _build_slots_from_fixed_times(
-                brand=brand,
-                day=local_day,
-                factory_tz=factory.timezone,
-                slot_times=long_slot_times,
-                now_local=now_local,
-            ) if long_slot_times else []
-        for dt in short_slots:
-            plans.append(SlotPlan(brand=brand, video_type="SHORT", scheduled_at=dt))
-        for dt in long_slots:
-            plans.append(SlotPlan(brand=brand, video_type="LONG", scheduled_at=dt))
         plans.sort(key=lambda p: p.scheduled_at)
 
-        # Evita duplicar slots já planejados no mesmo dia (permite reruns intradiários).
         occupied = set(
             FactoryPostingSchedule.objects.filter(
                 factory=factory,
@@ -248,11 +181,13 @@ def generate_daily_schedule_for_factory(
             ).values_list("video_type", "scheduled_at")
         )
         plans = [
-            p for p in plans
+            p
+            for p in plans
             if (
                 p.video_type,
                 p.scheduled_at.astimezone(UTC),
-            ) not in occupied
+            )
+            not in occupied
         ]
 
         short_items = list(
@@ -270,16 +205,14 @@ def generate_daily_schedule_for_factory(
         short_queue = _order_with_source_diversity(short_items)
         long_queue = _order_with_source_diversity(long_items)
 
-        for plan in plans:
-            queue = short_queue if plan.video_type == "SHORT" else long_queue
+        for slot_plan in plans:
+            queue = short_queue if slot_plan.video_type == "SHORT" else long_queue
             if not queue:
                 continue
             item = queue.pop(0)
-            platform = "YT" if plan.video_type == "SHORT" else "YTB"
-            account = _first_social_account_for_video_type(brand, plan.video_type)
-            slot_at_utc = plan.scheduled_at.astimezone(UTC)
-            # Sempre usar o horário do slot: publicação (YouTube publishAt, Upload Post scheduled_date)
-            # deve seguir as horas da brand, não "agora" (que virava publicação imediata / data errada).
+            platform = "YT" if slot_plan.video_type == "SHORT" else "YTB"
+            account = _first_social_account_for_video_type(brand, slot_plan.video_type)
+            slot_at_utc = slot_plan.scheduled_at.astimezone(UTC)
             post_at_utc = slot_at_utc
             scheduled_post = ScheduledPost.objects.create(
                 job=None,
@@ -292,15 +225,26 @@ def generate_daily_schedule_for_factory(
                 privacy_status="private",
                 status="PENDING",
             )
-            FactoryPostingSchedule.objects.create(
-                factory=factory,
-                brand=brand,
-                inventory_item=item,
-                video_type=plan.video_type,
-                scheduled_at=slot_at_utc,
-                status="PLANNED",
-                scheduled_post=scheduled_post,
-            )
+            fps_kwargs = {
+                "factory": factory,
+                "brand": brand,
+                "inventory_item": item,
+                "video_type": slot_plan.video_type,
+                "scheduled_at": slot_at_utc,
+                "status": "PLANNED",
+                "scheduled_post": scheduled_post,
+            }
+            if slot_plan.plan_item:
+                fps_kwargs["daily_plan_item"] = slot_plan.plan_item
+            FactoryPostingSchedule.objects.create(**fps_kwargs)
+
+            if slot_plan.plan_item:
+                DailyPostingPlanItem.objects.filter(pk=slot_plan.plan_item.pk).update(
+                    status=DailyPostingPlanItem.Status.CONSUMED,
+                    inventory_item_id=item.id,
+                    scheduled_post_id=scheduled_post.id,
+                )
+
             item.status = "SCHEDULED"
             item.scheduled_for = post_at_utc
             item.save(update_fields=["status", "scheduled_for", "updated_at"])

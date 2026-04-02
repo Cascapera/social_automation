@@ -305,6 +305,11 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        "apps.jobs.services.daily_posting_plan_service": {
+            "handlers": ["console_json"],
+            "level": "INFO",
+            "propagate": False,
+        },
         "apps.social.tasks": {
             "handlers": ["console_json"],
             "level": "INFO",

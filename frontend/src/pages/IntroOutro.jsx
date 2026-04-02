@@ -35,6 +35,267 @@ const THEME_CATEGORY_OPTIONS = [
   { id: 'COMEDY_HUMOR', label: 'Comédia / Humor' },
 ]
 
+/** Fuso fixo do scheduler (sem edição na UI). */
+const SCHEDULER_TIMEZONE_DEFAULT = 'America/Sao_Paulo'
+
+const SCHEDULER_DEFAULTS = {
+  scheduler_enabled: true,
+  scheduler_paused: false,
+  base_start_time: '09:00',
+  base_end_time: '21:00',
+  start_jitter_minutes: 0,
+  end_jitter_minutes: 0,
+  daily_min_posts: 3,
+  daily_max_posts: 4,
+  daily_min_long_posts: 0,
+  daily_max_long_posts: 1,
+  min_gap_minutes: 60,
+  max_gap_minutes: 360,
+  active_weekdays: [0, 1, 2, 3, 4, 5, 6],
+}
+
+const WEEKDAY_LABELS = [
+  { v: 0, label: 'Seg' },
+  { v: 1, label: 'Ter' },
+  { v: 2, label: 'Qua' },
+  { v: 3, label: 'Qui' },
+  { v: 4, label: 'Sex' },
+  { v: 5, label: 'Sáb' },
+  { v: 6, label: 'Dom' },
+]
+
+function timeToInput(v, fallback = '09:00') {
+  if (v == null || v === '') return fallback
+  const s = String(v)
+  return s.length >= 5 ? s.slice(0, 5) : fallback
+}
+
+function timeToApi(hhmm) {
+  if (!hhmm || typeof hhmm !== 'string') return null
+  const t = hhmm.slice(0, 5)
+  if (!/^\d{2}:\d{2}$/.test(t)) return null
+  return `${t}:00`
+}
+
+function weekdaysFromApi(wd) {
+  if (!Array.isArray(wd) || wd.length === 0) return [0, 1, 2, 3, 4, 5, 6]
+  return [...new Set(wd.map(Number))]
+    .filter((n) => n >= 0 && n <= 6)
+    .sort((a, b) => a - b)
+}
+
+function weekdaysToApi(wd) {
+  if (!Array.isArray(wd) || wd.length === 0) return []
+  const sorted = [...new Set(wd)].sort((a, b) => a - b)
+  if (sorted.length === 7 && sorted.every((v, i) => v === i)) return []
+  return sorted
+}
+
+/** API pode devolver "18:00:00"; inputs usam "18:MM". Unifica para HH:MM nos chips e no PATCH. */
+function normalizeLongSlotTimesList(raw) {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set()
+  const out = []
+  for (const x of raw) {
+    const s = String(x || '').trim()
+    if (!s) continue
+    const hhmm = s.length >= 5 ? s.slice(0, 5) : s
+    if (!/^\d{1,2}:\d{2}$/.test(hhmm)) continue
+    if (!seen.has(hhmm)) {
+      seen.add(hhmm)
+      out.push(hhmm)
+    }
+  }
+  return out.sort()
+}
+
+function scheduleFromBrand(b) {
+  if (!b) return { ...SCHEDULER_DEFAULTS }
+  return {
+    scheduler_enabled: b.scheduler_enabled !== false,
+    scheduler_paused: !!b.scheduler_paused,
+    base_start_time: timeToInput(b.base_start_time, '09:00'),
+    base_end_time: timeToInput(b.base_end_time, '21:00'),
+    start_jitter_minutes: Math.max(0, Number(b.start_jitter_minutes ?? 0)),
+    end_jitter_minutes: Math.max(0, Number(b.end_jitter_minutes ?? 0)),
+    daily_min_posts: Math.max(0, Number(b.daily_min_posts ?? 3)),
+    daily_max_posts: Math.max(0, Number(b.daily_max_posts ?? 4)),
+    daily_min_long_posts: Math.max(0, Number(b.daily_min_long_posts ?? 0)),
+    daily_max_long_posts: Math.max(0, Number(b.daily_max_long_posts ?? 1)),
+    min_gap_minutes: Math.max(0, Number(b.min_gap_minutes ?? 60)),
+    max_gap_minutes: Math.max(0, Number(b.max_gap_minutes ?? 360)),
+    active_weekdays: weekdaysFromApi(b.active_weekdays),
+  }
+}
+
+/** Campos do plano diário (API). Inclui `short_slot_times: []` para não usar horários fixos legados. */
+function scheduleToPayload(s) {
+  return {
+    scheduler_timezone: SCHEDULER_TIMEZONE_DEFAULT,
+    scheduler_enabled: !!s.scheduler_enabled,
+    scheduler_paused: !!s.scheduler_paused,
+    base_start_time: timeToApi(s.base_start_time),
+    base_end_time: timeToApi(s.base_end_time),
+    start_jitter_minutes: Number(s.start_jitter_minutes) || 0,
+    end_jitter_minutes: Number(s.end_jitter_minutes) || 0,
+    daily_min_posts: Number(s.daily_min_posts) || 0,
+    daily_max_posts: Number(s.daily_max_posts) || 0,
+    daily_min_long_posts: Number(s.daily_min_long_posts) || 0,
+    daily_max_long_posts: Number(s.daily_max_long_posts) || 0,
+    min_gap_minutes: Number(s.min_gap_minutes) || 0,
+    max_gap_minutes: Number(s.max_gap_minutes) || 0,
+    active_weekdays: weekdaysToApi(s.active_weekdays),
+    short_slot_times: [],
+  }
+}
+
+function SchedulerPlanFields({ schedule, setSchedule }) {
+  const set = (key, val) => setSchedule((prev) => ({ ...prev, [key]: val }))
+  const toggleDay = (d) => {
+    setSchedule((prev) => {
+      const w = [...prev.active_weekdays]
+      const i = w.indexOf(d)
+      if (i >= 0) {
+        if (w.length <= 1) return prev
+        w.splice(i, 1)
+      } else {
+        w.push(d)
+        w.sort((a, b) => a - b)
+      }
+      return { ...prev, active_weekdays: w }
+    })
+  }
+  return (
+    <div className="scheduler-plan-fields">
+      <div className="form-row" style={{ alignItems: 'center' }}>
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={schedule.scheduler_enabled}
+            onChange={(e) => set('scheduler_enabled', e.target.checked)}
+          />
+          Scheduler ativo
+        </label>
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={schedule.scheduler_paused}
+            onChange={(e) => set('scheduler_paused', e.target.checked)}
+          />
+          Pausado (mantém configuração)
+        </label>
+      </div>
+      <p className="form-hint">Fuso horário do agendamento: {SCHEDULER_TIMEZONE_DEFAULT} (fixo).</p>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Início da janela</label>
+          <input type="time" value={schedule.base_start_time} onChange={(e) => set('base_start_time', e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Fim da janela</label>
+          <input type="time" value={schedule.base_end_time} onChange={(e) => set('base_end_time', e.target.value)} />
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Jitter início (min)</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.start_jitter_minutes}
+            onChange={(e) => set('start_jitter_minutes', e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label>Jitter fim (min)</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.end_jitter_minutes}
+            onChange={(e) => set('end_jitter_minutes', e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Mín. posts/dia (shorts + longos)</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.daily_min_posts}
+            onChange={(e) => set('daily_min_posts', e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label>Máx. posts/dia</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.daily_max_posts}
+            onChange={(e) => set('daily_max_posts', e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Mín. longos/dia</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.daily_min_long_posts}
+            onChange={(e) => set('daily_min_long_posts', e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label>Máx. longos/dia</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.daily_max_long_posts}
+            onChange={(e) => set('daily_max_long_posts', e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Intervalo mín. entre posts (min)</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.min_gap_minutes}
+            onChange={(e) => set('min_gap_minutes', e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label>Intervalo máx. entre posts (min)</label>
+          <input
+            type="number"
+            min={0}
+            value={schedule.max_gap_minutes}
+            onChange={(e) => set('max_gap_minutes', e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="form-group">
+        <label>Dias ativos</label>
+        <p className="form-hint">Lista vazia na API = todos os dias; aqui, marcar os 7 equivale a “todos”.</p>
+        <div className="weekday-chips">
+          {WEEKDAY_LABELS.map(({ v, label }) => (
+            <button
+              key={v}
+              type="button"
+              className={`weekday-chip ${schedule.active_weekdays.includes(v) ? 'weekday-chip--on' : ''}`}
+              onClick={() => toggleDay(v)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ColorField({ label, value, onChange }) {
   return (
     <div className="form-group color-field">
@@ -95,8 +356,7 @@ export default function IntroOutro() {
   const [newBrandTextColor, setNewBrandTextColor] = useState('#0A0A0A')
   const [newBrandEffectColor, setNewBrandEffectColor] = useState('#FFEBDC')
   const [newBrandDescriptionExtra, setNewBrandDescriptionExtra] = useState('')
-  const [newBrandShortSlotTimes, setNewBrandShortSlotTimes] = useState([])
-  const [newBrandShortSlotTimeInput, setNewBrandShortSlotTimeInput] = useState('10:00')
+  const [newBrandSchedule, setNewBrandSchedule] = useState(() => ({ ...SCHEDULER_DEFAULTS }))
   const [newBrandLongSlotTimes, setNewBrandLongSlotTimes] = useState([])
   const [newBrandLongSlotTimeInput, setNewBrandLongSlotTimeInput] = useState('20:00')
   const [newBrandVerticalMode, setNewBrandVerticalMode] = useState('zoom_crop')
@@ -112,8 +372,7 @@ export default function IntroOutro() {
   const [editBandColor, setEditBandColor] = useState('#E12E20')
   const [editTextColor, setEditTextColor] = useState('#0A0A0A')
   const [editEffectColor, setEditEffectColor] = useState('#FFEBDC')
-  const [editShortSlotTimes, setEditShortSlotTimes] = useState([])
-  const [newShortSlotTime, setNewShortSlotTime] = useState('10:00')
+  const [editSchedule, setEditSchedule] = useState(() => ({ ...SCHEDULER_DEFAULTS }))
   const [editLongSlotTimes, setEditLongSlotTimes] = useState([])
   const [editVerticalMode, setEditVerticalMode] = useState('zoom_crop')
   const [newLongSlotTime, setNewLongSlotTime] = useState('20:00')
@@ -186,8 +445,8 @@ export default function IntroOutro() {
     setEditBandColor(selected?.thumbnail_band_color || '#E12E20')
     setEditTextColor(selected?.thumbnail_text_color || '#0A0A0A')
     setEditEffectColor(selected?.thumbnail_effect_color || '#FFEBDC')
-    setEditShortSlotTimes(Array.isArray(selected?.short_slot_times) ? selected.short_slot_times : [])
-    setEditLongSlotTimes(Array.isArray(selected?.long_slot_times) ? selected.long_slot_times : [])
+    setEditSchedule(scheduleFromBrand(selected))
+    setEditLongSlotTimes(normalizeLongSlotTimesList(selected?.long_slot_times))
     setEditVerticalMode(selected?.vertical_mode || 'zoom_crop')
     setUploadPostTiktokEnabled(!!selected?.upload_post_tiktok_enabled)
     setUploadPostTiktokExtra(selected?.upload_post_tiktok_extra_description || '')
@@ -277,8 +536,8 @@ export default function IntroOutro() {
         thumbnail_text_color: (newBrandTextColor || '').trim(),
         thumbnail_effect_color: (newBrandEffectColor || '').trim(),
         youtube_description_extra: newBrandDescriptionExtra || '',
-        short_slot_times: newBrandShortSlotTimes?.length ? newBrandShortSlotTimes : [],
-        long_slot_times: newBrandLongSlotTimes?.length ? newBrandLongSlotTimes : [],
+        ...scheduleToPayload(newBrandSchedule),
+        long_slot_times: normalizeLongSlotTimesList(newBrandLongSlotTimes),
         vertical_mode: newBrandVerticalMode || 'zoom_crop',
       }
       const b = await createBrand(payload)
@@ -292,6 +551,7 @@ export default function IntroOutro() {
       setNewBrandThemeCategory('')
       setNewBrandLogoFile(null)
       setNewBrandDescriptionExtra('')
+      setNewBrandSchedule({ ...SCHEDULER_DEFAULTS })
       setShowNewBrand(false)
     } catch (e) {
       setError(e.message)
@@ -338,8 +598,8 @@ export default function IntroOutro() {
         thumbnail_band_color: (editBandColor || '').trim(),
         thumbnail_text_color: (editTextColor || '').trim(),
         thumbnail_effect_color: (editEffectColor || '').trim(),
-        short_slot_times: Array.isArray(editShortSlotTimes) ? editShortSlotTimes : [],
-        long_slot_times: Array.isArray(editLongSlotTimes) ? editLongSlotTimes : [],
+        ...scheduleToPayload(editSchedule),
+        long_slot_times: normalizeLongSlotTimesList(editLongSlotTimes),
         vertical_mode: editVerticalMode || 'zoom_crop',
       })
       const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
@@ -598,28 +858,13 @@ export default function IntroOutro() {
 
             <div className="form-section">
               <h3>Regras de Agendamento</h3>
+              <p className="form-hint">
+                Plano diário: janela operacional, volumes e jitter. Os horários de publicação são gerados dentro da janela (não são fixos).
+              </p>
+              <SchedulerPlanFields schedule={newBrandSchedule} setSchedule={setNewBrandSchedule} />
               <div className="form-group">
-                <label>Horários fixos de short</label>
-                <p className="form-hint">Adicione os horários em que os shorts serão postados. Obrigatório.</p>
-                <div className="short-slots-list">
-                  {(newBrandShortSlotTimes || []).map((t, i) => (
-                    <span key={i} className="short-slot-chip">
-                      {t}
-                      <button type="button" onClick={() => setNewBrandShortSlotTimes((prev) => prev.filter((_, j) => j !== i))} title="Remover">×</button>
-                    </span>
-                  ))}
-                  <div className="short-slot-add">
-                    <input type="time" value={newBrandShortSlotTimeInput} onChange={(e) => setNewBrandShortSlotTimeInput(e.target.value)} />
-                    <button type="button" onClick={() => {
-                      const v = newBrandShortSlotTimeInput?.slice(0, 5)
-                      if (v && !newBrandShortSlotTimes.includes(v)) setNewBrandShortSlotTimes((prev) => [...prev, v].sort())
-                    }}>Adicionar</button>
-                  </div>
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Horários fixos de vídeos longos</label>
-                <p className="form-hint">Adicione os horários em que os longos serão postados. Obrigatório para agendar longos.</p>
+                <label>Horários alvo dos vídeos longos (opcional)</label>
+                <p className="form-hint">Se preenchido, o plano ancora os longos perto destes horários (± jitter). Vazio = longos distribuídos como os shorts, só pela janela.</p>
                 <div className="short-slots-list">
                   {(newBrandLongSlotTimes || []).map((t, i) => (
                     <span key={i} className="short-slot-chip">
@@ -678,7 +923,7 @@ export default function IntroOutro() {
           <div className="add-form">
             <h2>Configuração de agendamento da brand</h2>
             <p className="form-hint">
-              Ajuste os horários fixos de postagem. O número de slots define quantos vídeos serão agendados por dia.
+              Defina a janela operacional, volumes diários e dias ativos. Os shorts usam horários gerados na janela. Se preencher os horários de longos abaixo, cada longo ancora nesse horário (com pequeno jitter); se deixar vazio, longos e shorts seguem só a janela.
             </p>
             <form onSubmit={handleSaveBrandScheduling} className="brand-create-form">
               <div className="form-row">
@@ -718,28 +963,10 @@ export default function IntroOutro() {
                   <p className="form-hint">Zoom preenche a tela; Enquadrar adiciona bordas e logo.</p>
                 </div>
               </div>
+              <SchedulerPlanFields schedule={editSchedule} setSchedule={setEditSchedule} />
               <div className="form-group">
-                <label>Horários fixos de short</label>
-                <p className="form-hint">Adicione os horários em que os shorts serão postados. Obrigatório.</p>
-                <div className="short-slots-list">
-                  {(editShortSlotTimes || []).map((t, i) => (
-                    <span key={i} className="short-slot-chip">
-                      {t}
-                      <button type="button" onClick={() => setEditShortSlotTimes((prev) => prev.filter((_, j) => j !== i))} title="Remover">×</button>
-                    </span>
-                  ))}
-                  <div className="short-slot-add">
-                    <input type="time" value={newShortSlotTime} onChange={(e) => setNewShortSlotTime(e.target.value)} />
-                    <button type="button" onClick={() => {
-                      const v = newShortSlotTime?.slice(0, 5)
-                      if (v && !editShortSlotTimes.includes(v)) setEditShortSlotTimes((prev) => [...prev, v].sort())
-                    }}>Adicionar</button>
-                  </div>
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Horários fixos de vídeos longos</label>
-                <p className="form-hint">Adicione os horários em que os longos serão postados. Obrigatório para agendar longos.</p>
+                <label>Horários alvo dos vídeos longos (opcional)</label>
+                <p className="form-hint">Se preenchido, o plano ancora os longos perto destes horários (± jitter). Vazio = longos distribuídos como os shorts, só pela janela.</p>
                 <div className="short-slots-list">
                   {(editLongSlotTimes || []).map((t, i) => (
                     <span key={i} className="short-slot-chip">
