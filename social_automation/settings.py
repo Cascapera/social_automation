@@ -36,7 +36,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 def _get_allowed_hosts():
     if not DEBUG:
         return [h.strip() for h in (os.getenv("ALLOWED_HOSTS", "") or "").split(",") if h.strip()]
-    hosts = ["localhost", "127.0.0.1"]
+    hosts = ["localhost", "127.0.0.1", "web"]
     # Allow LAN access when FRONTEND_URL points to an IP (e.g. http://192.168.1.100:5173)
     try:
         from urllib.parse import urlparse

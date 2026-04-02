@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090
+
+  # Celery task metrics are aggregated by Django's /metrics endpoint through
+  # prometheus_client multiprocess mode (shared PROMETHEUS_MULTIPROC_DIR).
+  # Workers do not expose a separate HTTP metrics endpoint in this repository.
+  - job_name: social_automation_web
+    metrics_path: /metrics/
+    static_configs:
+      - targets:
+          - web:8000
+        labels:
+          app: social_automation
+          service: web
+          scrape_mode: multiprocess_aggregate

@@ -41,7 +41,8 @@ services:
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc/web
+      PROMETHEUS_MULTIPROC_ROOT_DIR: /tmp/prometheus_multiproc
     volumes:
       - .:/app
       - prometheus_multiproc:/tmp/prometheus_multiproc
@@ -52,8 +53,8 @@ services:
         condition: service_healthy
     networks:
       - app
-    # Clear shared Prometheus multiproc dir once (web starts before Celery; avoids a separate one-shot container that exits and confuses Docker Desktop).
-    command: sh -c "mkdir -p /tmp/prometheus_multiproc && rm -rf /tmp/prometheus_multiproc/* && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
+    # Reset shared multiprocess root once, then create per-service subdirs to avoid PID file collisions across containers.
+    command: sh -c "mkdir -p /tmp/prometheus_multiproc && rm -rf /tmp/prometheus_multiproc/* && mkdir -p /tmp/prometheus_multiproc/web /tmp/prometheus_multiproc/celery /tmp/prometheus_multiproc/celery_render /tmp/prometheus_multiproc/celery_publish /tmp/prometheus_multiproc/beat && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
 
   # Transcription + analysis (CPU). Runs the next job while celery_render encodes on GPU.
   celery:
@@ -64,7 +65,7 @@ services:
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc/celery
     volumes:
       - .:/app
       - prometheus_multiproc:/tmp/prometheus_multiproc
@@ -93,7 +94,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc/celery_render
     volumes:
       - .:/app
       - prometheus_multiproc:/tmp/prometheus_multiproc
@@ -117,7 +118,7 @@ services:
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc/celery_publish
     volumes:
       - .:/app
       - prometheus_multiproc:/tmp/prometheus_multiproc
@@ -140,7 +141,7 @@ services:
       CELERY_RESULT_BACKEND: django-db
       TZ: America/Sao_Paulo
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-social_automation}
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc/beat
     volumes:
       - .:/app
       - prometheus_multiproc:/tmp/prometheus_multiproc
@@ -161,6 +162,40 @@ services:
       - app
     command: celery -A config beat -l INFO
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      web:
+        condition: service_started
+    networks:
+      - app
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - app
+
 networks:
   app:
     driver: bridge
@@ -168,3 +203,5 @@ networks:
 volumes:
   postgres_data:
   prometheus_multiproc:
+  prometheus_data:
+  grafana_data:
