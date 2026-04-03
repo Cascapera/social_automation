@@ -41,6 +41,12 @@ from apps.jobs.models import (
     VideoInventoryItem,
 )
 from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
+from apps.social.services.idempotency import (
+    acquire_idempotency_key,
+    get_existing_idempotency_result,
+    mark_idempotency_failed,
+    mark_idempotency_success,
+)
 
 logger = logging.getLogger(__name__)
 YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
@@ -584,6 +590,7 @@ UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
 UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
 YOUTUBE_QUOTA_MAX_RETRIES = 2
+IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
 
 
 @shared_task
@@ -727,6 +734,72 @@ def _build_upload_post_platforms(brand, post) -> list[str]:
     if is_youtube and getattr(brand, "upload_post_youtube_enabled", False):
         platforms.append("YOUTUBE")
     return platforms
+
+
+def _logical_upload_post_platform(post: ScheduledPost, upload_post_platform: str) -> str:
+    normalized = str(upload_post_platform).strip().upper()
+    if normalized == "YOUTUBE":
+        return "YT" if ("YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])) else "YTB"
+    return {
+        "TIKTOK": "TT",
+        "INSTAGRAM": "IG",
+        "X": "X",
+    }[normalized]
+
+
+def _resolve_publish_target_identity(
+    post: ScheduledPost,
+    brand,
+    platform: str,
+    *,
+    account=None,
+) -> str:
+    normalized = str(platform).strip().upper()
+    resolved_account = account
+    if resolved_account is None and normalized in YOUTUBE_PLATFORM_CODES:
+        resolved_account = _resolve_social_account_for_platform(post, brand, normalized)
+    channel_id = str(getattr(resolved_account, "channel_id", "") or "").strip()
+    if channel_id:
+        return channel_id
+    account_id = getattr(resolved_account, "id", None)
+    if account_id:
+        return f"social_account_{account_id}"
+    return f"brand_{brand.id}_{normalized}"
+
+
+def _build_publish_idempotency_key(
+    post: ScheduledPost,
+    brand,
+    platform: str,
+    upload_fingerprint: str,
+    *,
+    account=None,
+) -> str:
+    target_identity = _resolve_publish_target_identity(
+        post,
+        brand,
+        platform,
+        account=account,
+    )
+    return f"publish:{platform}:{target_identity}:{upload_fingerprint}"
+
+
+def _apply_idempotency_result(external_ids: dict, result_payload: dict | None) -> None:
+    payload = result_payload or {}
+    for key in payload.get("remove_external_ids") or []:
+        external_ids.pop(str(key), None)
+    for key, value in (payload.get("external_ids") or {}).items():
+        if value is None or value == "":
+            continue
+        external_ids[str(key)] = value
+
+
+def _build_idempotency_retryable_error(platform: str) -> dict:
+    return {
+        "message": f"{platform}: publicação já está em andamento para esta chave idempotente",
+        "retry_after_seconds": IDEMPOTENCY_IN_PROGRESS_DELAY_SEC,
+        "reason": "idempotencyInProgress",
+    }
 
 
 @shared_task
@@ -1385,11 +1458,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
 
     correlation_id = resolve_scheduled_post_correlation_id(post)
 
-    if post.status != "PENDING":
+    claimed = ScheduledPost.objects.filter(id=post.id, status="PENDING").update(status="POSTING")
+    if not claimed:
         return {"skipped": "status não é PENDING"}
     current_attempt = int(post.retry_count or 0) + 1
     post.status = "POSTING"
-    post.save(update_fields=["status"])
     brand = None
     video_path = ""
     job_obj = post.job
@@ -1470,7 +1543,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     external_ids = dict(post.external_ids or {})
     upload_fingerprint = ""
     social_account_changed = False
-    upload_post_youtube_ok = False  # Set if YouTube was posted via Upload Post
+    upload_post_youtube_ok = bool(external_ids.get("youtube_via_upload_post"))
     # File hash for deduplication per channel/platform.
     try:
         hasher = hashlib.sha256()
@@ -1480,6 +1553,48 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         upload_fingerprint = hasher.hexdigest()
     except Exception:
         upload_fingerprint = ""
+    if not upload_fingerprint:
+        upload_fingerprint = str(post.upload_fingerprint or "").strip()
+    if not upload_fingerprint:
+        errors.append("idempotency: upload_fingerprint indisponível para proteger a publicação")
+    if errors:
+        post.status = "FAILED"
+        post.error = "; ".join(errors)
+        post.upload_fingerprint = upload_fingerprint
+        post.external_ids = external_ids
+        post.save(update_fields=["status", "error", "upload_fingerprint", "external_ids"])
+        try:
+            FactoryPostingAttemptLog.objects.create(
+                posting_schedule=post.factory_schedule,
+                attempt_number=current_attempt,
+                started_at=timezone.now(),
+                finished_at=timezone.now(),
+                result="ERROR",
+                error_message=post.error,
+                provider_response={},
+            )
+        except Exception:
+            pass
+        publish_failures_total.inc()
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=_brand_id,
+            platform="youtube",
+            status="error",
+            duration_ms=_timer.elapsed_ms(),
+            attempt_number=current_attempt,
+            error=post.error,
+        )
+        _sync_factory_posting_schedule(post)
+        return {
+            "status": post.status,
+            "errors": errors,
+            "error": post.error,
+            "external_ids": external_ids,
+        }
 
     # Upload-Post (preferred): TikTok, X, Instagram, YouTube when enabled on brand.
     # Short and long. Retry 2x at 10s. Fallback to YouTube API on failure.
@@ -1522,84 +1637,137 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         if getattr(brand, "factory_id", None) and getattr(brand, "factory", None):
             tz_name = (brand.factory.timezone or "").strip() or tz_name
 
+        upload_post_keys_by_platform: dict[str, str] = {}
+        upload_post_platforms_to_execute: list[str] = []
+        for up_platform in upload_post_platforms:
+            logical_platform = _logical_upload_post_platform(post, up_platform)
+            idempotency_key = _build_publish_idempotency_key(
+                post,
+                brand,
+                logical_platform,
+                upload_fingerprint,
+            )
+            acquire_result = acquire_idempotency_key(
+                key=idempotency_key,
+                operation_name="publish",
+                aggregate_type="ScheduledPost",
+                aggregate_id=post.id,
+            )
+            if acquire_result.outcome == "succeeded":
+                existing_payload = get_existing_idempotency_result(idempotency_key) or acquire_result.record.result_payload
+                _apply_idempotency_result(external_ids, existing_payload)
+                existing_external_ids = (existing_payload or {}).get("external_ids") or {}
+                if logical_platform in YOUTUBE_PLATFORM_CODES and (
+                    existing_external_ids.get("youtube_via_upload_post") or existing_external_ids.get(logical_platform)
+                ):
+                    upload_post_youtube_ok = True
+                continue
+            if acquire_result.outcome == "in_progress":
+                retryable_errors.append(_build_idempotency_retryable_error(logical_platform))
+                continue
+            upload_post_keys_by_platform[up_platform] = idempotency_key
+            upload_post_platforms_to_execute.append(up_platform)
+
         up_success = False
         last_up_error = None
-        for attempt in range(UPLOAD_POST_RETRY_COUNT + 1):
-            try:
-                result = publish_to_upload_post(
-                    video_path=video_path,
-                    brand_id=brand.id,
-                    platforms=upload_post_platforms,
-                    title=title,
-                    description_by_platform=desc_by_platform,
-                    scheduled_at=post.scheduled_at,
-                    timezone_name=tz_name,
-                )
-                if result.get("success"):
-                    up_success = True
-                    logger.info(
-                        "[UploadPost] Posting confirmation received (id %s)",
-                        result.get("request_id") or "ok",
+        if upload_post_platforms_to_execute:
+            desc_by_platform = {
+                key: value
+                for key, value in desc_by_platform.items()
+                if key in upload_post_platforms_to_execute
+            }
+            upload_post_result_keys = {
+                "TIKTOK": "tiktok",
+                "X": "x",
+                "INSTAGRAM": "instagram",
+                "YOUTUBE": "youtube",
+            }
+            for attempt in range(UPLOAD_POST_RETRY_COUNT + 1):
+                try:
+                    result = publish_to_upload_post(
+                        video_path=video_path,
+                        brand_id=brand.id,
+                        platforms=upload_post_platforms_to_execute,
+                        title=title,
+                        description_by_platform=desc_by_platform,
+                        scheduled_at=post.scheduled_at,
+                        timezone_name=tz_name,
                     )
-                    yt_platform = "YT" if ("YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])) else "YTB"
-                    UPLOAD_POST_TO_PLATFORM = {
-                        "tiktok": "TT",
-                        "x": "X",
-                        "instagram": "IG",
-                        "youtube": yt_platform,
-                    }
-                    up_results = (result.get("data") or {}).get("results") or {}
-                    for up_platform, platform_code in UPLOAD_POST_TO_PLATFORM.items():
-                        plat_data = up_results.get(up_platform)
-                        if plat_data and plat_data.get("success"):
-                            vid = plat_data.get("video_id") or plat_data.get("publish_id")
-                            if vid:
-                                external_ids[platform_code] = str(vid)
-                                if up_platform == "youtube":
-                                    upload_post_youtube_ok = True
-                    if result.get("request_id"):
-                        external_ids["upload_post_request_id"] = str(result["request_id"])
-                    # With async_upload=true, YouTube may return no video_id yet (processing). Avoid duplicate fallback.
-                    if "YOUTUBE" in upload_post_platforms and result.get("request_id"):
-                        upload_post_youtube_ok = True
-                    if upload_post_youtube_ok:
-                        # Evita upload de capa pela API YouTube (thumbnails.set) em upload_thumbnails_after_batch_task.
-                        external_ids["youtube_via_upload_post"] = True
-                    break
-                last_up_error = result.get("error", "error")
-            except UploadPostPublishError as e:
-                last_up_error = str(e)
-                if attempt < UPLOAD_POST_RETRY_COUNT:
-                    logger.warning(
-                        "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
-                        attempt + 1,
-                        UPLOAD_POST_RETRY_COUNT + 1,
-                        UPLOAD_POST_RETRY_DELAY_SEC,
-                        last_up_error,
-                    )
-                    _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
-                else:
-                    logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
-                    if "YOUTUBE" in upload_post_platforms:
-                        logger.info("[UploadPost] Falling back to YouTube API")
-            except Exception as e:
-                last_up_error = str(e)
-                if attempt < UPLOAD_POST_RETRY_COUNT:
-                    logger.warning(
-                        "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
-                        attempt + 1,
-                        UPLOAD_POST_RETRY_COUNT + 1,
-                        UPLOAD_POST_RETRY_DELAY_SEC,
-                        last_up_error,
-                    )
-                    _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
-                else:
-                    logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
-                    if "YOUTUBE" in upload_post_platforms:
-                        logger.info("[UploadPost] Falling back to YouTube API")
+                    if result.get("success"):
+                        up_success = True
+                        request_id = str(result.get("request_id") or "").strip()
+                        logger.info(
+                            "[UploadPost] Posting confirmation received (id %s)",
+                            request_id or "ok",
+                        )
+                        if request_id:
+                            external_ids["upload_post_request_id"] = request_id
+                        up_results = (result.get("data") or {}).get("results") or {}
+                        for up_platform in upload_post_platforms_to_execute:
+                            logical_platform = _logical_upload_post_platform(post, up_platform)
+                            plat_data = up_results.get(upload_post_result_keys[up_platform]) or {}
+                            external_ids_delta: dict[str, str | bool] = {}
+                            if request_id:
+                                external_ids_delta["upload_post_request_id"] = request_id
+                            if plat_data.get("success"):
+                                vid = plat_data.get("video_id") or plat_data.get("publish_id")
+                                if vid:
+                                    external_ids[logical_platform] = str(vid)
+                                    external_ids_delta[logical_platform] = str(vid)
+                            if logical_platform in YOUTUBE_PLATFORM_CODES and (
+                                request_id or external_ids_delta.get(logical_platform)
+                            ):
+                                upload_post_youtube_ok = True
+                                external_ids["youtube_via_upload_post"] = True
+                                external_ids_delta["youtube_via_upload_post"] = True
+                            mark_idempotency_success(
+                                key=upload_post_keys_by_platform[up_platform],
+                                result_payload={
+                                    "platform": logical_platform,
+                                    "publisher": "upload_post",
+                                    "external_ids": external_ids_delta,
+                                    "provider_response": plat_data,
+                                    "request_id": request_id,
+                                },
+                            )
+                        break
+                    last_up_error = str(result.get("error") or "error")
+                except UploadPostPublishError as e:
+                    last_up_error = str(e)
+                    if attempt < UPLOAD_POST_RETRY_COUNT:
+                        logger.warning(
+                            "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
+                            attempt + 1,
+                            UPLOAD_POST_RETRY_COUNT + 1,
+                            UPLOAD_POST_RETRY_DELAY_SEC,
+                            last_up_error,
+                        )
+                        _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
+                    else:
+                        logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                        if "YOUTUBE" in upload_post_platforms_to_execute:
+                            logger.info("[UploadPost] Falling back to YouTube API")
+                except Exception as e:
+                    last_up_error = str(e)
+                    if attempt < UPLOAD_POST_RETRY_COUNT:
+                        logger.warning(
+                            "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
+                            attempt + 1,
+                            UPLOAD_POST_RETRY_COUNT + 1,
+                            UPLOAD_POST_RETRY_DELAY_SEC,
+                            last_up_error,
+                        )
+                        _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
+                    else:
+                        logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                        if "YOUTUBE" in upload_post_platforms_to_execute:
+                            logger.info("[UploadPost] Falling back to YouTube API")
 
-        if not up_success and last_up_error and "YOUTUBE" not in upload_post_platforms:
-            warnings.append(f"Upload-Post: {last_up_error}")
+        if not up_success and last_up_error:
+            for idempotency_key in upload_post_keys_by_platform.values():
+                mark_idempotency_failed(key=idempotency_key, error_message=last_up_error)
+            if "YOUTUBE" not in upload_post_platforms_to_execute:
+                warnings.append(f"Upload-Post: {last_up_error}")
 
     for platform in post.platforms:
         # If YouTube was already handled via Upload Post, skip native API (avoid duplicate Short).
@@ -1647,6 +1815,26 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         if not post.social_account_id and isinstance(account, BrandSocialAccount):
             post.social_account = account
             social_account_changed = True
+        idempotency_key = _build_publish_idempotency_key(
+            post,
+            brand,
+            platform,
+            upload_fingerprint,
+            account=account,
+        )
+        acquire_result = acquire_idempotency_key(
+            key=idempotency_key,
+            operation_name="publish",
+            aggregate_type="ScheduledPost",
+            aggregate_id=post.id,
+        )
+        if acquire_result.outcome == "succeeded":
+            existing_payload = get_existing_idempotency_result(idempotency_key) or acquire_result.record.result_payload
+            _apply_idempotency_result(external_ids, existing_payload)
+            continue
+        if acquire_result.outcome == "in_progress":
+            retryable_errors.append(_build_idempotency_retryable_error(platform))
+            continue
         # Extra deduplication: avoid accidental duplicate upload for same channel/platform.
         if upload_fingerprint and platform in ("YT", "YTB"):
             done_posts = ScheduledPost.objects.filter(
@@ -1666,13 +1854,17 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     duplicated = True
                     break
             if duplicated:
-                errors.append(f"{platform}: upload duplicado detectado (mesmo arquivo e canal)")
+                duplicate_message = f"{platform}: upload duplicado detectado (mesmo arquivo e canal)"
+                mark_idempotency_failed(key=idempotency_key, error_message=duplicate_message)
+                errors.append(duplicate_message)
                 continue
         from apps.social.publishers import get_publisher
 
         publisher = get_publisher(platform)
         if not publisher:
-            errors.append(f"{platform}: publisher não implementado")
+            error_message = f"{platform}: publisher não implementado"
+            mark_idempotency_failed(key=idempotency_key, error_message=error_message)
+            errors.append(error_message)
             continue
         is_youtube_platform = str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES
         ordered_youtube_credentials = _list_ordered_youtube_credentials(brand) if is_youtube_platform else []
@@ -1697,6 +1889,13 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         "retry_after_seconds": delay,
                         "reason": "quotaExceeded",
                     }
+                )
+                mark_idempotency_failed(
+                    key=idempotency_key,
+                    error_message=(
+                        f"{platform}: todas as credenciais YouTube da brand estão sem cota. "
+                        "Aguardando reset automático."
+                    ),
                 )
                 continue
 
@@ -1750,6 +1949,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         youtube_credential_id=yt_cred.id,
                     )
                     published = True
+                    mark_idempotency_success(
+                        key=idempotency_key,
+                        result_payload={
+                            "platform": platform,
+                            "publisher": "native",
+                            "external_ids": (
+                                {platform: str(video_id)}
+                                if video_id
+                                else {}
+                            ),
+                            "remove_external_ids": ["youtube_via_upload_post"],
+                            "provider_response": result or {},
+                        },
+                    )
                     break
                 except Exception as e:
                     reason = str(getattr(e, "reason", "") or "").strip()
@@ -1797,6 +2010,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             # All credentials failed: schedule retry or mark error
             if last_exception is not None:
                 if last_is_retriable:
+                    mark_idempotency_failed(
+                        key=idempotency_key,
+                        error_message=f"{platform}: {last_exception}",
+                    )
                     retryable_errors.append(
                         {
                             "message": f"{platform}: {last_exception}",
@@ -1805,7 +2022,9 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         }
                     )
                 else:
-                    errors.append(f"{platform}: {last_exception}")
+                    error_message = f"{platform}: {last_exception}"
+                    mark_idempotency_failed(key=idempotency_key, error_message=error_message)
+                    errors.append(error_message)
             continue
 
             next_available_at = min(
@@ -1834,8 +2053,23 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             warning = (result or {}).get("warning")
             if warning:
                 warnings.append(f"{platform}: {warning}")
+            mark_idempotency_success(
+                key=idempotency_key,
+                result_payload={
+                    "platform": platform,
+                    "publisher": "native",
+                    "external_ids": (
+                        {platform: str(video_id)}
+                        if video_id
+                        else {}
+                    ),
+                    "remove_external_ids": ["youtube_via_upload_post"] if platform in ("YT", "YTB") else [],
+                    "provider_response": result or {},
+                },
+            )
         except Exception as e:
             if getattr(e, "retriable", False):
+                mark_idempotency_failed(key=idempotency_key, error_message=f"{platform}: {e}")
                 retryable_errors.append(
                     {
                         "message": f"{platform}: {e}",
@@ -1844,7 +2078,9 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     }
                 )
             else:
-                errors.append(f"{platform}: {e}")
+                error_message = f"{platform}: {e}"
+                mark_idempotency_failed(key=idempotency_key, error_message=error_message)
+                errors.append(error_message)
     if retryable_errors and not errors:
         has_quota_exceeded = any(
             (item.get("reason") or "").strip() == "quotaExceeded"
@@ -1858,6 +2094,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             (item.get("reason") or "").strip() == "minIntervalNotReached"
             for item in retryable_errors
         )
+        has_idempotency_in_progress = any(
+            (item.get("reason") or "").strip() == "idempotencyInProgress"
+            for item in retryable_errors
+        )
         if has_quota_exceeded:
             q = int(getattr(post, "youtube_quota_retry_count", 0) or 0) + 1
             post.youtube_quota_retry_count = q
@@ -1866,7 +2106,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 errors.extend([item["message"] for item in retryable_errors])
         next_retry = int(post.retry_count or 0) + 1
         should_not_consume_attempt = (
-            has_quota_exceeded or has_upload_limit_exceeded or has_min_interval_not_reached
+            has_quota_exceeded
+            or has_upload_limit_exceeded
+            or has_min_interval_not_reached
+            or has_idempotency_in_progress
         )
         # One retry for upload/title errors; token/quota errors do not consume attempt
         if not errors and not should_not_consume_attempt and next_retry > 1:
@@ -1884,6 +2127,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 delay = max([24 * 3600] + requested_delays)
             elif has_min_interval_not_reached:
                 delay = max([60] + requested_delays)
+            elif has_idempotency_in_progress:
+                delay = max([IDEMPOTENCY_IN_PROGRESS_DELAY_SEC] + requested_delays)
             else:
                 delay = max([300] + requested_delays)
             msg = " ; ".join([item["message"] for item in retryable_errors])
@@ -1901,6 +2146,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             elif has_min_interval_not_reached:
                 post.error = (
                     "Intervalo mínimo entre publicações ainda não cumprido. "
+                    f"Nova tentativa automática em {delay}s. {msg}"
+                )
+            elif has_idempotency_in_progress:
+                post.error = (
+                    "Publicação aguardando conclusão de uma execução idempotente já iniciada. "
                     f"Nova tentativa automática em {delay}s. {msg}"
                 )
             else:

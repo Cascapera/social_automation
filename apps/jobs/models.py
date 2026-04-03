@@ -232,6 +232,42 @@ class ScheduledPost(models.Model):
         return f"{label} → {self.scheduled_at} ({self.status})"
 
 
+class IdempotencyKey(models.Model):
+    class Status(models.TextChoices):
+        IN_PROGRESS = "in_progress", "Em andamento"
+        SUCCEEDED = "succeeded", "Concluída"
+        FAILED = "failed", "Falhou"
+
+    key = models.CharField(max_length=255, unique=True)
+    operation_name = models.CharField(max_length=64)
+    aggregate_type = models.CharField(max_length=64)
+    aggregate_id = models.PositiveBigIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.IN_PROGRESS,
+    )
+    result_payload = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["operation_name", "aggregate_type", "aggregate_id"],
+                name="jobs_idemp_agg_idx",
+            ),
+            models.Index(fields=["status", "updated_at"], name="jobs_idemp_status_idx"),
+        ]
+        verbose_name = "Chave de idempotência"
+        verbose_name_plural = "Chaves de idempotência"
+
+    def __str__(self) -> str:
+        return f"{self.operation_name}:{self.key} ({self.status})"
+
+
 class VideoInventoryItem(models.Model):
     STATUS = [
         ("AVAILABLE", "Disponível"),
