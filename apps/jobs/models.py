@@ -140,6 +140,113 @@ class Job(models.Model):
         platforms = ",".join(self.target_platforms) if self.target_platforms else "-"
         return f"{label} ({platforms}) - {self.status}"
 
+
+class PipelineExecution(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    pipeline_type = models.CharField(max_length=64)
+    aggregate_type = models.CharField(max_length=64)
+    aggregate_id = models.PositiveBigIntegerField()
+    correlation_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    current_stage = models.CharField(max_length=64, blank=True, default="")
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.TextField(blank=True, default="")
+    metadata_json = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["pipeline_type", "aggregate_type", "aggregate_id"],
+                name="jobs_pipe_exec_scope_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["aggregate_type", "aggregate_id"],
+                name="jobs_pipe_exec_agg_idx",
+            ),
+            models.Index(
+                fields=["status", "pipeline_type"],
+                name="jobs_pipe_exec_status_idx",
+            ),
+        ]
+        ordering = ["-updated_at", "-id"]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.pipeline_type}:{self.aggregate_type}:{self.aggregate_id}"
+            f" ({self.status})"
+        )
+
+
+class StageExecution(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
+    pipeline_execution = models.ForeignKey(
+        PipelineExecution,
+        on_delete=models.CASCADE,
+        related_name="stage_executions",
+    )
+    stage_name = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    queue_name = models.CharField(max_length=64, blank=True, default="")
+    task_name = models.CharField(max_length=255, blank=True, default="")
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    input_payload = models.JSONField(default=dict, blank=True)
+    output_payload = models.JSONField(default=dict, blank=True)
+    error_class = models.CharField(max_length=255, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["pipeline_execution", "stage_name"],
+                name="jobs_stage_exec_name_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["pipeline_execution", "status"],
+                name="jobs_stage_exec_status_idx",
+            ),
+            models.Index(
+                fields=["stage_name", "status"],
+                name="jobs_stage_exec_name_idx",
+            ),
+        ]
+        ordering = ["pipeline_execution_id", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.pipeline_execution_id}:{self.stage_name} ({self.status})"
+
+
 class RenderOutput(models.Model):
     job = models.OneToOneField(Job, on_delete=models.CASCADE, related_name="output")
     file = models.FileField(upload_to="exports/")

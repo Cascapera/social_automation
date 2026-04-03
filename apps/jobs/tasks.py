@@ -14,11 +14,23 @@ from apps.common.metrics import (
     transcription_failures_total,
     transcription_jobs_total,
 )
+from apps.common.task_observability import resolve_task_observation_labels
 
 from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
 from .logging_utils import Timer, ensure_job_correlation_id, log_event
 from .services.ffmpeg import has_nvenc
 from .services.pipeline import run_job
+from .services.pipeline_execution import (
+    STAGE_JOB_PROCESSING,
+    STAGE_SUBTITLE_BURN,
+    STAGE_TRANSCRIPTION,
+    complete_stage,
+    fail_stage,
+    get_or_create_job_pipeline_execution,
+    mark_pipeline_completed,
+    mark_pipeline_failed,
+    start_stage,
+)
 from .services.subtitles import (
     burn_subtitles,
     generate_subtitles,
@@ -36,13 +48,70 @@ def _whisper_workload_type() -> str:
     return "cpu" if force_cpu else "gpu"
 
 
+def _resolve_task_context(task) -> tuple[str, str]:
+    return resolve_task_observation_labels(
+        task=task,
+        task_name=getattr(task, "name", "") or None,
+    )
+
+
+def _fail_stage_and_pipeline(
+    pipeline_execution,
+    *,
+    stage_name: str,
+    error: Exception | None = None,
+    error_class: str = "",
+    error_message: str = "",
+) -> None:
+    stage_execution = fail_stage(
+        pipeline_execution,
+        stage_name=stage_name,
+        error=error,
+        error_class=error_class,
+        error_message=error_message,
+    )
+    mark_pipeline_failed(
+        pipeline_execution,
+        current_stage=stage_name,
+        failure_reason=stage_execution.error_message,
+    )
+
+
 @shared_task(bind=True)
 def process_job(self, job_id: int) -> None:
     from .models import Job
 
     job = Job.objects.get(id=job_id)
     ensure_job_correlation_id(job)
-    run_job(job_id)
+    pipeline_execution, _ = get_or_create_job_pipeline_execution(job)
+    task_name, queue_name = _resolve_task_context(self)
+    start_stage(
+        pipeline_execution,
+        stage_name=STAGE_JOB_PROCESSING,
+        queue_name=queue_name,
+        task_name=task_name,
+        input_payload={"job_id": job.id},
+    )
+
+    try:
+        run_job(job_id)
+    except Exception as exc:
+        _fail_stage_and_pipeline(
+            pipeline_execution,
+            stage_name=STAGE_JOB_PROCESSING,
+            error=exc,
+        )
+        raise
+
+    complete_stage(
+        pipeline_execution,
+        stage_name=STAGE_JOB_PROCESSING,
+        output_payload={"job_status": "DONE"},
+    )
+    mark_pipeline_completed(
+        pipeline_execution,
+        current_stage=STAGE_JOB_PROCESSING,
+    )
 
 
 @shared_task(bind=True)
@@ -51,30 +120,58 @@ def generate_subtitles_task(self, job_id: int) -> None:
 
     job = Job.objects.get(id=job_id)
     ensure_job_correlation_id(job)
+    pipeline_execution, _ = get_or_create_job_pipeline_execution(job)
+    task_name, queue_name = _resolve_task_context(self)
+    queue_name = queue_name or settings.CELERY_QUEUE_TRANSCRIPTION
+    start_stage(
+        pipeline_execution,
+        stage_name=STAGE_TRANSCRIPTION,
+        queue_name=queue_name,
+        task_name=task_name,
+        input_payload={"job_id": job.id},
+    )
+
     try:
         out = job.output
         if not out or not out.file:
             job.subtitle_status = "error"
             job.subtitle_error = "Arquivo de vídeo não encontrado."
             job.save(update_fields=["subtitle_status", "subtitle_error"])
+            _fail_stage_and_pipeline(
+                pipeline_execution,
+                stage_name=STAGE_TRANSCRIPTION,
+                error_class="StageValidationError",
+                error_message=job.subtitle_error,
+            )
             return
         video_path = Path(out.file.path)
         if not video_path.exists():
             job.subtitle_status = "error"
             job.subtitle_error = "Arquivo não existe no disco."
             job.save(update_fields=["subtitle_status", "subtitle_error"])
+            _fail_stage_and_pipeline(
+                pipeline_execution,
+                stage_name=STAGE_TRANSCRIPTION,
+                error_class="StageValidationError",
+                error_message=job.subtitle_error,
+            )
             return
     except Exception as e:
         job.subtitle_status = "error"
         job.subtitle_error = str(e)
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        _fail_stage_and_pipeline(
+            pipeline_execution,
+            stage_name=STAGE_TRANSCRIPTION,
+            error=e,
+        )
         raise
 
     job.subtitle_status = "generating"
     job.subtitle_error = ""
     job.save(update_fields=["subtitle_status", "subtitle_error"])
 
-    _queue = settings.CELERY_QUEUE_TRANSCRIPTION
+    _queue = queue_name
     _workload = _whisper_workload_type()
     _task_id = self.request.id or ""
     log_event(
@@ -94,6 +191,14 @@ def generate_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "ready_for_edit"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_segments", "subtitle_status", "subtitle_error"])
+        complete_stage(
+            pipeline_execution,
+            stage_name=STAGE_TRANSCRIPTION,
+            output_payload={
+                "segments_count": len(segments),
+                "subtitle_status": job.subtitle_status,
+            },
+        )
         transcription_duration_ms.labels(workload_type=_workload).observe(_timer.elapsed_ms())
         log_event(
             logger,
@@ -121,6 +226,11 @@ def generate_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "error"
         job.subtitle_error = str(e)
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        _fail_stage_and_pipeline(
+            pipeline_execution,
+            stage_name=STAGE_TRANSCRIPTION,
+            error=e,
+        )
         raise
 
 
@@ -132,23 +242,51 @@ def burn_subtitles_task(self, job_id: int) -> None:
 
     job = Job.objects.get(id=job_id)
     ensure_job_correlation_id(job)
+    pipeline_execution, _ = get_or_create_job_pipeline_execution(job)
+    task_name, queue_name = _resolve_task_context(self)
+    queue_name = queue_name or settings.CELERY_QUEUE_RENDER
+    start_stage(
+        pipeline_execution,
+        stage_name=STAGE_SUBTITLE_BURN,
+        queue_name=queue_name,
+        task_name=task_name,
+        input_payload={"job_id": job.id},
+    )
+
     try:
         out = job.output
         if not out or not out.file:
             job.subtitle_status = "error"
             job.subtitle_error = "Arquivo de vídeo não encontrado."
             job.save(update_fields=["subtitle_status", "subtitle_error"])
+            _fail_stage_and_pipeline(
+                pipeline_execution,
+                stage_name=STAGE_SUBTITLE_BURN,
+                error_class="StageValidationError",
+                error_message=job.subtitle_error,
+            )
             return
         segments = job.subtitle_segments
         if not segments:
             job.subtitle_status = "error"
             job.subtitle_error = "Nenhum segmento de legenda."
             job.save(update_fields=["subtitle_status", "subtitle_error"])
+            _fail_stage_and_pipeline(
+                pipeline_execution,
+                stage_name=STAGE_SUBTITLE_BURN,
+                error_class="StageValidationError",
+                error_message=job.subtitle_error,
+            )
             return
     except Exception as e:
         job.subtitle_status = "error"
         job.subtitle_error = str(e)
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        _fail_stage_and_pipeline(
+            pipeline_execution,
+            stage_name=STAGE_SUBTITLE_BURN,
+            error=e,
+        )
         raise
 
     job.subtitle_status = "burning"
@@ -160,9 +298,15 @@ def burn_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "error"
         job.subtitle_error = "Arquivo não existe no disco."
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        _fail_stage_and_pipeline(
+            pipeline_execution,
+            stage_name=STAGE_SUBTITLE_BURN,
+            error_class="StageValidationError",
+            error_message=job.subtitle_error,
+        )
         return
 
-    _queue = settings.CELERY_QUEUE_RENDER
+    _queue = queue_name
     _workload = "gpu" if has_nvenc() else "cpu"
     _task_id = self.request.id or ""
     log_event(
@@ -208,6 +352,18 @@ def burn_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "burned"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        complete_stage(
+            pipeline_execution,
+            stage_name=STAGE_SUBTITLE_BURN,
+            output_payload={
+                "output_file": out.file.name,
+                "subtitle_status": job.subtitle_status,
+            },
+        )
+        mark_pipeline_completed(
+            pipeline_execution,
+            current_stage=STAGE_SUBTITLE_BURN,
+        )
         render_duration_ms.labels(workload_type=_workload).observe(_timer.elapsed_ms())
         log_event(
             logger,
@@ -235,4 +391,9 @@ def burn_subtitles_task(self, job_id: int) -> None:
         job.subtitle_status = "error"
         job.subtitle_error = str(e)
         job.save(update_fields=["subtitle_status", "subtitle_error"])
+        _fail_stage_and_pipeline(
+            pipeline_execution,
+            stage_name=STAGE_SUBTITLE_BURN,
+            error=e,
+        )
         raise

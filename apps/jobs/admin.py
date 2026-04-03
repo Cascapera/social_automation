@@ -9,9 +9,11 @@ from .models import (
     FactoryScheduleRun,
     Job,
     JobCut,
+    PipelineExecution,
     PostedVideoLog,
     RenderOutput,
     ScheduledPost,
+    StageExecution,
     VideoInventoryItem,
 )
 
@@ -98,6 +100,118 @@ class JobAdmin(admin.ModelAdmin):
         from .tasks import process_job
         for job in queryset.filter(status__in=["QUEUED", "FAILED", "DONE"]):
             process_job.delay(job.id)
+
+
+class StageExecutionInline(admin.TabularInline):
+    model = StageExecution
+    extra = 0
+    can_delete = False
+    readonly_fields = (
+        "stage_name",
+        "status",
+        "queue_name",
+        "task_name",
+        "retry_count",
+        "started_at",
+        "completed_at",
+        "duration_ms",
+        "input_payload",
+        "output_payload",
+        "error_class",
+        "error_message",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PipelineExecution)
+class PipelineExecutionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "pipeline_type",
+        "aggregate_type",
+        "aggregate_id",
+        "status",
+        "current_stage",
+        "correlation_id",
+        "started_at",
+        "completed_at",
+        "updated_at",
+    )
+    list_filter = ("pipeline_type", "aggregate_type", "status")
+    search_fields = ("correlation_id", "aggregate_type", "=aggregate_id")
+    readonly_fields = (
+        "pipeline_type",
+        "aggregate_type",
+        "aggregate_id",
+        "correlation_id",
+        "status",
+        "current_stage",
+        "started_at",
+        "completed_at",
+        "failure_reason",
+        "metadata_json",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [StageExecutionInline]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(StageExecution)
+class StageExecutionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "pipeline_execution",
+        "stage_name",
+        "status",
+        "queue_name",
+        "retry_count",
+        "started_at",
+        "completed_at",
+        "duration_ms",
+    )
+    list_filter = ("stage_name", "status", "queue_name")
+    search_fields = (
+        "pipeline_execution__correlation_id",
+        "=pipeline_execution__aggregate_id",
+        "stage_name",
+        "task_name",
+        "error_class",
+        "error_message",
+    )
+    readonly_fields = (
+        "pipeline_execution",
+        "stage_name",
+        "status",
+        "queue_name",
+        "task_name",
+        "retry_count",
+        "started_at",
+        "completed_at",
+        "duration_ms",
+        "input_payload",
+        "output_payload",
+        "error_class",
+        "error_message",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(RenderOutput)
 class RenderOutputAdmin(admin.ModelAdmin):
