@@ -73,6 +73,8 @@ export default function BancoVideos() {
   const [markingPostedId, setMarkingPostedId] = useState(null)
   const [retryModalItem, setRetryModalItem] = useState(null)
   const [retryScheduledAt, setRetryScheduledAt] = useState('')
+  const [markPostedModalItem, setMarkPostedModalItem] = useState(null)
+  const [markPostedAt, setMarkPostedAt] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -159,6 +161,20 @@ export default function BancoVideos() {
     setError('')
   }
 
+  function openMarkPostedModal(item) {
+    if (!item?.id) return
+    const initial = toDatetimeLocal(new Date())
+    setMarkPostedModalItem(item)
+    setMarkPostedAt(initial || '')
+    setError('')
+  }
+
+  function closeMarkPostedModal() {
+    if (markingPostedId != null) return
+    setMarkPostedModalItem(null)
+    setMarkPostedAt('')
+  }
+
   async function handleDownloadMedia(item) {
     if (!item?.id) return
     setError('')
@@ -172,20 +188,36 @@ export default function BancoVideos() {
     }
   }
 
-  async function handleMarkPosted(item) {
+  async function handleMarkPosted(item, postedAtValue) {
     if (!item?.id) return
-    if (!confirm('Marcar este vídeo como postado manualmente? O vídeo irá para "Vídeos Postados" e as mídias serão removidas.')) return
+    if (!postedAtValue) {
+      setError('Informe a data e hora da postagem.')
+      return
+    }
+    const postedAtDate = new Date(postedAtValue)
+    if (Number.isNaN(postedAtDate.getTime())) {
+      setError('Informe uma data e hora válidas para a postagem.')
+      return
+    }
     setError('')
     setMarkingPostedId(item.id)
     try {
-      await markInventoryPosted(item.id)
+      const payload = { posted_at: postedAtDate.toISOString() }
+      const result = await markInventoryPosted(item.id, payload)
       setItems((prev) =>
         prev.map((x) =>
           x.id === item.id
-            ? { ...x, status: 'POSTED', posted_at: new Date().toISOString() }
+            ? {
+                ...x,
+                status: 'POSTED',
+                posted_at: result?.posted_at || payload.posted_at,
+                last_error: '',
+              }
             : x,
         ),
       )
+      setMarkPostedModalItem(null)
+      setMarkPostedAt('')
     } catch (e) {
       setError(e.message || 'Erro ao marcar como postado.')
     } finally {
@@ -272,6 +304,44 @@ export default function BancoVideos() {
                 className="btn-action btn-cancel"
                 onClick={() => setRetryModalItem(null)}
                 disabled={retryingId === retryModalItem.id}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {markPostedModalItem && (
+        <div className="banco-modal-overlay" onClick={closeMarkPostedModal} role="presentation">
+          <div className="banco-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Marcar vídeo como postado">
+            <h3>Marcar como postado</h3>
+            <p className="banco-modal-desc">
+              Informe a data e hora da postagem manual. Por padrão, o campo vem preenchido com o momento em que você clicou em "Postado".
+            </p>
+            <label className="banco-modal-label">
+              Data e hora da postagem
+              <input
+                type="datetime-local"
+                value={markPostedAt}
+                onChange={(e) => setMarkPostedAt(e.target.value)}
+                className="banco-modal-input"
+              />
+            </label>
+            <div className="banco-modal-actions">
+              <button
+                type="button"
+                className="btn-action btn-posted"
+                disabled={markingPostedId === markPostedModalItem.id}
+                onClick={() => handleMarkPosted(markPostedModalItem, markPostedAt)}
+              >
+                {markingPostedId === markPostedModalItem.id ? 'Marcando...' : 'Confirmar postagem'}
+              </button>
+              <button
+                type="button"
+                className="btn-action btn-cancel"
+                onClick={closeMarkPostedModal}
+                disabled={markingPostedId === markPostedModalItem.id}
               >
                 Cancelar
               </button>
@@ -371,9 +441,9 @@ export default function BancoVideos() {
                             <button
                               type="button"
                               className="btn-action btn-posted"
-                              onClick={() => handleMarkPosted(item)}
+                              onClick={() => openMarkPostedModal(item)}
                               disabled={markingPostedId === item.id}
-                              title="Marcar como postado manualmente (move para postados e remove mídias)"
+                              title="Informar data e hora e marcar como postado manualmente"
                               style={{ marginRight: 8 }}
                             >
                               {markingPostedId === item.id ? 'Marcando...' : 'Postado'}

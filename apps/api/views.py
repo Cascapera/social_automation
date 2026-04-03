@@ -1375,13 +1375,24 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 {"error": "Este vídeo já está marcado como postado."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        posted_raw = (request.data or {}).get("posted_at")
+        if posted_raw:
+            posted_at = parse_datetime(str(posted_raw))
+            if not posted_at:
+                return Response(
+                    {"error": "posted_at inválido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if timezone.is_naive(posted_at):
+                posted_at = timezone.make_aware(posted_at, timezone.get_current_timezone())
+        else:
+            posted_at = timezone.now()
         schedules = list(
             FactoryPostingSchedule.objects.select_related("scheduled_post")
             .filter(inventory_item=inventory)
             .order_by("id")
         )
         scheduled_post_ids = [s.scheduled_post_id for s in schedules if getattr(s, "scheduled_post_id", None)]
-        now = timezone.now()
         deleted_files = 0
         deleted_thumbnails = 0
         with transaction.atomic():
@@ -1402,14 +1413,14 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 post = ScheduledPost.objects.filter(id=post_id).first()
                 if post:
                     post.status = "DONE"
-                    post.posted_at = post.posted_at or now
+                    post.posted_at = posted_at
                     post.error = ""
-                    post.save(update_fields=["status", "posted_at", "error", "updated_at"])
+                    post.save(update_fields=["status", "posted_at", "error"])
             for s in schedules:
                 s.status = "DONE"
                 s.save(update_fields=["status", "updated_at"])
             inventory.status = "POSTED"
-            inventory.posted_at = now
+            inventory.posted_at = posted_at
             inventory.last_error = ""
             inventory.save(update_fields=["status", "posted_at", "last_error", "updated_at"])
             factory = inventory.factory
@@ -1425,13 +1436,17 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                     inventory_item=inventory,
                     external_platform="MANUAL",
                     external_video_id="manual",
-                    posted_at=now,
-                    metadata_snapshot={"manual_post": True},
+                    posted_at=posted_at,
+                    metadata_snapshot={
+                        "manual_post": True,
+                        "manual_posted_at": posted_at.isoformat(),
+                    },
                 )
         return Response(
             {
                 "ok": True,
                 "inventory_item_id": inventory.id,
+                "posted_at": posted_at,
                 "deleted_media_files": deleted_files,
                 "deleted_media_thumbnails": deleted_thumbnails,
             }

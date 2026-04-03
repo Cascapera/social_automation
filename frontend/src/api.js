@@ -245,9 +245,11 @@ export async function downloadInventoryMedia(id, title = '') {
   URL.revokeObjectURL(url)
 }
 
-export async function markInventoryPosted(id) {
+export async function markInventoryPosted(id, payload = {}) {
+  const hasBody = payload && (payload.posted_at != null && payload.posted_at !== '')
   return apiRequest(`/video-inventory/${id}/mark-posted/`, {
     method: 'POST',
+    ...(hasBody ? { body: JSON.stringify({ posted_at: payload.posted_at }) } : {}),
   })
 }
 
