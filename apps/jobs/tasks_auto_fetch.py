@@ -24,6 +24,7 @@ from apps.brands.models import (
     ProcessedYoutubeVideo,
     SearchChannel,
 )
+from apps.common.task_observability import instrument_celery_task
 from apps.jobs.models import VideoInventoryItem
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ def _get_search_channels_ordered(
 
 
 @shared_task
+@instrument_celery_task
 def check_and_fetch_new_videos_task() -> dict:
     """
     Para cada factory com auto_fetch_enabled=True:

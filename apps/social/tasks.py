@@ -23,6 +23,7 @@ from apps.common.metrics import (
     publish_reconciliation_failures_total,
     publish_reconciliation_runs_total,
 )
+from apps.common.task_observability import instrument_celery_task
 from apps.jobs.logging_utils import (
     Timer,
     log_event,
@@ -1147,6 +1148,7 @@ def reconcile_youtube_schedules_task():
 
 
 @shared_task
+@instrument_celery_task
 def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str | None = None):
     """
     Daily full scan per channel:
@@ -2141,6 +2143,7 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
 
 
 @shared_task
+@instrument_celery_task
 def cleanup_posted_media_task():
     """
     Clean media for already-posted videos to save space.

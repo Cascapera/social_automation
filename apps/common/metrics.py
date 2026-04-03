@@ -46,6 +46,30 @@ _DURATION_MS_BUCKETS = (
 )
 
 _workload = ("workload_type",)
+_task = ("task_name", "queue_name")
+
+# --- Generic Celery task observability ---
+task_started_total = Counter(
+    "task_started_total",
+    "Celery task executions started",
+    _task,
+)
+task_finished_total = Counter(
+    "task_finished_total",
+    "Celery task executions finished successfully",
+    _task,
+)
+task_failed_total = Counter(
+    "task_failed_total",
+    "Celery task executions failed with exception",
+    _task,
+)
+task_duration_ms = Histogram(
+    "task_duration_ms",
+    "Celery task runtime in milliseconds",
+    _task,
+    buckets=_DURATION_MS_BUCKETS,
+)
 
 # --- Transcription ---
 transcription_jobs_total = Counter(

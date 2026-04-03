@@ -419,6 +419,16 @@
       "type": "stat"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 6,
         "w": 8,
@@ -427,13 +437,42 @@
       },
       "id": 10,
       "options": {
-        "content": "No dedicated Prometheus task-rate metric was found in the repository for the `processing` queue.",
-        "mode": "markdown"
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(task_started_total{queue_name=\"processing\"}[5m]))",
+          "legendFormat": "processing/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
       "title": "Processing task rate",
-      "type": "text"
+      "type": "stat"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 6,
         "w": 8,
@@ -442,13 +481,42 @@
       },
       "id": 11,
       "options": {
-        "content": "No dedicated Prometheus task-duration histogram was found in the repository for the `processing` queue.",
-        "mode": "markdown"
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
-      "title": "Processing task duration",
-      "type": "text"
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(task_failed_total{queue_name=\"processing\"}[5m]))",
+          "legendFormat": "processing failures/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Processing failures",
+      "type": "stat"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 6,
         "w": 8,
@@ -457,11 +525,162 @@
       },
       "id": 12,
       "options": {
-        "content": "No dedicated Prometheus failure counter was found in the repository for the `processing` queue.",
-        "mode": "markdown"
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
-      "title": "Processing failures",
-      "type": "text"
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(task_duration_ms_sum{queue_name=\"processing\"}[5m])) / sum(rate(task_duration_ms_count{queue_name=\"processing\"}[5m]))",
+          "legendFormat": "processing avg ms",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Processing average duration",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(task_duration_ms_bucket{queue_name=\"processing\"}[5m])))",
+          "legendFormat": "processing p95 ms",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Processing p95 duration",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "topk(5, sum by (task_name) (rate(task_started_total{queue_name=\"processing\"}[5m])))",
+          "legendFormat": "{{task_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top processing tasks by throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "topk(5, sum by (task_name) (rate(task_failed_total{queue_name=\"processing\"}[5m])))",
+          "legendFormat": "{{task_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top processing tasks by failures",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -483,6 +702,6 @@
   "timezone": "",
   "title": "Queue Operations",
   "uid": "queue-operations",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
