@@ -4,11 +4,40 @@ import json
 import logging
 import os
 import re
+from collections.abc import Mapping
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
+from time import perf_counter
+
+from apps.common.metrics import (
+    grok_cost_usd_total,
+    grok_request_duration_ms,
+    grok_requests_total,
+    grok_tokens_total,
+)
 
 logger = logging.getLogger(__name__)
 THEME_CATEGORY_RETRY_THRESHOLD = 5
+
+GROK_OPERATION_ANALYZE_CHUNKS = "analyze_chunks"
+GROK_OPERATION_READY_CUT_METADATA = "ready_cut_metadata"
+GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS = "ready_cuts_titles_from_transcripts"
+GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME = "ready_cuts_titles_from_job_name"
+
+GROK_MODEL_ALIASES = {
+    "grok-4-1-fast": "grok-4-1-fast-reasoning",
+    "grok-4-1-fast-reasoning-latest": "grok-4-1-fast-reasoning",
+}
+GROK_PRICING = {
+    # Official xAI pricing at implementation time:
+    # input $0.20 / 1M, cached input $0.05 / 1M, output $0.50 / 1M.
+    "grok-4-1-fast-reasoning": {
+        "input_per_1k": 0.0002,
+        "cached_input_per_1k": 0.00005,
+        "output_per_1k": 0.0005,
+    },
+}
 
 # Palavras que aumentam CTR (preferir em títulos e thumbnails)
 CTR_WORDS_PT = [
@@ -1102,7 +1131,211 @@ def _validate_minimum_items(
             )
 
 
-def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
+def _normalize_grok_model_name(model_name: str) -> str:
+    value = str(model_name or "").strip()
+    if not value:
+        return "unknown_model"
+    return GROK_MODEL_ALIASES.get(value, value)
+
+
+def _coerce_dict(value) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, Mapping):
+            return dict(dumped)
+    result = {}
+    for attr in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "prompt_tokens_details",
+        "completion_tokens_details",
+        "input_tokens_details",
+        "output_tokens_details",
+        "cached_tokens",
+        "reasoning_tokens",
+    ):
+        if hasattr(value, attr):
+            result[attr] = getattr(value, attr)
+    return result
+
+
+def _coerce_int(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_float(value, *, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@lru_cache(maxsize=1)
+def _get_grok_pricing() -> dict[str, dict[str, float]]:
+    pricing = {
+        model_name: {
+            "input_per_1k": _coerce_float(config.get("input_per_1k")),
+            "cached_input_per_1k": _coerce_float(
+                config.get("cached_input_per_1k", config.get("input_per_1k"))
+            ),
+            "output_per_1k": _coerce_float(config.get("output_per_1k")),
+        }
+        for model_name, config in GROK_PRICING.items()
+    }
+    raw_override = (os.getenv("GROK_PRICING_JSON") or "").strip()
+    if not raw_override:
+        return pricing
+    try:
+        parsed = json.loads(raw_override)
+    except json.JSONDecodeError:
+        logger.warning("[FLUXO/Grok] GROK_PRICING_JSON inválido; usando defaults.")
+        return pricing
+    if not isinstance(parsed, Mapping):
+        logger.warning("[FLUXO/Grok] GROK_PRICING_JSON deve ser um objeto; usando defaults.")
+        return pricing
+    for model_name, config in parsed.items():
+        if not isinstance(config, Mapping):
+            continue
+        normalized_model_name = _normalize_grok_model_name(str(model_name))
+        pricing[normalized_model_name] = {
+            "input_per_1k": _coerce_float(config.get("input_per_1k")),
+            "cached_input_per_1k": _coerce_float(
+                config.get("cached_input_per_1k", config.get("input_per_1k"))
+            ),
+            "output_per_1k": _coerce_float(config.get("output_per_1k")),
+        }
+    return pricing
+
+
+def _extract_grok_usage(response) -> dict[str, int]:
+    usage = _coerce_dict(getattr(response, "usage", None))
+    input_tokens = _coerce_int(usage.get("prompt_tokens") or usage.get("input_tokens"))
+    output_tokens = _coerce_int(
+        usage.get("completion_tokens") or usage.get("output_tokens")
+    )
+    total_tokens = _coerce_int(usage.get("total_tokens"))
+    if not input_tokens and total_tokens and output_tokens:
+        input_tokens = max(0, total_tokens - output_tokens)
+    if not output_tokens and total_tokens and input_tokens:
+        output_tokens = max(0, total_tokens - input_tokens)
+
+    input_details = _coerce_dict(
+        usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+    )
+    output_details = _coerce_dict(
+        usage.get("completion_tokens_details") or usage.get("output_tokens_details")
+    )
+    cached_input_tokens = min(
+        input_tokens,
+        _coerce_int(input_details.get("cached_tokens")),
+    )
+    reasoning_tokens = _coerce_int(output_details.get("reasoning_tokens"))
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "reasoning_tokens": reasoning_tokens,
+    }
+
+
+def _calculate_grok_cost_usd(*, model: str, usage: Mapping[str, int]) -> float:
+    pricing = _get_grok_pricing().get(_normalize_grok_model_name(model))
+    if not pricing:
+        return 0.0
+    input_tokens = _coerce_int(usage.get("input_tokens"))
+    output_tokens = _coerce_int(usage.get("output_tokens"))
+    cached_input_tokens = min(
+        input_tokens,
+        _coerce_int(usage.get("cached_input_tokens")),
+    )
+    uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
+    input_cost = (
+        (uncached_input_tokens / 1000.0) * pricing["input_per_1k"]
+        + (cached_input_tokens / 1000.0) * pricing["cached_input_per_1k"]
+    )
+    output_cost = (output_tokens / 1000.0) * pricing["output_per_1k"]
+    return input_cost + output_cost
+
+
+def _observe_grok_request_metrics(
+    *,
+    model: str,
+    operation: str,
+    duration_ms: float,
+    usage: Mapping[str, int] | None = None,
+) -> None:
+    normalized_model = _normalize_grok_model_name(model)
+    grok_requests_total.labels(
+        model=normalized_model,
+        operation=str(operation or "unknown_operation"),
+    ).inc()
+    grok_request_duration_ms.labels(model=normalized_model).observe(max(0.0, duration_ms))
+
+    usage_payload = usage or {}
+    input_tokens = _coerce_int(usage_payload.get("input_tokens"))
+    output_tokens = _coerce_int(usage_payload.get("output_tokens"))
+    if input_tokens:
+        grok_tokens_total.labels(model=normalized_model, type="input").inc(input_tokens)
+    if output_tokens:
+        grok_tokens_total.labels(model=normalized_model, type="output").inc(output_tokens)
+
+    cost_usd = _calculate_grok_cost_usd(model=normalized_model, usage=usage_payload)
+    if cost_usd > 0.0:
+        grok_cost_usd_total.labels(model=normalized_model).inc(cost_usd)
+
+
+def _execute_grok_chat_completion(
+    client,
+    *,
+    model_name: str,
+    messages: list[dict],
+    operation: str,
+    response_format: dict | None = None,
+):
+    started_at = perf_counter()
+    try:
+        request_kwargs = {
+            "model": model_name,
+            "messages": messages,
+        }
+        if response_format is not None:
+            request_kwargs["response_format"] = response_format
+        response = client.chat.completions.create(**request_kwargs)
+    except Exception:
+        _observe_grok_request_metrics(
+            model=model_name,
+            operation=operation,
+            duration_ms=(perf_counter() - started_at) * 1000.0,
+        )
+        raise
+
+    _observe_grok_request_metrics(
+        model=model_name,
+        operation=operation,
+        duration_ms=(perf_counter() - started_at) * 1000.0,
+        usage=_extract_grok_usage(response),
+    )
+    return response
+
+
+def call_grok_chat(
+    system: str,
+    user: str,
+    api_key: str | None = None,
+    *,
+    operation: str = "chat",
+) -> str:
     """Chama Grok API e retorna o conteúdo da resposta."""
     import os
 
@@ -1121,9 +1354,11 @@ def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
 
     # Força JSON object na resposta quando suportado pela API.
     try:
-        resp = client.chat.completions.create(
-            model=model_name,
+        resp = _execute_grok_chat_completion(
+            client,
+            model_name=model_name,
             messages=messages,
+            operation=operation,
             response_format={"type": "json_object"},
         )
     except Exception as e:
@@ -1131,9 +1366,11 @@ def call_grok_chat(system: str, user: str, api_key: str | None = None) -> str:
             "[FLUXO/Grok] response_format=json_object não suportado (%s). Tentando sem response_format.",
             e,
         )
-        resp = client.chat.completions.create(
-            model=model_name,
+        resp = _execute_grok_chat_completion(
+            client,
+            model_name=model_name,
             messages=messages,
+            operation=operation,
         )
     return resp.choices[0].message.content or ""
 
@@ -1270,7 +1507,12 @@ def analyze_chunks_in_one_request(
         context_block=context_block, chunks_block=chunks_block
     )
     logger.info("[FLUXO/Grok] Enviando requisição para Grok API...")
-    content = call_grok_chat(system_prompt, user, api_key)
+    content = call_grok_chat(
+        system_prompt,
+        user,
+        api_key,
+        operation=GROK_OPERATION_ANALYZE_CHUNKS,
+    )
     logger.info("[FLUXO/Grok] Resposta recebida (%d chars). Extraindo JSON...", len(content or ""))
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
@@ -1384,7 +1626,12 @@ def analyze_ready_cut_metadata(
 
 Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnail_moment_timestamp (MM:SS), thumbnail_text (2-4 palavras)."""
     system = READY_CUT_SYSTEM_PROMPT_BASE + _ready_cuts_metadata_language_block(titles_language)
-    content = call_grok_chat(system, user, api_key)
+    content = call_grok_chat(
+        system,
+        user,
+        api_key,
+        operation=GROK_OPERATION_READY_CUT_METADATA,
+    )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
         return {
@@ -1419,7 +1666,12 @@ def analyze_ready_cuts_batch_titles_from_transcripts(
     )
     user = f"Dados dos vídeos (JSON):\n{payload}\n\nRetorne apenas o JSON com titles."
     system = _ready_cuts_batch_transcripts_system_prompt(titles_language)
-    content = call_grok_chat(system, user, api_key)
+    content = call_grok_chat(
+        system,
+        user,
+        api_key,
+        operation=GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS,
+    )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
         return {}
@@ -1445,7 +1697,12 @@ def analyze_ready_cuts_batch_titles_from_job_name(
     name = (job_name or "").strip() or "Conteúdo"
     user = f'Nome do conjunto / tema: "{name}"\n\nN = {n}\n\nCrie exatamente {n} títulos na lista.'
     system = _ready_cuts_batch_jobname_system_prompt(titles_language)
-    content = call_grok_chat(system, user, api_key)
+    content = call_grok_chat(
+        system,
+        user,
+        api_key,
+        operation=GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME,
+    )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
         return [f"{name} #{i+1}" for i in range(n)]

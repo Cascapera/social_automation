@@ -47,6 +47,8 @@ _DURATION_MS_BUCKETS = (
 
 _workload = ("workload_type",)
 _task = ("task_name", "queue_name")
+_grok_request = ("model", "operation")
+_grok_token = ("model", "type")
 
 # --- Generic Celery task observability ---
 task_started_total = Counter(
@@ -67,6 +69,12 @@ task_failed_total = Counter(
 task_duration_ms = Histogram(
     "task_duration_ms",
     "Celery task runtime in milliseconds",
+    _task,
+    buckets=_DURATION_MS_BUCKETS,
+)
+queue_wait_ms = Histogram(
+    "queue_wait_ms",
+    "Approximate Celery queue wait time in milliseconds (enqueue to task start)",
     _task,
     buckets=_DURATION_MS_BUCKETS,
 )
@@ -138,5 +146,28 @@ publish_reconciliation_failures_total = Counter(
 publish_reconciliation_duration_ms = Histogram(
     "publish_reconciliation_duration_ms",
     "Successful reconciliation run duration in milliseconds",
+    buckets=_DURATION_MS_BUCKETS,
+)
+
+# --- Grok / xAI cost observability ---
+grok_requests_total = Counter(
+    "grok_requests_total",
+    "Grok API requests attempted",
+    _grok_request,
+)
+grok_tokens_total = Counter(
+    "grok_tokens_total",
+    "Grok token usage by direction",
+    _grok_token,
+)
+grok_cost_usd_total = Counter(
+    "grok_cost_usd_total",
+    "Estimated Grok API cost in USD",
+    ("model",),
+)
+grok_request_duration_ms = Histogram(
+    "grok_request_duration_ms",
+    "Grok API request duration in milliseconds",
+    ("model",),
     buckets=_DURATION_MS_BUCKETS,
 )

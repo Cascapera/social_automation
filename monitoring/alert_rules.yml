@@ -1,0 +1,102 @@
+groups:
+  - name: social_automation_slo
+    rules:
+      - alert: QueueBacklogHigh
+        expr: '(queue_backlog{queue_name="processing"} > 25) or (queue_backlog{queue_name="transcription"} > 8) or (queue_backlog{queue_name="render"} > 4) or (queue_backlog{queue_name="publish"} > 20)'
+        for: 15m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Queue backlog high on {{ $labels.queue_name }}'
+          description: 'Ready backlog on queue {{ $labels.queue_name }} has been above its bootstrap threshold for 15m. This is a conservative initial saturation alert; tune thresholds after observing normal traffic. Check the Service SLOs dashboard first.'
+
+      - alert: QueueWaitHigh
+        expr: '(histogram_quantile(0.95, sum by (le, queue_name) (rate(queue_wait_ms_bucket{queue_name="processing"}[15m]))) > 300000) or (histogram_quantile(0.95, sum by (le, queue_name) (rate(queue_wait_ms_bucket{queue_name="transcription"}[15m]))) > 900000) or (histogram_quantile(0.95, sum by (le, queue_name) (rate(queue_wait_ms_bucket{queue_name="render"}[15m]))) > 1200000) or (histogram_quantile(0.95, sum by (le, queue_name) (rate(queue_wait_ms_bucket{queue_name="publish"}[15m]))) > 3600000)'
+        for: 15m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Queue wait p95 high on {{ $labels.queue_name }}'
+          description: 'Queue wait p95 for {{ $labels.queue_name }} has stayed above the bootstrap threshold for 15m. Publish uses a very conservative threshold because some flows intentionally use Celery countdown/staggering. Inspect Queue wait p95 by queue and backlog together before taking action.'
+
+      - alert: TranscriptionLatencyHigh
+        expr: 'histogram_quantile(0.95, sum by (le) (rate(transcription_duration_ms_bucket[15m]))) > 900000'
+        for: 20m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Transcription latency p95 high'
+          description: 'Transcription p95 has stayed above 15 minutes for 20m. This bootstrap threshold is intentionally conservative; inspect Stage Durations and Service SLOs to confirm sustained degradation.'
+
+      - alert: RenderLatencyHigh
+        expr: 'histogram_quantile(0.95, sum by (le) (rate(render_duration_ms_bucket[15m]))) > 1200000'
+        for: 20m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Render latency p95 high'
+          description: 'Render p95 has stayed above 20 minutes for 20m. This usually indicates GPU/FFmpeg saturation or oversized backlog rather than a transient spike.'
+
+      - alert: PublishLatencyHigh
+        expr: 'histogram_quantile(0.95, sum by (le) (rate(publish_duration_ms_bucket[15m]))) > 1200000'
+        for: 20m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Publish latency p95 high'
+          description: 'Publish p95 has stayed above 20 minutes for 20m. Check platform/API health, upload throughput and publish queue pressure before changing any behavior.'
+
+      - alert: TranscriptionFailuresHigh
+        expr: '((sum(increase(transcription_failures_total[15m])) >= 3) and ((sum(increase(transcription_failures_total[15m])) / clamp_min(sum(increase(transcription_jobs_total[15m])), 1)) > 0.15))'
+        for: 15m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Transcription failures high'
+          description: 'Transcription failures are above the bootstrap threshold for 15m (count and rate gate). Check worker health, model/runtime issues and the Stage Durations dashboard.'
+
+      - alert: RenderFailuresHigh
+        expr: '((sum(increase(render_failures_total[15m])) >= 3) and ((sum(increase(render_failures_total[15m])) / clamp_min(sum(increase(render_jobs_total[15m])), 1)) > 0.15))'
+        for: 15m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Render failures high'
+          description: 'Render failures are above the bootstrap threshold for 15m (count and rate gate). Check GPU availability, FFmpeg errors and render queue pressure.'
+
+      - alert: PublishFailuresHigh
+        expr: '((sum(increase(publish_failures_total[15m])) >= 3) and ((sum(increase(publish_failures_total[15m])) / clamp_min(sum(increase(publish_attempts_total[15m])), 1)) > 0.15))'
+        for: 15m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Publish failures high'
+          description: 'Publish failures are above the bootstrap threshold for 15m. This often points to external platform/API instability or credential/quota issues rather than queue saturation alone.'
+
+      - alert: ProcessingFailuresHigh
+        expr: '((sum(increase(task_failed_total{queue_name="processing"}[15m])) >= 5) and ((sum(increase(task_failed_total{queue_name="processing"}[15m])) / clamp_min(sum(increase(task_started_total{queue_name="processing"}[15m])), 1)) > 0.10))'
+        for: 15m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Processing queue failures high'
+          description: 'Generic processing queue failures are above the bootstrap threshold for 15m. Use Queue Operations and Service SLOs to see whether this is isolated task failure or broad queue pressure.'
+
+      - alert: ReconciliationFailuresHigh
+        expr: 'sum(increase(publish_reconciliation_failures_total[20m])) >= 3'
+        for: 10m
+        labels:
+          severity: warning
+          service: social_automation
+        annotations:
+          summary: 'Publish reconciliation failures high'
+          description: 'Reconciliation failures have increased repeatedly over the last 20m. This usually indicates upstream platform instability, auth drift or API response changes rather than Celery routing problems.'

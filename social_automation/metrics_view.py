@@ -12,6 +12,8 @@ import os
 
 from django.http import HttpResponse
 
+_DEFAULT_QUEUE_BACKLOG_COLLECTOR_REGISTERED = False
+
 
 def _collect_multiproc_paths(current_dir: str, root_dir: str | None) -> list[str]:
     paths: list[str] = []
@@ -43,10 +45,27 @@ class _MultiProcessDirsCollector:
         return self._multiprocess.MultiProcessCollector.merge(files, accumulate=True)
 
 
+def _register_queue_backlog_collector(registry) -> None:
+    from apps.common.queue_backlog import QueueBacklogCollector
+
+    registry.register(QueueBacklogCollector())
+
+
+def _ensure_default_queue_backlog_collector_registered(default_registry) -> None:
+    global _DEFAULT_QUEUE_BACKLOG_COLLECTOR_REGISTERED
+    if _DEFAULT_QUEUE_BACKLOG_COLLECTOR_REGISTERED:
+        return
+    from apps.common.queue_backlog import QueueBacklogCollector
+
+    default_registry.register(QueueBacklogCollector())
+    _DEFAULT_QUEUE_BACKLOG_COLLECTOR_REGISTERED = True
+
+
 def prometheus_metrics(request):
     try:
         from prometheus_client import (
             CONTENT_TYPE_LATEST,
+            REGISTRY,
             CollectorRegistry,
             generate_latest,
             multiprocess,
@@ -70,7 +89,9 @@ def prometheus_metrics(request):
             )
         else:
             registry.register(_MultiProcessDirsCollector(paths, multiprocess))
+        _register_queue_backlog_collector(registry)
         data = generate_latest(registry)
     else:
+        _ensure_default_queue_backlog_collector_registered(default_registry=REGISTRY)
         data = generate_latest()
     return HttpResponse(data, content_type=CONTENT_TYPE_LATEST)

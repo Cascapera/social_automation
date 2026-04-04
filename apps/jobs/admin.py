@@ -1,9 +1,10 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 
 from .models import (
     DailyPostingPlan,
     DailyPostingPlanItem,
+    DeadLetterJob,
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
     FactoryScheduleRun,
@@ -211,6 +212,126 @@ class StageExecutionAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(DeadLetterJob)
+class DeadLetterJobAdmin(admin.ModelAdmin):
+    list_display = ("id", "job_name", "aggregate_id", "status", "error_category", "created_at")
+    list_filter = ("status", "error_category", "job_name")
+    search_fields = ("correlation_id", "=aggregate_id")
+    list_select_related = ("pipeline_execution", "stage_execution", "replayed_by")
+    readonly_fields = (
+        "pipeline_execution",
+        "stage_execution",
+        "aggregate_type",
+        "aggregate_id",
+        "job_name",
+        "queue_name",
+        "correlation_id",
+        "payload_json",
+        "error_class",
+        "error_message",
+        "error_category",
+        "status",
+        "retry_count",
+        "first_failed_at",
+        "last_failed_at",
+        "replayed_at",
+        "replayed_by",
+        "replay_result_json",
+        "created_at",
+        "updated_at",
+    )
+    actions = ["replay_selected_dead_letters", "ignore_selected_dead_letters"]
+
+    @admin.action(description="Replay selected dead letters")
+    def replay_selected_dead_letters(self, request, queryset):
+        from .services.dead_letter import replay_dead_letter_job
+
+        replayed = 0
+        failed = 0
+        for dead_letter in queryset:
+            try:
+                replay_dead_letter_job(dead_letter, user=request.user)
+            except Exception as exc:
+                failed += 1
+                self.message_user(
+                    request,
+                    f"Dead letter {dead_letter.id} não pôde ser reenfileirada: {exc}",
+                    level=messages.WARNING,
+                )
+            else:
+                replayed += 1
+
+        if replayed:
+            self.message_user(
+                request,
+                f"{replayed} dead letter(s) reenfileirada(s) com sucesso.",
+                level=messages.SUCCESS,
+            )
+        if failed and not replayed:
+            self.message_user(
+                request,
+                "Nenhuma dead letter selecionada pôde ser reenfileirada.",
+                level=messages.WARNING,
+            )
+
+    @admin.action(description="Mark selected dead letters as ignored")
+    def ignore_selected_dead_letters(self, request, queryset):
+        from .services.dead_letter import mark_dead_letter_ignored
+
+        ignored = 0
+        failed = 0
+        for dead_letter in queryset:
+            try:
+                mark_dead_letter_ignored(dead_letter)
+            except Exception as exc:
+                failed += 1
+                self.message_user(
+                    request,
+                    f"Dead letter {dead_letter.id} não pôde ser ignorada: {exc}",
+                    level=messages.WARNING,
+                )
+            else:
+                ignored += 1
+
+        if ignored:
+            self.message_user(
+                request,
+                f"{ignored} dead letter(s) marcadas como ignoradas.",
+                level=messages.SUCCESS,
+            )
+        if failed and not ignored:
+            self.message_user(
+                request,
+                "Nenhuma dead letter selecionada pôde ser ignorada.",
+                level=messages.WARNING,
+            )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        context.update(
+            {
+                "show_save": False,
+                "show_save_and_continue": False,
+                "show_save_and_add_another": False,
+                "show_save_as_new": False,
+                "show_delete": False,
+            }
+        )
+        return super().render_change_form(
+            request,
+            context,
+            add=add,
+            change=change,
+            form_url=form_url,
+            obj=obj,
+        )
 
 
 @admin.register(RenderOutput)

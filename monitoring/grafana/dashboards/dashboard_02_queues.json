@@ -29,13 +29,13 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 0
       },
@@ -57,13 +57,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(transcription_jobs_total[5m]))",
-          "legendFormat": "transcription/s",
+          "expr": "sum(rate(queue_wait_ms_sum{queue_name=\"processing\"}[5m])) / sum(rate(queue_wait_ms_count{queue_name=\"processing\"}[5m]))",
+          "legendFormat": "processing",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Transcription task rate",
+      "title": "Processing wait avg",
       "type": "stat"
     },
     {
@@ -79,8 +79,8 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 0
       },
       "id": 2,
@@ -101,13 +101,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(transcription_duration_ms_sum[5m])) / sum(rate(transcription_duration_ms_count[5m]))",
-          "legendFormat": "transcription avg ms",
+          "expr": "sum(rate(queue_wait_ms_sum{queue_name=\"transcription\"}[5m])) / sum(rate(queue_wait_ms_count{queue_name=\"transcription\"}[5m]))",
+          "legendFormat": "transcription",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Transcription task duration",
+      "title": "Transcription wait avg",
       "type": "stat"
     },
     {
@@ -117,14 +117,14 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 0
       },
       "id": 3,
@@ -145,13 +145,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(transcription_failures_total[5m]))",
-          "legendFormat": "transcription failures/s",
+          "expr": "sum(rate(queue_wait_ms_sum{queue_name=\"render\"}[5m])) / sum(rate(queue_wait_ms_count{queue_name=\"render\"}[5m]))",
+          "legendFormat": "render",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Transcription failures",
+      "title": "Render wait avg",
       "type": "stat"
     },
     {
@@ -161,15 +161,15 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 6
+        "w": 6,
+        "x": 18,
+        "y": 0
       },
       "id": 4,
       "options": {
@@ -189,13 +189,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(render_jobs_total[5m]))",
-          "legendFormat": "render/s",
+          "expr": "sum(rate(queue_wait_ms_sum{queue_name=\"publish\"}[5m])) / sum(rate(queue_wait_ms_count{queue_name=\"publish\"}[5m]))",
+          "legendFormat": "publish",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Render task rate",
+      "title": "Publish wait avg",
       "type": "stat"
     },
     {
@@ -211,8 +211,8 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 0,
         "y": 6
       },
       "id": 5,
@@ -233,13 +233,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(render_duration_ms_sum[5m])) / sum(rate(render_duration_ms_count[5m]))",
-          "legendFormat": "render avg ms",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_wait_ms_bucket{queue_name=\"processing\"}[5m])))",
+          "legendFormat": "processing",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Render task duration",
+      "title": "Processing wait p95",
       "type": "stat"
     },
     {
@@ -249,14 +249,14 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 6,
         "y": 6
       },
       "id": 6,
@@ -277,13 +277,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(render_failures_total[5m]))",
-          "legendFormat": "render failures/s",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_wait_ms_bucket{queue_name=\"transcription\"}[5m])))",
+          "legendFormat": "transcription",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Render failures",
+      "title": "Transcription wait p95",
       "type": "stat"
     },
     {
@@ -293,15 +293,15 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 12
+        "w": 6,
+        "x": 12,
+        "y": 6
       },
       "id": 7,
       "options": {
@@ -321,13 +321,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(publish_attempts_total[5m])) + sum(rate(publish_reconciliation_runs_total[5m]))",
-          "legendFormat": "publish queue tasks/s",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_wait_ms_bucket{queue_name=\"render\"}[5m])))",
+          "legendFormat": "render",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Publish task rate",
+      "title": "Render wait p95",
       "type": "stat"
     },
     {
@@ -343,9 +343,9 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 12
+        "w": 6,
+        "x": 18,
+        "y": 6
       },
       "id": 8,
       "options": {
@@ -365,233 +365,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(sum(rate(publish_duration_ms_sum[5m])) + sum(rate(publish_reconciliation_duration_ms_sum[5m]))) / (sum(rate(publish_duration_ms_count[5m])) + sum(rate(publish_reconciliation_duration_ms_count[5m])))",
-          "legendFormat": "publish queue avg ms",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_wait_ms_bucket{queue_name=\"publish\"}[5m])))",
+          "legendFormat": "publish",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Publish task duration",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 16,
-        "y": 12
-      },
-      "id": 9,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(rate(publish_failures_total[5m])) + sum(rate(publish_reconciliation_failures_total[5m]))",
-          "legendFormat": "publish queue failures/s",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Publish failures",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 18
-      },
-      "id": 10,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(rate(task_started_total{queue_name=\"processing\"}[5m]))",
-          "legendFormat": "processing/s",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Processing task rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 18
-      },
-      "id": 11,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(rate(task_failed_total{queue_name=\"processing\"}[5m]))",
-          "legendFormat": "processing failures/s",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Processing failures",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 16,
-        "y": 18
-      },
-      "id": 12,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(rate(task_duration_ms_sum{queue_name=\"processing\"}[5m])) / sum(rate(task_duration_ms_count{queue_name=\"processing\"}[5m]))",
-          "legendFormat": "processing avg ms",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Processing average duration",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 24
-      },
-      "id": 13,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(task_duration_ms_bucket{queue_name=\"processing\"}[5m])))",
-          "legendFormat": "processing p95 ms",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Processing p95 duration",
+      "title": "Publish wait p95",
       "type": "stat"
     },
     {
@@ -604,17 +384,17 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "ops"
+          "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 24
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 12
       },
-      "id": 14,
+      "id": 9,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -622,20 +402,20 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
       "targets": [
         {
           "editorMode": "code",
-          "expr": "topk(5, sum by (task_name) (rate(task_started_total{queue_name=\"processing\"}[5m])))",
-          "legendFormat": "{{task_name}}",
+          "expr": "queue_backlog",
+          "legendFormat": "{{queue_name}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Top processing tasks by throughput",
+      "title": "Queue backlog",
       "type": "timeseries"
     },
     {
@@ -653,12 +433,12 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 16,
-        "y": 24
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
       },
-      "id": 15,
+      "id": 10,
       "options": {
         "legend": {
           "displayMode": "list",
@@ -666,20 +446,106 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
       "targets": [
         {
           "editorMode": "code",
-          "expr": "topk(5, sum by (task_name) (rate(task_failed_total{queue_name=\"processing\"}[5m])))",
-          "legendFormat": "{{task_name}}",
+          "expr": "sum(rate(task_started_total{queue_name=\"processing\"}[5m]))",
+          "legendFormat": "processing",
           "range": true,
           "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(transcription_jobs_total[5m]))",
+          "legendFormat": "transcription",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(render_jobs_total[5m]))",
+          "legendFormat": "render",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(publish_attempts_total[5m])) + sum(rate(publish_reconciliation_runs_total[5m]))",
+          "legendFormat": "publish",
+          "range": true,
+          "refId": "D"
         }
       ],
-      "title": "Top processing tasks by failures",
+      "title": "Queue throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(task_failed_total{queue_name=\"processing\"}[5m]))",
+          "legendFormat": "processing",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(transcription_failures_total[5m]))",
+          "legendFormat": "transcription",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(render_failures_total[5m]))",
+          "legendFormat": "render",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(publish_failures_total[5m])) + sum(rate(publish_reconciliation_failures_total[5m]))",
+          "legendFormat": "publish",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Queue failures",
       "type": "timeseries"
     }
   ],
@@ -702,6 +568,6 @@
   "timezone": "",
   "title": "Queue Operations",
   "uid": "queue-operations",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

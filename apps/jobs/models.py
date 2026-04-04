@@ -247,6 +247,87 @@ class StageExecution(models.Model):
         return f"{self.pipeline_execution_id}:{self.stage_name} ({self.status})"
 
 
+class DeadLetterJob(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        REPLAYED = "replayed", "Replayed"
+        IGNORED = "ignored", "Ignored"
+
+    class ErrorCategory(models.TextChoices):
+        RETRYABLE = "retryable", "Retryable"
+        NON_RETRYABLE = "non_retryable", "Non retryable"
+        INFRA = "infra", "Infra"
+        POISON = "poison", "Poison"
+        UNKNOWN = "unknown", "Unknown"
+
+    pipeline_execution = models.ForeignKey(
+        PipelineExecution,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dead_letter_jobs",
+    )
+    stage_execution = models.ForeignKey(
+        StageExecution,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dead_letter_jobs",
+    )
+    aggregate_type = models.CharField(max_length=64)
+    aggregate_id = models.PositiveBigIntegerField()
+    job_name = models.CharField(max_length=255)
+    queue_name = models.CharField(max_length=64, blank=True, default="")
+    correlation_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    payload_json = models.JSONField(default=dict, blank=True)
+    error_class = models.CharField(max_length=255, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    error_category = models.CharField(
+        max_length=32,
+        choices=ErrorCategory.choices,
+        default=ErrorCategory.UNKNOWN,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.OPEN,
+    )
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    first_failed_at = models.DateTimeField(default=django_timezone.now)
+    last_failed_at = models.DateTimeField(default=django_timezone.now)
+    replayed_at = models.DateTimeField(null=True, blank=True)
+    replayed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replayed_dead_letter_jobs",
+    )
+    replay_result_json = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["aggregate_type", "aggregate_id"],
+                name="jobs_dlj_agg_idx",
+            ),
+            models.Index(
+                fields=["status", "error_category"],
+                name="jobs_dlj_status_cat_idx",
+            ),
+            models.Index(
+                fields=["job_name", "status"],
+                name="jobs_dlj_job_status_idx",
+            ),
+        ]
+        ordering = ["-updated_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.job_name}:{self.aggregate_type}:{self.aggregate_id} ({self.status})"
+
+
 class RenderOutput(models.Model):
     job = models.OneToOneField(Job, on_delete=models.CASCADE, related_name="output")
     file = models.FileField(upload_to="exports/")

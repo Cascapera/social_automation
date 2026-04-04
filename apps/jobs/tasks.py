@@ -18,6 +18,7 @@ from apps.common.task_observability import resolve_task_observation_labels
 
 from . import tasks_auto_fetch  # noqa: F401 - registra check_and_fetch_new_videos_task
 from .logging_utils import Timer, ensure_job_correlation_id, log_event
+from .services.dead_letter import create_dead_letter_job
 from .services.ffmpeg import has_nvenc
 from .services.pipeline import run_job
 from .services.pipeline_execution import (
@@ -75,6 +76,27 @@ def _fail_stage_and_pipeline(
         current_stage=stage_name,
         failure_reason=stage_execution.error_message,
     )
+    try:
+        create_dead_letter_job(
+            pipeline_execution=pipeline_execution,
+            stage_execution=stage_execution,
+            aggregate_type=pipeline_execution.aggregate_type,
+            aggregate_id=pipeline_execution.aggregate_id,
+            job_name=stage_execution.task_name,
+            queue_name=stage_execution.queue_name,
+            correlation_id=pipeline_execution.correlation_id,
+            error_class=stage_execution.error_class,
+            error_message=stage_execution.error_message,
+        )
+    except Exception:
+        logger.exception(
+            "dead_letter_persistence_failed",
+            extra={
+                "aggregate_type": getattr(pipeline_execution, "aggregate_type", ""),
+                "aggregate_id": getattr(pipeline_execution, "aggregate_id", 0),
+                "stage_name": stage_name,
+            },
+        )
 
 
 @shared_task(bind=True)
