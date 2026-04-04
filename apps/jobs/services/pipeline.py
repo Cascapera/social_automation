@@ -31,11 +31,12 @@ def run_job(job_id: int) -> None:
         "intro_asset", "outro_asset"
     ).prefetch_related("job_cuts__cut__source").get(id=job_id)
 
-    use_gpu = has_nvenc()
-
     job_cuts = list(job.job_cuts.select_related("cut", "cut__source").order_by("id"))
     if not job_cuts:
         raise ValueError("Job precisa de pelo menos 1 corte")
+    # Detecta aceleração só depois das validações iniciais, para não depender
+    # do binário do ffmpeg em erros de negócio que deveriam falhar antes.
+    use_gpu = has_nvenc()
 
     job.status = "RUNNING"
     job.started_at = timezone.now()
