@@ -11,6 +11,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files import File
 from django.db.utils import DatabaseError
+from django.utils import timezone
 
 from apps.auto_cuts.services.grok import (
     analyze_chunks_in_one_request,
@@ -207,6 +208,51 @@ def _safe_save_analysis(analysis, update_fields):
         if "did not affect any rows" in str(e):
             return False
         raise
+
+
+def _resolve_finalization_vertical_mode(analysis) -> str:
+    vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip()
+    if vert_mode:
+        return vert_mode
+    brand = getattr(analysis, "brand", None)
+    return getattr(brand, "vertical_mode", None) or "zoom_crop"
+
+
+def _mark_analysis_done(analysis) -> None:
+    analysis.status = "done"
+    analysis.progress_message = "Concluído"
+    analysis.progress = 100
+    analysis.error = ""
+    if not _safe_save_analysis(analysis, ["status", "progress_message", "progress", "error"]):
+        return
+    try:
+        from apps.auto_cuts.services.youtube_fetch import register_manual_youtube_success
+
+        register_manual_youtube_success(analysis)
+    except Exception:
+        logger.exception(
+            "[FLUXO] register_manual_youtube_success failed (analysis_id=%s)",
+            getattr(analysis, "id", None),
+        )
+
+
+def _queue_analysis_finalization(analysis) -> None:
+    analysis.status = "finalizing"
+    analysis.progress_message = "Finalizando cortes e sincronizando inventário..."
+    analysis.progress = min(99, max(int(getattr(analysis, "progress", 0) or 0), 95))
+    analysis.error = ""
+    if not _safe_save_analysis(analysis, ["status", "progress_message", "progress", "error"]):
+        return
+
+    finalizar_auto_cut_task.apply_async(
+        args=[analysis.id],
+        kwargs={
+            "vertical_mode": _resolve_finalization_vertical_mode(analysis),
+            "horizontal_logo_x": 20,
+            "horizontal_logo_y": 20,
+        },
+        queue=settings.CELERY_QUEUE_RENDER,
+    )
 
 
 def _sanitize_long_overlay_fk(analysis) -> bool:
@@ -504,24 +550,7 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     target_brand = _resolve_target_brand_for_suggestion(analysis, sug)
     generate_auto_thumbnail(corte, target_brand=target_brand)
 
-    analysis.status = "done"
-    analysis.progress_message = "Concluído"
-    analysis.progress = 100
-    analysis.save(update_fields=["status", "progress_message", "progress"])
-
-    vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip() or None
-    if not vert_mode:
-        brand = getattr(analysis, "brand", None)
-        vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
-    finalizar_auto_cut_task.apply_async(
-        args=[analysis.id],
-        kwargs={
-            "vertical_mode": vert_mode,
-            "horizontal_logo_x": 20,
-            "horizontal_logo_y": 20,
-        },
-        queue=settings.CELERY_QUEUE_RENDER,
-    )
+    _queue_analysis_finalization(analysis)
     logger.info("[FLUXO] Ready cuts flow completed successfully.")
 
 
@@ -811,24 +840,7 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
         tb = _resolve_target_brand_for_suggestion(analysis, sug)
         generate_auto_thumbnail(corte, target_brand=tb)
 
-    analysis.status = "done"
-    analysis.progress_message = "Concluído"
-    analysis.progress = 100
-    analysis.save(update_fields=["status", "progress_message", "progress"])
-
-    vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip() or None
-    if not vert_mode:
-        brand = getattr(analysis, "brand", None)
-        vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
-    finalizar_auto_cut_task.apply_async(
-        args=[analysis.id],
-        kwargs={
-            "vertical_mode": vert_mode,
-            "horizontal_logo_x": 20,
-            "horizontal_logo_y": 20,
-        },
-        queue=settings.CELERY_QUEUE_RENDER,
-    )
+    _queue_analysis_finalization(analysis)
     logger.info("[FLUXO] Ready cuts batch completed (analysis=%s, long=%s).", analysis_id, bool(create_long))
 
 
@@ -859,12 +871,13 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             analysis_id,
         )
 
-    # Idempotency: if already done, skip reprocessing (avoids loop when Celery
-    # stalls freeing GPU and the task is redelivered after restart)
-    if analysis.status == "done":
+    # Idempotency: if the full pipeline already finished, or if post-processing
+    # is already in progress, do not restart the analysis stage.
+    if analysis.status in ("done", "finalizing"):
         logger.debug(
-            "[FLUXO] Analysis %s already done; skip duplicate task delivery (idempotent).",
+            "[FLUXO] Analysis %s already advanced to %s; skip duplicate analyze delivery.",
             analysis_id,
+            analysis.status,
         )
         return
 
@@ -889,7 +902,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 _process_ready_cuts_batch_flow(analysis_id)
             except Exception as e:
                 logger.exception("[FLUXO] Ready cuts batch error: %s", e)
-                AutoCutAnalysis.objects.filter(id=analysis_id).update(status="error", error=str(e))
+                AutoCutAnalysis.objects.filter(id=analysis_id).update(
+                    status="error",
+                    error=str(e),
+                    updated_at=timezone.now(),
+                )
             return
 
     youtube_url = (analysis.youtube_url or "").strip()
@@ -1440,28 +1457,11 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             else:
                 logger.info("[FLUXO] Auto thumbnail unavailable for cut %s.", corte.id)
 
-        logger.info("[FLUXO] All %d cuts extracted. Saving final status.", total_cortes)
-        analysis.status = "done"
-        analysis.progress_message = "Concluído"
-        analysis.progress = 100
-        if not _safe_save_analysis(analysis, ["status", "progress_message", "progress"]):
+        logger.info("[FLUXO] All %d cuts extracted. Queueing finalization.", total_cortes)
+        if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
             logger.info("[FLUXO] Analysis %s deleted before final save; ignoring.", analysis_id)
             return
-        # Finalize in the same flow so the job completes
-        # (finalized cuts + inventory) before the next heavy job.
-        vert_mode = (getattr(analysis, "vertical_mode", None) or "").strip() or None
-        if not vert_mode:
-            brand = getattr(analysis, "brand", None)
-            vert_mode = getattr(brand, "vertical_mode", None) or "zoom_crop"
-        finalizar_auto_cut_task.apply_async(
-            args=[analysis.id],
-            kwargs={
-                "vertical_mode": vert_mode,
-                "horizontal_logo_x": 20,
-                "horizontal_logo_y": 20,
-            },
-            queue=settings.CELERY_QUEUE_RENDER,
-        )
+        _queue_analysis_finalization(analysis)
         logger.info("[FLUXO] Task completed successfully.")
 
     except Exception as e:
@@ -1480,21 +1480,12 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             error=str(e),
             source_video_id=analysis_id,
         )
-        AutoCutAnalysis.objects.filter(id=analysis_id).update(status="error", error=str(e))
+        AutoCutAnalysis.objects.filter(id=analysis_id).update(
+            status="error",
+            error=str(e),
+            updated_at=timezone.now(),
+        )
         raise
-    finally:
-        # Marca vídeo YouTube só após sucesso (manual) para a busca automática não repetir.
-        try:
-            from apps.auto_cuts.services.youtube_fetch import register_manual_youtube_success
-
-            done = AutoCutAnalysis.objects.filter(id=analysis_id).first()
-            if done and done.status == "done":
-                register_manual_youtube_success(done)
-        except Exception:
-            logger.exception(
-                "[FLUXO] register_manual_youtube_success failed (analysis_id=%s)",
-                analysis_id,
-            )
 
 
 # Default subtitle style (emoji-capable font).
@@ -1559,6 +1550,13 @@ def finalizar_auto_cut_task(
             "[FLUXO] Analysis %s: orphan side overlay during finalize; disabled.",
             analysis_id,
         )
+
+    analysis.status = "finalizing"
+    analysis.progress_message = "Finalizando cortes e sincronizando inventário..."
+    analysis.progress = min(99, max(int(getattr(analysis, "progress", 0) or 0), 95))
+    analysis.error = ""
+    if not _safe_save_analysis(analysis, ["status", "progress_message", "progress", "error"]):
+        return
 
     user_subtitle_style = subtitle_style or {}
     vert_mode = vertical_mode or "zoom_crop"
@@ -1666,6 +1664,9 @@ def finalizar_auto_cut_task(
             "suggestion"
         )
     )
+    total_to_finalize = len(to_finalize)
+    finalization_failures: list[str] = []
+    inventory_failures: list[str] = []
 
     use_gpu = has_nvenc()
     _queue = settings.CELERY_QUEUE_RENDER
@@ -1683,16 +1684,35 @@ def finalizar_auto_cut_task(
     )
     _render_timer = Timer()
 
-    for corte in to_finalize:
+    for idx, corte in enumerate(to_finalize, start=1):
+        analysis.progress_message = (
+            f"Finalizando corte {idx}/{total_to_finalize}..."
+            if total_to_finalize
+            else "Finalizando cortes..."
+        )
+        analysis.progress = min(99, 95 + int(4 * idx / max(total_to_finalize, 1)))
+        if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
+            return
+
+        finalized_ok = False
+        failure_recorded = False
         if not corte.file:
-            corte.is_finalized = True
-            corte.save(update_fields=["is_finalized"])
+            finalization_failures.append(f"cut:{corte.id}:missing_file_field")
+            failure_recorded = True
+            if corte.is_finalized:
+                corte.is_finalized = False
+                corte.save(update_fields=["is_finalized"])
+            logger.warning("Finalize skipped for cut %s: file field missing", corte.id)
             continue
 
         video_path = Path(corte.file.path)
         if not video_path.exists():
-            corte.is_finalized = True
-            corte.save(update_fields=["is_finalized"])
+            finalization_failures.append(f"cut:{corte.id}:missing_file_on_disk")
+            failure_recorded = True
+            if corte.is_finalized:
+                corte.is_finalized = False
+                corte.save(update_fields=["is_finalized"])
+            logger.warning("Finalize skipped for cut %s: file missing on disk", corte.id)
             continue
 
         # Cut destination brand (target_brand override, distribute, or theme)
@@ -1714,6 +1734,7 @@ def finalizar_auto_cut_task(
 
         try:
             work_path = video_path
+            step_failed = False
             # 1. Reframe vertical (shorts with horizontal source)
             info = ffprobe_video_info(video_path)
             w, h = info.get("width", 0), info.get("height", 0)
@@ -1751,6 +1772,7 @@ def finalizar_auto_cut_task(
                         work_path = Path(corte.file.path)
                         logger.info("Cut %s: reframed to vertical (%s)", corte.id, vert_mode)
                 except Exception as e:
+                    step_failed = True
                     logger.exception("Vertical reframe failed for cut %s: %s", corte.id, e)
             elif corte.format == "vertical" and not is_horizontal:
                 # Portrait/square/other aspect: force 1080×1920 (9:16) with pad (no crop)
@@ -1778,6 +1800,7 @@ def finalizar_auto_cut_task(
                                 corte.id, w, h,
                             )
                     except Exception as e:
+                        step_failed = True
                         logger.exception("9:16 vertical normalize failed for cut %s: %s", corte.id, e)
                 else:
                     logger.info(
@@ -1824,6 +1847,7 @@ def finalizar_auto_cut_task(
                                 info_long.get("sample_aspect_ratio") or "N/A",
                             )
                 except Exception as e:
+                    step_failed = True
                     logger.exception(
                         "Horizontal long normalize (16:9 canvas) failed for cut %s: %s",
                         corte.id,
@@ -1854,6 +1878,7 @@ def finalizar_auto_cut_task(
                         work_path = Path(corte.file.path)
                         logger.info("Cut %s: overlay animation applied (%s)", corte.id, overlay_pos)
                 except Exception as e:
+                    step_failed = True
                     logger.exception("Overlay animation failed for cut %s: %s", corte.id, e)
 
             # 2b. Right-side overlay (horizontal long cuts only)
@@ -1883,6 +1908,7 @@ def finalizar_auto_cut_task(
                         work_path = Path(corte.file.path)
                         logger.info("Cut %s: side (long) overlay applied", corte.id)
                 except Exception as e:
+                    step_failed = True
                     logger.exception(
                         "Long side overlay failed for cut %s: %s", corte.id, e
                     )
@@ -1918,6 +1944,7 @@ def finalizar_auto_cut_task(
                         work_path = Path(corte.file.path)
                         logger.info("Cut %s: logo inserted at (%d,%d)", corte.id, horiz_logo_x, horiz_logo_y)
                 except Exception as e:
+                    step_failed = True
                     logger.exception("Logo insert failed for cut %s: %s", corte.id, e)
 
             # 4. Burn subtitles (shorts: if flagged; horizontal longs: only if brand allows)
@@ -1976,16 +2003,32 @@ def finalizar_auto_cut_task(
                             _burn_timer.elapsed_ms()
                         )
                     except Exception as e:
+                        step_failed = True
                         render_failures_total.labels(workload_type=_workload).inc()
                         logger.exception("Subtitle burn failed for cut %s: %s", corte.id, e)
+            finalized_ok = (
+                not step_failed
+                and bool(corte.file)
+                and Path(corte.file.path).exists()
+            )
         except Exception as e:
+            finalization_failures.append(f"cut:{corte.id}:exception:{type(e).__name__}")
+            failure_recorded = True
             logger.exception("Finalize failed for cut %s: %s", corte.id, e)
-        corte.is_finalized = True
-        corte.save(update_fields=["is_finalized"])
-        try:
-            _sync_inventory_item_from_corte(corte)
-        except Exception as e:
-            logger.exception("Inventory sync failed for cut %s: %s", corte.id, e)
+        if finalized_ok:
+            corte.is_finalized = True
+            corte.save(update_fields=["is_finalized"])
+            try:
+                _sync_inventory_item_from_corte(corte)
+            except Exception as e:
+                inventory_failures.append(f"cut:{corte.id}:inventory:{type(e).__name__}")
+                logger.exception("Inventory sync failed for cut %s: %s", corte.id, e)
+        else:
+            if not failure_recorded:
+                finalization_failures.append(f"cut:{corte.id}:incomplete")
+            if corte.is_finalized:
+                corte.is_finalized = False
+                corte.save(update_fields=["is_finalized"])
 
     # Inventory was synced above. Automatic scheduling runs ONLY at 19:00
     # via cron (generate_daily_factory_schedules_task). Not triggered here to avoid
@@ -1997,7 +2040,22 @@ def finalizar_auto_cut_task(
         workload_type=_workload,
         task_id=_task_id,
         duration_ms=_render_timer.elapsed_ms(),
-        status="success",
+        status="success" if not finalization_failures and not inventory_failures else "incomplete",
         analysis_id=analysis_id,
         cuts_finalized=len(to_finalize),
     )
+    if finalization_failures or inventory_failures:
+        analysis.status = "finalizing"
+        analysis.progress_message = (
+            "Finalização pendente de recovery."
+            if finalization_failures
+            else "Sincronização de inventário pendente de recovery."
+        )
+        analysis.error = (
+            f"Finalização incompleta: {len(finalization_failures)} corte(s) com falha e "
+            f"{len(inventory_failures)} sincronização(ões) com falha."
+        )
+        _safe_save_analysis(analysis, ["status", "progress_message", "error"])
+        return
+
+    _mark_analysis_done(analysis)

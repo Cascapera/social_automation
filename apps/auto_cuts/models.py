@@ -13,6 +13,7 @@ class AutoCutAnalysis(models.Model):
         ("pending", "Pendente"),
         ("transcribing", "Transcrevendo"),
         ("analyzing", "Analisando"),
+        ("finalizing", "Finalizando"),
         ("done", "Concluído"),
         ("error", "Erro"),
     ]
@@ -185,6 +186,13 @@ class AutoCutAnalysis(models.Model):
         help_text="Asset OVERLAY_LONG da brand; usado só se long_overlay_enabled.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "updated_at" not in update_fields:
+            kwargs["update_fields"] = set(update_fields) | {"updated_at"}
+        return super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"AutoCut #{self.id} – {self.name or 'Sem nome'} ({self.status})"

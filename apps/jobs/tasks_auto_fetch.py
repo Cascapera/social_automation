@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 def _factory_has_job_in_progress(factory: Factory) -> bool:
-    """Verifica se a factory tem análise em andamento (pending, transcribing, analyzing)."""
+    """Verifica se a factory tem análise em andamento até o fim da finalização."""
     brands = list(Brand.objects.filter(factory=factory).values_list("id", flat=True))
     if not brands:
         return False
     return AutoCutAnalysis.objects.filter(
         brand_id__in=brands,
-        status__in=["pending", "transcribing", "analyzing"],
+        status__in=["pending", "transcribing", "analyzing", "finalizing"],
     ).exists()
 
 
