@@ -5,14 +5,19 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import timedelta
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from django.conf import settings
 from django.core.files import File
 from django.utils import timezone
 
-from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk, AutoCutSuggestion
+from apps.auto_cuts.models import (
+    AutoCutAnalysis,
+    AutoCutCorte,
+    AutoCutReadyChunk,
+    AutoCutSuggestion,
+)
 from apps.auto_cuts.services.extract import extract_corte
 from apps.auto_cuts.services.video_chunks import cleanup_cortes_processo
 from apps.jobs.models import VideoInventoryItem
@@ -28,7 +33,7 @@ BLOCKING_INVENTORY_STATUSES = {"SCHEDULED", "POSTING", "POSTED"}
 MANUAL_ATTENTION_PREFIX = "Recovery manual required:"
 
 
-class AutoCutRecoveryStage(str, Enum):
+class AutoCutRecoveryStage(StrEnum):
     FETCH_PREPARE = "fetch_prepare"
     TRANSCRIPTION = "transcription"
     AI_ANALYSIS = "ai_analysis"
@@ -39,7 +44,7 @@ class AutoCutRecoveryStage(str, Enum):
     AMBIGUOUS = "ambiguous"
 
 
-class AutoCutRecoveryAction(str, Enum):
+class AutoCutRecoveryAction(StrEnum):
     IGNORE = "ignore"
     RESTART_FROM_BEGINNING = "restart_from_beginning"
     RERUN_FINALIZATION = "rerun_finalization"

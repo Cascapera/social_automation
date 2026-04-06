@@ -12,8 +12,8 @@ from django.utils import timezone
 
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutSuggestion
 from apps.auto_cuts.services.recovery import (
-    AutoCutRecoveryAction,
     MANUAL_ATTENTION_PREFIX,
+    AutoCutRecoveryAction,
     recover_autocut_analysis,
     recover_stuck_autocut_analyses,
 )
