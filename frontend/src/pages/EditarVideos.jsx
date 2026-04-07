@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
   getBrandAssets,
-  getCuts,
-  getJobs,
+  getCutsAllPages,
+  getJobsAllPages,
   createJob,
   runJob,
   getJob,
@@ -50,10 +50,9 @@ export default function EditarVideos() {
   const [cutsFilterDuration, setCutsFilterDuration] = useState('all')
   const [subtitleModalJob, setSubtitleModalJob] = useState(null)
   const [subtitlePollingJob, setSubtitlePollingJob] = useState(null)
-
   useEffect(() => {
     if (brandId) {
-      getCuts(null, brandId).then(setCuts).catch(() => setCuts([]))
+      getCutsAllPages(null, brandId).then(setCuts).catch(() => setCuts([]))
     } else {
       setCuts([])
     }
@@ -61,7 +60,7 @@ export default function EditarVideos() {
 
   useEffect(() => {
     if (brandId) {
-      getJobs(false, brandId).then(setJobs).catch(() => setJobs([]))
+      getJobsAllPages(false, brandId).then(setJobs).catch(() => setJobs([]))
     } else {
       setJobs([])
     }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useBrand } from '../context/BrandContext'
-import { getSources, getCuts, uploadSourceWithProgress, extractCuts, deleteCut, uploadCut } from '../api'
+import { getSourcesAllPages, getCuts, uploadSourceWithProgress, extractCuts, deleteCut, uploadCut } from '../api'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../components/PaginationControls'
 import './GerarCortes.css'
 
 function secondsToTC(sec) {
@@ -26,10 +27,16 @@ export default function GerarCortes() {
   const [uploadCutName, setUploadCutName] = useState('')
   const [uploadCutFormat, setUploadCutFormat] = useState('vertical')
   const [uploadingCut, setUploadingCut] = useState(false)
+  const [cutsPage, setCutsPage] = useState(1)
+  const [cutsTotal, setCutsTotal] = useState(0)
+
+  useEffect(() => {
+    setCutsPage(1)
+  }, [brandId])
 
   useEffect(() => {
     if (brandId) {
-      getSources(brandId).then(setSources).catch(() => setSources([]))
+      getSourcesAllPages(brandId).then(setSources).catch(() => setSources([]))
     } else {
       setSources([])
     }
@@ -37,11 +44,20 @@ export default function GerarCortes() {
 
   useEffect(() => {
     if (brandId) {
-      getCuts(null, brandId).then(setCuts).catch(() => setCuts([]))
+      getCuts(null, brandId, { page: cutsPage, pageSize: DEFAULT_PAGE_SIZE })
+        .then((r) => {
+          setCuts(r.items)
+          setCutsTotal(r.count)
+        })
+        .catch(() => {
+          setCuts([])
+          setCutsTotal(0)
+        })
     } else {
       setCuts([])
+      setCutsTotal(0)
     }
-  }, [brandId])
+  }, [brandId, cutsPage])
 
   function handleFileSelect(selectedFile) {
     setFile(selectedFile)
@@ -98,7 +114,7 @@ export default function GerarCortes() {
     try {
       const s = await uploadSourceWithProgress(brandId, title, file, setUploadProgress)
       setPhase('extract')
-      const created = await extractCuts(
+      await extractCuts(
         s.id,
         valid.map((c) => ({
           name: c.name || '',
@@ -107,8 +123,11 @@ export default function GerarCortes() {
           format: c.format || 'vertical',
         }))
       )
-      setCuts((prev) => [...created, ...prev])
       setSources((prev) => prev.filter((src) => src.id !== s.id))
+      const r = await getCuts(null, brandId, { page: 1, pageSize: DEFAULT_PAGE_SIZE })
+      setCuts(r.items)
+      setCutsTotal(r.count)
+      setCutsPage(1)
       setFile(null)
       setTitle('')
       setCutsForm([{ name: '', start_tc: '', end_tc: '', format: 'vertical' }])
@@ -142,8 +161,11 @@ export default function GerarCortes() {
     setError('')
     setUploadingCut(true)
     try {
-      const c = await uploadCut(uploadCutFile, uploadCutName, uploadCutFormat, brandId)
-      setCuts((prev) => [c, ...prev])
+      await uploadCut(uploadCutFile, uploadCutName, uploadCutFormat, brandId)
+      const r = await getCuts(null, brandId, { page: 1, pageSize: DEFAULT_PAGE_SIZE })
+      setCuts(r.items)
+      setCutsTotal(r.count)
+      setCutsPage(1)
       setUploadCutFile(null)
       setUploadCutName('')
       setUploadCutFormat('vertical')
@@ -316,6 +338,13 @@ export default function GerarCortes() {
               </div>
             ))}
           </div>
+        )}
+        {cuts.length > 0 && (
+          <PaginationControls
+            page={cutsPage}
+            totalCount={cutsTotal}
+            onPageChange={setCutsPage}
+          />
         )}
       </section>
 

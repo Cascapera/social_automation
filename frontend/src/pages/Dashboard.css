@@ -358,3 +358,126 @@
 .dashboard-jobs-hint {
   margin-bottom: 1.5rem;
 }
+
+/* YouTube (Upload Post) — factory */
+.dashboard-youtube-section {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.dashboard-youtube-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.yt-period-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.yt-period-label select {
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  min-width: 11rem;
+}
+
+.yt-config-banner {
+  background: rgba(220, 160, 40, 0.12);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.yt-meta-note {
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  max-width: 52rem;
+}
+
+.yt-summary-grid {
+  margin-bottom: 0.5rem;
+}
+
+.yt-subsection {
+  margin-top: 1.75rem;
+}
+
+.yt-subsection-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text);
+}
+
+.yt-ts-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 36rem;
+}
+
+.yt-ts-row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr 4rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.yt-ts-date {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.yt-ts-bar-track {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.yt-ts-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  min-width: 2px;
+}
+
+.yt-ts-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+table.metrics-table.yt-top-table,
+table.metrics-table.yt-brands-table {
+  max-width: 100%;
+}
+
+table.metrics-table.yt-brands-table {
+  max-width: 56rem;
+}
+
+.yt-code {
+  font-size: 0.8rem;
+}
+
+.yt-brand-err {
+  color: var(--error);
+  font-size: 0.8rem;
+  max-width: 12rem;
+  word-break: break-word;
+}

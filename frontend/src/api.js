@@ -72,6 +72,40 @@ export async function apiRequest(endpoint, options = {}) {
   return data
 }
 
+/**
+ * Resposta DRF paginada { count, next, previous, results }.
+ * Compatível com respostas antigas em array puro.
+ */
+export function normalizeListResponse(data) {
+  if (data && Array.isArray(data.results)) {
+    return {
+      items: data.results,
+      count: typeof data.count === 'number' ? data.count : data.results.length,
+      next: data.next || null,
+      previous: data.previous || null,
+    }
+  }
+  if (Array.isArray(data)) {
+    return { items: data, count: data.length, next: null, previous: null }
+  }
+  return { items: [], count: 0, next: null, previous: null }
+}
+
+/** Busca todas as páginas (calendário, dropdowns, assets). page_size alto para menos round-trips. */
+async function fetchAllListPages(pathBuilder, { pageSize = 100, maxPages = 200 } = {}) {
+  const all = []
+  let page = 1
+  while (page <= maxPages) {
+    const url = pathBuilder(page, pageSize)
+    const data = await apiRequest(url)
+    const { items, next } = normalizeListResponse(data)
+    all.push(...items)
+    if (!next || items.length === 0) break
+    page += 1
+  }
+  return all
+}
+
 export async function login(username, password) {
   let res
   try {
@@ -134,6 +168,19 @@ export async function getDashboardMetrics({ brandId = null, factoryId = null } =
   return apiRequest(`/dashboard-metrics/?${qs}`)
 }
 
+/**
+ * YouTube (Upload Post): métricas agregadas por factory. Backend chama a API Upload Post.
+ * @param {number} factoryId
+ * @param {{ period?: string, refresh?: boolean }} [opts]
+ */
+export async function getFactoryYoutubeSummary(factoryId, { period = 'last_month', refresh = false } = {}) {
+  if (!factoryId) throw new Error('factoryId obrigatório')
+  const params = new URLSearchParams()
+  if (period) params.append('period', period)
+  if (refresh) params.append('refresh', '1')
+  return apiRequest(`/dashboard/factory/${factoryId}/youtube-summary/?${params.toString()}`)
+}
+
 export async function getBrand(brandId) {
   return apiRequest(`/brands/${brandId}/`)
 }
@@ -169,16 +216,25 @@ export async function triggerBrandImmediateSchedule(brandId, targetDate = null) 
 
 export async function getFactorySchedules(factoryId, status = null, brandId = null) {
   if (!factoryId) return []
-  const params = new URLSearchParams()
-  params.append('factory', factoryId)
-  if (status) params.append('status', status)
-  if (brandId) params.append('brand', brandId)
-  return apiRequest(`/factory-schedules/?${params.toString()}`)
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    params.append('factory', factoryId)
+    if (status) params.append('status', status)
+    if (brandId) params.append('brand', brandId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/factory-schedules/?${params.toString()}`
+  })
 }
 
 export async function getSearchChannels(factoryId = null) {
-  const qs = factoryId ? `?factory=${factoryId}` : ''
-  return apiRequest(`/search-channels/${qs}`)
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (factoryId) params.append('factory', factoryId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/search-channels/?${params.toString()}`
+  })
 }
 
 export async function createSearchChannel(data) {
@@ -209,14 +265,19 @@ export async function getVideoInventory({
   brandId = null,
   status = null,
   videoType = null,
+  page = 1,
+  pageSize = 25,
 } = {}) {
   const params = new URLSearchParams()
   if (factoryId) params.append('factory', factoryId)
   if (brandId) params.append('brand', brandId)
   if (status) params.append('status', status)
   if (videoType) params.append('video_type', videoType)
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
   const qs = params.toString()
-  return apiRequest(qs ? `/video-inventory/?${qs}` : '/video-inventory/')
+  const data = await apiRequest(qs ? `/video-inventory/?${qs}` : `/video-inventory/?${params.toString()}`)
+  return normalizeListResponse(data)
 }
 
 export async function removeAwaitingInventoryItem(id) {
@@ -304,12 +365,14 @@ export async function updateBrand(brandId, payload) {
 }
 
 export async function getBrandAssets(brandId, assetType) {
-  let url = '/brand-assets/'
-  const params = new URLSearchParams()
-  if (brandId) params.append('brand', brandId)
-  if (assetType) params.append('asset_type', assetType)
-  if (params.toString()) url += '?' + params.toString()
-  return apiRequest(url)
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (brandId) params.append('brand', brandId)
+    if (assetType) params.append('asset_type', assetType)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/brand-assets/?${params.toString()}`
+  })
 }
 
 export async function createBrandAsset(brandId, assetType, file, label = '') {
@@ -396,9 +459,23 @@ export function uploadSourceWithProgress(brandId, title, file, onProgress) {
   })
 }
 
-export async function getSources(brandId = null) {
-  const url = brandId ? `/sources/?brand=${brandId}` : '/sources/'
-  return apiRequest(url)
+export async function getSources(brandId = null, { page = 1, pageSize = 25 } = {}) {
+  const params = new URLSearchParams()
+  if (brandId) params.append('brand', brandId)
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/sources/?${params.toString()}`)
+  return normalizeListResponse(data)
+}
+
+export async function getSourcesAllPages(brandId = null) {
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (brandId) params.append('brand', brandId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/sources/?${params.toString()}`
+  })
 }
 
 export async function createCuts(sourceId, cuts) {
@@ -415,12 +492,26 @@ export async function extractCuts(sourceId, cuts) {
   })
 }
 
-export async function getCuts(sourceId = null, brandId = null) {
+export async function getCuts(sourceId = null, brandId = null, { page = 1, pageSize = 25 } = {}) {
   const params = new URLSearchParams()
   if (sourceId) params.append('source', sourceId)
   if (brandId) params.append('brand', brandId)
-  const qs = params.toString()
-  return apiRequest(qs ? `/cuts/?${qs}` : '/cuts/')
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/cuts/?${params.toString()}`)
+  return normalizeListResponse(data)
+}
+
+/** Todas as páginas de cortes (ex.: modal de montagem de job). */
+export async function getCutsAllPages(sourceId = null, brandId = null) {
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (sourceId) params.append('source', sourceId)
+    if (brandId) params.append('brand', brandId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/cuts/?${params.toString()}`
+  })
 }
 
 export async function deleteCut(id) {
@@ -471,11 +562,26 @@ export async function createJob(data, brandId = null) {
   })
 }
 
-export async function getJobs(archived = false, brandId = null) {
+export async function getJobs(archived = false, brandId = null, { page = 1, pageSize = 25 } = {}) {
   const params = new URLSearchParams()
   params.append('archived', archived ? 'true' : 'false')
   if (brandId) params.append('brand', brandId)
-  return apiRequest(`/jobs/?${params.toString()}`)
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/jobs/?${params.toString()}`)
+  return normalizeListResponse(data)
+}
+
+/** Todas as páginas de jobs (ex.: tela de edição com fila + finalizados). */
+export async function getJobsAllPages(archived = false, brandId = null) {
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    params.append('archived', archived ? 'true' : 'false')
+    if (brandId) params.append('brand', brandId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/jobs/?${params.toString()}`
+  })
 }
 
 export async function archiveJob(id) {
@@ -548,12 +654,14 @@ export async function downloadJobVideo(jobId, jobName) {
 }
 
 export async function getScheduledPosts({ brandId = null, factoryId = null } = {}) {
-  const params = new URLSearchParams()
-  if (brandId) params.append('brand', brandId)
-  if (factoryId) params.append('factory', factoryId)
-  const qs = params.toString()
-  const url = qs ? `/scheduled-posts/?${qs}` : '/scheduled-posts/'
-  return apiRequest(url)
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (brandId) params.append('brand', brandId)
+    if (factoryId) params.append('factory', factoryId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/scheduled-posts/?${params.toString()}`
+  })
 }
 
 export async function createScheduledPost({
@@ -679,12 +787,18 @@ export async function deleteSocialAccount(id) {
 }
 
 // Cortes Automáticos
-export async function getAutoCutAnalyses(brandId = null, { excludeFinalized = false } = {}) {
+export async function getAutoCutAnalyses(
+  brandId = null,
+  { excludeFinalized = false, page = 1, pageSize = 25, factoryId = null } = {},
+) {
   const params = new URLSearchParams()
   if (brandId) params.append('brand', brandId)
+  else if (factoryId) params.append('factory', factoryId)
   if (excludeFinalized) params.append('exclude_finalized', '1')
-  const qs = params.toString()
-  return apiRequest(`/auto-cuts/${qs ? '?' + qs : ''}`)
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/auto-cuts/?${params.toString()}`)
+  return normalizeListResponse(data)
 }
 
 export async function getAutoCutAnalysis(id) {
@@ -892,15 +1006,21 @@ export async function scheduleAutoCutCorte(corteId, { scheduledAt, privacyStatus
   })
 }
 
-export async function getAutoCutCortes(brandId, { finalized, date_from, date_to, format } = {}) {
+export async function getAutoCutCortes(
+  brandId,
+  { finalized, date_from, date_to, format, factoryId, page = 1, pageSize = 25 } = {},
+) {
   const params = new URLSearchParams()
   if (brandId) params.append('brand', brandId)
+  if (factoryId) params.append('factory', factoryId)
   if (finalized) params.append('finalized', '1')
   if (date_from) params.append('date_from', date_from)
   if (date_to) params.append('date_to', date_to)
   if (format) params.append('format', format)
-  const qs = params.toString()
-  return apiRequest(`/auto-cut-cortes/${qs ? '?' + qs : ''}`)
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/auto-cut-cortes/?${params.toString()}`)
+  return normalizeListResponse(data)
 }
 
 export async function deleteAutoCutCorte(id, brandId) {

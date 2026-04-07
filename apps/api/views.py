@@ -45,6 +45,7 @@ from apps.jobs.tasks import burn_subtitles_task, generate_subtitles_task, proces
 from apps.mediahub.models import SourceVideo
 from apps.social.services.youtube_description import build_youtube_description
 
+from .pagination import StandardResultsSetPagination
 from .serializers import (
     AutoCutAnalysisSerializer,
     AutoCutCorteSerializer,
@@ -280,6 +281,7 @@ class SearchChannelViewSet(viewsets.ModelViewSet):
     """CRUD de canais de busca (YouTube) por factory."""
     queryset = SearchChannel.objects.all().select_related("factory", "target_brand")
     serializer_class = SearchChannelSerializer
+    pagination_class = StandardResultsSetPagination
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
@@ -553,6 +555,7 @@ class BrandAssetViewSet(viewsets.ModelViewSet):
     """Lista, cria e deleta assets (intro/outro/CTA) por marca."""
     queryset = BrandAsset.objects.all()
     serializer_class = BrandAssetSerializer
+    pagination_class = StandardResultsSetPagination
     parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -570,6 +573,7 @@ class SourceVideoViewSet(viewsets.ModelViewSet):
     """Upload e gestão de vídeos fonte."""
     queryset = SourceVideo.objects.all()
     serializer_class = SourceVideoSerializer
+    pagination_class = StandardResultsSetPagination
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -620,6 +624,7 @@ class CutViewSet(viewsets.ModelViewSet):
     """Cortes de vídeo."""
     queryset = Cut.objects.all()
     serializer_class = CutSerializer
+    pagination_class = StandardResultsSetPagination
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -729,6 +734,7 @@ class JobViewSet(viewsets.ModelViewSet):
     """Jobs de renderização."""
     queryset = Job.objects.all()
     serializer_class = JobSerializer
+    pagination_class = StandardResultsSetPagination
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
@@ -966,6 +972,7 @@ class ScheduledPostViewSet(viewsets.ModelViewSet):
     """Agendamento de postagens."""
     queryset = ScheduledPost.objects.all()
     serializer_class = ScheduledPostSerializer
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1085,6 +1092,7 @@ class ScheduledPostViewSet(viewsets.ModelViewSet):
 
 class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
     """Banco de vídeos por brand/factory."""
+    pagination_class = StandardResultsSetPagination
     queryset = VideoInventoryItem.objects.all().select_related(
         "brand", "factory",
         "auto_cut_corte",
@@ -1458,6 +1466,7 @@ class FactoryPostingScheduleViewSet(viewsets.ReadOnlyModelViewSet):
     """Agenda e status operacional para debug."""
     queryset = FactoryPostingSchedule.objects.all().select_related("factory", "brand", "inventory_item", "scheduled_post")
     serializer_class = FactoryPostingScheduleSerializer
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1493,6 +1502,7 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
     """Análise automática de cortes virais."""
     queryset = AutoCutAnalysis.objects.all()
     serializer_class = AutoCutAnalysisSerializer
+    pagination_class = StandardResultsSetPagination
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     http_method_names = ["get", "post", "head", "options", "delete"]
 
@@ -1503,8 +1513,11 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             # Inclui jobs do usuário OU do auto-fetch (user=None)
             qs = qs.filter(Q(user=self.request.user) | Q(user__isnull=True))
         brand = self.request.query_params.get("brand")
+        factory = self.request.query_params.get("factory")
         if brand:
             qs = qs.filter(brand_id=brand)
+        elif factory:
+            qs = qs.filter(brand__factory_id=factory)
         # exclude_finalized=1: remove jobs que já têm cortes finalizados (aparecem só em Cortes finalizados)
         if self.request.query_params.get("exclude_finalized") == "1":
             from django.db.models import Exists, OuterRef
@@ -2004,6 +2017,7 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
     """Cortes do auto-cuts. Lista finalizados (tabela) e permite atualizar/deletar."""
     queryset = AutoCutCorte.objects.all()
     serializer_class = AutoCutCorteSerializer
+    pagination_class = StandardResultsSetPagination
     http_method_names = ["get", "patch", "delete", "post", "head", "options"]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
@@ -2013,8 +2027,11 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
         if self.request.user.is_authenticated:
             qs = qs.filter(Q(analysis__user=self.request.user) | Q(analysis__user__isnull=True))
         brand = self.request.query_params.get("brand")
+        factory = self.request.query_params.get("factory")
         if brand:
             qs = qs.filter(analysis__brand_id=brand)
+        elif factory:
+            qs = qs.filter(analysis__brand__factory_id=factory)
         # Tabela de finalizados: ?finalized=1
         if self.request.query_params.get("finalized") == "1":
             qs = qs.filter(is_finalized=True)
@@ -2199,4 +2216,29 @@ class DashboardMetricsView(APIView):
             factory_id = None
 
         data = compute_dashboard_metrics(request.user, brand_id, factory_id)
+        return Response(data)
+
+
+class FactoryYoutubeDashboardView(APIView):
+    """
+    YouTube via Upload Post: resumo agregado por factory (assinantes, views no período, série, top vídeos).
+    GET /api/dashboard/factory/<factory_id>/youtube-summary/?period=last_month&refresh=1
+    """
+
+    def get(self, request, factory_id=None):
+        from django.core.cache import cache
+
+        from .factory_youtube_dashboard import build_factory_youtube_dashboard, normalize_period_param
+
+        fid = _parse_positive_int(factory_id)
+        if not fid:
+            return Response({"detail": "factory_id inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        if not Factory.objects.filter(pk=fid).exists():
+            return Response({"detail": "Factory não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+
+        period = normalize_period_param(request.query_params.get("period"))
+        if request.query_params.get("refresh") in ("1", "true", "yes"):
+            cache.delete(f"factory_youtube_dash:{fid}:{period}")
+
+        data = build_factory_youtube_dashboard(fid, period=period)
         return Response(data)

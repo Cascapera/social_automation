@@ -166,7 +166,9 @@ export default function Agendamento() {
   const [savingDailyScheduleTime, setSavingDailyScheduleTime] = useState(false)
   useEffect(() => {
     if (brandId) {
-      getJobs(false, brandId).then(setJobs).catch(() => setJobs([]))
+      getJobs(false, brandId, { page: 1, pageSize: 100 })
+        .then((r) => setJobs(r.items))
+        .catch(() => setJobs([]))
       reloadScheduledPosts()
       getBrandSocialAccounts(brandId).then(setSocialAccounts).catch(() => setSocialAccounts([]))
     } else {

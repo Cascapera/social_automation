@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useBrand } from '../context/BrandContext'
 import { getVideoInventory, removeAwaitingInventoryItem, retryAwaitingInventoryItem, downloadInventoryMedia, markInventoryPosted } from '../api'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../components/PaginationControls'
 import './BancoVideos.css'
 
 const STATUS_LABEL = {
@@ -75,6 +76,12 @@ export default function BancoVideos() {
   const [retryScheduledAt, setRetryScheduledAt] = useState('')
   const [markPostedModalItem, setMarkPostedModalItem] = useState(null)
   const [markPostedAt, setMarkPostedAt] = useState('')
+  const [inventoryPage, setInventoryPage] = useState(1)
+  const [inventoryTotal, setInventoryTotal] = useState(0)
+
+  useEffect(() => {
+    setInventoryPage(1)
+  }, [viewMode, factoryId, brandId, videoType])
 
   useEffect(() => {
     let cancelled = false
@@ -91,12 +98,17 @@ export default function BancoVideos() {
       setLoading(true)
       setError('')
       try {
-        const rows = await getVideoInventory({
+        const paged = await getVideoInventory({
           factoryId: effectiveFactoryId,
           brandId: effectiveBrandId,
           videoType: videoType || null,
+          page: inventoryPage,
+          pageSize: DEFAULT_PAGE_SIZE,
         })
-        if (!cancelled) setItems(Array.isArray(rows) ? rows : [])
+        if (!cancelled) {
+          setItems(paged.items)
+          setInventoryTotal(paged.count)
+        }
       } catch (e) {
         if (!cancelled) {
           setItems([])
@@ -111,7 +123,7 @@ export default function BancoVideos() {
     return () => {
       cancelled = true
     }
-  }, [viewMode, factoryId, brandId, videoType])
+  }, [viewMode, factoryId, brandId, videoType, inventoryPage])
 
   const brandNameById = useMemo(
     () => Object.fromEntries((brands || []).map((b) => [String(b.id), b.name])),
@@ -119,12 +131,12 @@ export default function BancoVideos() {
   )
 
   const summary = useMemo(() => {
-    const acc = { total: items.length, AVAILABLE: 0, SCHEDULED: 0, POSTING: 0, POSTED: 0, FAILED: 0 }
+    const acc = { total: inventoryTotal, AVAILABLE: 0, SCHEDULED: 0, POSTING: 0, POSTED: 0, FAILED: 0 }
     items.forEach((item) => {
       if (acc[item.status] != null) acc[item.status] += 1
     })
     return acc
-  }, [items])
+  }, [items, inventoryTotal])
 
   const awaitingItems = useMemo(
     () => items.filter((item) => item.status !== 'POSTED'),
@@ -352,12 +364,12 @@ export default function BancoVideos() {
 
       <section className="section banco-filters">
         <div className="banco-summary">
-          <span>Total: {summary.total}</span>
-          <span>Aguardando: {awaitingItems.length}</span>
-          <span>Postados: {postedItems.length}</span>
-          <span>Disponíveis: {summary.AVAILABLE}</span>
-          <span>Postando: {(summary.SCHEDULED || 0) + (summary.POSTING || 0)}</span>
-          <span>Erros: {summary.FAILED}</span>
+          <span>Total (registros): {summary.total}</span>
+          <span>Aguardando (página): {awaitingItems.length}</span>
+          <span>Postados (página): {postedItems.length}</span>
+          <span>Disponíveis (página): {summary.AVAILABLE}</span>
+          <span>Postando (página): {(summary.SCHEDULED || 0) + (summary.POSTING || 0)}</span>
+          <span>Erros (página): {summary.FAILED}</span>
         </div>
         <div className="banco-filter-row">
           <label>
@@ -506,6 +518,14 @@ export default function BancoVideos() {
               )}
             </div>
           </div>
+        )}
+        {!loading && items.length > 0 && (
+          <PaginationControls
+            page={inventoryPage}
+            totalCount={inventoryTotal}
+            onPageChange={setInventoryPage}
+            disabled={loading}
+          />
         )}
       </section>
     </div>

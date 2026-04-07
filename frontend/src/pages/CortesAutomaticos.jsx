@@ -7,7 +7,7 @@ import {
   createReadyCutsAnalysis,
   getFactory,
   updateFactory,
-  getSources,
+  getSourcesAllPages,
   getBrandAssets,
   getBrandSocialAccounts,
   resetStuckAutoCuts,
@@ -22,6 +22,7 @@ import {
   uploadAutoCutCorteThumbnail,
   updateBrand,
 } from '../api'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../components/PaginationControls'
 import './CortesAutomaticos.css'
 
 function formatDuration(sec) {
@@ -117,6 +118,10 @@ export default function CortesAutomaticos() {
   const [unitScheduling, setUnitScheduling] = useState(false)
   const [uploadingThumbnailId, setUploadingThumbnailId] = useState(null)
   const [thumbnailModal, setThumbnailModal] = useState(null)
+  const [analysesPage, setAnalysesPage] = useState(1)
+  const [analysesTotal, setAnalysesTotal] = useState(0)
+  const [finalizedPage, setFinalizedPage] = useState(1)
+  const [finalizedTotal, setFinalizedTotal] = useState(0)
   const [titleEditCorteId, setTitleEditCorteId] = useState(null)
   const [titleEditValue, setTitleEditValue] = useState('')
   const [savingTitleId, setSavingTitleId] = useState(null)
@@ -143,6 +148,8 @@ export default function CortesAutomaticos() {
     ? (factoryBrands[0]?.id || brands[0]?.id || null)
     : null
   const activeBrandId = brandId || fallbackFactoryBrandId
+  const scopeKey = `${activeBrandId}|${viewMode}|${filters.date_from || ''}|${filters.date_to || ''}|${filters.format || ''}|${brandId || ''}|${factoryId || ''}|${factoryBrandIdsKey}`
+  const prevScopeKeyRef = useRef(null)
   const selectedBrand = brands.find((b) => String(b.id) === String(activeBrandId))
   const hasRunningAnalyses = analyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
     || factoryRunningAnalyses.some((a) => ['pending', 'transcribing', 'analyzing'].includes(a.status))
@@ -190,53 +197,85 @@ export default function CortesAutomaticos() {
     setFactoryRunningAnalyses([])
   }
 
-  async function loadAnalysesForView() {
+  async function loadAnalysesForView(pageOverride = analysesPage) {
+    const page = pageOverride
     if (viewMode === 'factory') {
-      // Fila de jobs: universal (todas as factories). Sem filtro de brand.
-      const list = await getAutoCutAnalyses(null, { excludeFinalized: true })
-      const dedup = (Array.isArray(list) ? list : [])
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      if (!factoryId) {
+        setAnalyses([])
+        setAnalysesTotal(0)
+        return []
+      }
+      const r = await getAutoCutAnalyses(null, {
+        excludeFinalized: true,
+        factoryId,
+        page,
+        pageSize: DEFAULT_PAGE_SIZE,
+      })
+      const dedup = [...r.items].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       setAnalyses(dedup)
+      setAnalysesTotal(r.count)
       return dedup
     }
     if (!activeBrandId) {
       setAnalyses([])
+      setAnalysesTotal(0)
       return []
     }
-    if (viewMode !== 'factory') {
-      const list = await getAutoCutAnalyses(activeBrandId, { excludeFinalized: true })
-      setAnalyses(list)
-      return list
-    }
-    return []
+    const r = await getAutoCutAnalyses(activeBrandId, {
+      excludeFinalized: true,
+      page,
+      pageSize: DEFAULT_PAGE_SIZE,
+    })
+    setAnalyses(r.items)
+    setAnalysesTotal(r.count)
+    return r.items
   }
 
-  async function loadFinalizedCortes() {
-    if (viewMode === 'factory') {
-      if (factoryBrandIds.length === 0) {
-        setFinalizedCortes([])
-        return
-      }
+  async function loadFinalizedCortes(pageOverride = finalizedPage) {
+    const page = pageOverride
+    if (viewMode === 'factory' && factoryId) {
       try {
-        const settled = await Promise.allSettled(
-          factoryBrandIds.map((id) => getAutoCutCortes(id, { finalized: true, ...filters })),
-        )
-        const rows = settled
-          .filter((r) => r.status === 'fulfilled')
-          .map((r) => r.value)
-        const merged = rows.flat()
-        const dedup = Array.from(new Map(merged.map((c) => [c.id, c])).values())
-        setFinalizedCortes(dedup)
+        const r = await getAutoCutCortes(null, {
+          factoryId,
+          finalized: true,
+          ...filters,
+          page,
+          pageSize: DEFAULT_PAGE_SIZE,
+        })
+        setFinalizedCortes(r.items)
+        setFinalizedTotal(r.count)
+        return r.items
       } catch {
         setFinalizedCortes([])
+        setFinalizedTotal(0)
+        return []
       }
-      return
+    }
+    if (viewMode === 'factory' && !factoryId) {
+      setFinalizedCortes([])
+      setFinalizedTotal(0)
+      return []
     }
     if (!activeBrandId) {
       setFinalizedCortes([])
-      return
+      setFinalizedTotal(0)
+      return []
     }
-    getAutoCutCortes(activeBrandId, { finalized: true, ...filters }).then(setFinalizedCortes).catch(() => setFinalizedCortes([]))
+    try {
+      const r = await getAutoCutCortes(activeBrandId, {
+        finalized: true,
+        ...filters,
+        page,
+        pageSize: DEFAULT_PAGE_SIZE,
+      })
+      setFinalizedCortes(r.items)
+      setFinalizedTotal(r.count)
+      return r.items
+    } catch {
+      setFinalizedCortes([])
+      setFinalizedTotal(0)
+      return []
+    }
   }
 
   async function loadFactoryInfo() {
@@ -345,11 +384,20 @@ export default function CortesAutomaticos() {
   }, [readyCutsModalOpen, readyCutsBrandId, activeBrandId, viewMode, brands])
 
   useEffect(() => {
+    const scopeChanged = prevScopeKeyRef.current != null && prevScopeKeyRef.current !== scopeKey
+    prevScopeKeyRef.current = scopeKey
+    const ap = scopeChanged ? 1 : analysesPage
+    const fp = scopeChanged ? 1 : finalizedPage
+    if (scopeChanged) {
+      setAnalysesPage(1)
+      setFinalizedPage(1)
+    }
+
     const shouldLoadFactoryAggregated = viewMode === 'factory'
     if (shouldLoadFactoryAggregated || activeBrandId) {
-      loadAnalysesForView().catch(() => setAnalyses([]))
+      loadAnalysesForView(ap).catch(() => setAnalyses([]))
       if (activeBrandId) {
-        getSources(activeBrandId).then(setSources).catch(() => setSources([]))
+        getSourcesAllPages(activeBrandId).then(setSources).catch(() => setSources([]))
         getBrandSocialAccounts(activeBrandId).then(setSocialAccounts).catch(() => setSocialAccounts([]))
         getBrandAssets(activeBrandId, 'ANIMATION').then(setAnimationAssets).catch(() => setAnimationAssets([]))
       } else {
@@ -357,15 +405,17 @@ export default function CortesAutomaticos() {
         setSocialAccounts([])
         setAnimationAssets([])
       }
-      loadFinalizedCortes()
+      loadFinalizedCortes(fp)
       loadFactoryRunningAnalyses()
     } else {
       setAnalyses([])
+      setAnalysesTotal(0)
       setSocialAccounts([])
       setFinalizedCortes([])
+      setFinalizedTotal(0)
       setFactoryRunningAnalyses([])
     }
-  }, [activeBrandId, filters, viewMode, brandId, factoryId, factoryBrandIdsKey])
+  }, [scopeKey, analysesPage, finalizedPage])
 
   useEffect(() => {
     const bid =
@@ -438,7 +488,8 @@ export default function CortesAutomaticos() {
         longOverlayEnabled,
         longOverlayAssetId: longOverlayEnabled && longOverlayAssetId ? Number(longOverlayAssetId) : null,
       })
-      setAnalyses((prev) => [a, ...prev])
+      setAnalysesPage(1)
+      await loadAnalysesForView(1)
       setExpandedId(a.id)
       setFile(null)
       setSourceId('')
@@ -518,7 +569,7 @@ export default function CortesAutomaticos() {
             ? Number(readyCutsLongOverlayAssetId)
             : null,
       })
-      setAnalyses((prev) => [a, ...prev])
+      setAnalysesPage(1)
       if (a?.id) setExpandedId(a.id)
       setReadyCutsModalOpen(false)
       setReadyCutsModalFiles([])
@@ -528,7 +579,7 @@ export default function CortesAutomaticos() {
       setReadyCutsTitlesLanguage('pt')
       setReadyCutsLongOverlayEnabled(false)
       setReadyCutsLongOverlayAssetId('')
-      loadAnalysesForView()
+      await loadAnalysesForView(1)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -543,8 +594,7 @@ export default function CortesAutomaticos() {
     try {
       const res = await resetStuckAutoCuts(activeBrandId)
       if (res.reset > 0) {
-        const list = await loadAnalysesForView()
-        setAnalyses(list)
+        await loadAnalysesForView()
         setError(`${res.reset} análise(s) travada(s) limpa(s).`)
       }
     } catch (e) {
@@ -562,7 +612,6 @@ export default function CortesAutomaticos() {
       const res = await deleteStuckAutoCuts(activeBrandId)
       if (res.deleted > 0) {
         const list = await loadAnalysesForView()
-        setAnalyses(list)
         if (expandedId && !list.find((a) => a.id === expandedId)) setExpandedId(null)
         setError(`${res.deleted} job(s) interrompido(s) deletado(s).`)
       }
@@ -638,8 +687,7 @@ export default function CortesAutomaticos() {
         long_overlay_enabled: !!selectedAnalysis.long_overlay_enabled,
         long_overlay_asset_id: selectedAnalysis.long_overlay_asset ?? undefined,
       })
-      const list = await loadAnalysesForView()
-      setAnalyses(list)
+      await loadAnalysesForView()
       setExpandedId(null)
       await loadFinalizedCortes()
       setError('Cortes em finalização (queima de legendas em background). Atualize a página para ver os resultados.')
@@ -703,16 +751,7 @@ export default function CortesAutomaticos() {
     setError('')
     try {
       await uploadAutoCutCorteThumbnail(corte.id, file)
-      let refreshed = []
-      if (viewMode === 'factory' && factoryBrandIds.length > 0) {
-        const rows = await Promise.all(
-          factoryBrandIds.map((id) => getAutoCutCortes(id, { finalized: true, ...filters })),
-        )
-        refreshed = Array.from(new Map(rows.flat().map((c) => [c.id, c])).values())
-      } else {
-        refreshed = await getAutoCutCortes(activeBrandId, { finalized: true, ...filters })
-      }
-      setFinalizedCortes(refreshed)
+      const refreshed = await loadFinalizedCortes()
       const updated = refreshed.find((x) => x.id === corte.id)
       if (updated) setThumbnailModal(updated)
     } catch (err) {
@@ -1802,6 +1841,14 @@ export default function CortesAutomaticos() {
             ))}
           </div>
         )}
+        {analysesTotal > 0 && (
+          <PaginationControls
+            page={analysesPage}
+            totalCount={analysesTotal}
+            onPageChange={setAnalysesPage}
+            pageSize={DEFAULT_PAGE_SIZE}
+          />
+        )}
       </section>
 
       <section className="section">
@@ -1976,6 +2023,14 @@ export default function CortesAutomaticos() {
               })
             })()}
           </div>
+        )}
+        {finalizedTotal > 0 && (
+          <PaginationControls
+            page={finalizedPage}
+            totalCount={finalizedTotal}
+            onPageChange={setFinalizedPage}
+            pageSize={DEFAULT_PAGE_SIZE}
+          />
         )}
       </section>
 
