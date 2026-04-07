@@ -14,10 +14,10 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.views import APIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutSuggestion
 from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
@@ -2228,7 +2228,10 @@ class FactoryYoutubeDashboardView(APIView):
     def get(self, request, factory_id=None):
         from django.core.cache import cache
 
-        from .factory_youtube_dashboard import build_factory_youtube_dashboard, normalize_period_param
+        from .factory_youtube_dashboard import (
+            build_factory_youtube_dashboard,
+            normalize_period_param,
+        )
 
         fid = _parse_positive_int(factory_id)
         if not fid:

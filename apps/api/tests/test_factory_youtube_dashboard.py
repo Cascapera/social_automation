@@ -11,7 +11,6 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.brands.models import Brand, Factory
-from apps.jobs.models import Job, ScheduledPost
 
 User = get_user_model()
 

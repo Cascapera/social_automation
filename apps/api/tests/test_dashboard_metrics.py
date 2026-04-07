@@ -7,7 +7,12 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk, AutoCutSuggestion
+from apps.auto_cuts.models import (
+    AutoCutAnalysis,
+    AutoCutCorte,
+    AutoCutReadyChunk,
+    AutoCutSuggestion,
+)
 from apps.brands.models import Brand, Factory
 
 User = get_user_model()
@@ -105,7 +110,7 @@ class DashboardMetricsAggregationTests(TestCase):
         self.assertAlmostEqual(m["total_minutes_processed"], 2.0, places=3)
 
     def test_auto_fetch_visible_to_user(self):
-        a = AutoCutAnalysis.objects.create(
+        AutoCutAnalysis.objects.create(
             user=None,
             brand=self.brand,
             name="Auto",
