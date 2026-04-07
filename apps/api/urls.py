@@ -11,6 +11,7 @@ from .views import (
     BrandViewSet,
     BrandYouTubeCredentialViewSet,
     CutViewSet,
+    DashboardMetricsView,
     FactoryPostingScheduleViewSet,
     FactoryViewSet,
     JobViewSet,
@@ -42,6 +43,7 @@ router.register("factory-schedules", FactoryPostingScheduleViewSet, basename="fa
 router.register("posted-videos", PostedVideoLogViewSet, basename="posted-videos")
 
 urlpatterns = [
+    path("dashboard-metrics/", DashboardMetricsView.as_view(), name="dashboard-metrics"),
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("youtube/", include("apps.social.urls")),

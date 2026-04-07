@@ -121,6 +121,19 @@ export async function getFactories() {
   return apiRequest('/factories/')
 }
 
+/**
+ * Métricas reais do dashboard (AutoCut). Escopo: brand OU factory.
+ * Com ambos, a API valida que a brand pertence à factory.
+ */
+export async function getDashboardMetrics({ brandId = null, factoryId = null } = {}) {
+  const params = new URLSearchParams()
+  if (brandId) params.append('brand', String(brandId))
+  if (factoryId) params.append('factory', String(factoryId))
+  const qs = params.toString()
+  if (!qs) throw new Error('Informe brandId ou factoryId')
+  return apiRequest(`/dashboard-metrics/?${qs}`)
+}
+
 export async function getBrand(brandId) {
   return apiRequest(`/brands/${brandId}/`)
 }

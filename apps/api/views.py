@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -2160,3 +2161,42 @@ class AutoCutCorteViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+def _parse_positive_int(val):
+    if val is None or val == "":
+        return None
+    try:
+        i = int(val)
+        return i if i > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+class DashboardMetricsView(APIView):
+    """
+    Métricas reais do dashboard (AutoCut): vídeos processados, minutos, cortes finalizados.
+    Escopo: ?brand=ID ou ?factory=ID (obrigatório um deles). Com ambos, valida que a brand
+    pertence à factory e aplica escopo pela brand.
+    """
+
+    def get(self, request):
+        from .dashboard_metrics import compute_dashboard_metrics
+
+        brand_id = _parse_positive_int(request.query_params.get("brand"))
+        factory_id = _parse_positive_int(request.query_params.get("factory"))
+        if not brand_id and not factory_id:
+            return Response(
+                {"detail": "Informe o parâmetro brand ou factory."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if brand_id and factory_id:
+            if not Brand.objects.filter(pk=brand_id, factory_id=factory_id).exists():
+                return Response(
+                    {"detail": "Brand não pertence à factory indicada."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            factory_id = None
+
+        data = compute_dashboard_metrics(request.user, brand_id, factory_id)
+        return Response(data)
