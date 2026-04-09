@@ -11,6 +11,11 @@ import {
   getFactoryYoutubeSummary,
 } from '../api'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../components/PaginationControls'
+import {
+  loadYoutubeSummaryCache,
+  saveYoutubeSummaryCache,
+  isYoutubeSummaryCacheFresh,
+} from '../utils/youtubeSummaryCache'
 import './Dashboard.css'
 
 const PLATFORMS = [
@@ -145,14 +150,44 @@ export default function Dashboard() {
       return
     }
     let cancelled = false
-    setYtLoading(true)
+    const entry = loadYoutubeSummaryCache(factoryId, ytPeriod)
+
+    if (entry && isYoutubeSummaryCacheFresh(entry)) {
+      setYtData(entry.data)
+      setYtLoading(false)
+      setYtError('')
+      return () => {
+        cancelled = true
+      }
+    }
+
     setYtError('')
+    if (entry) {
+      setYtData(entry.data)
+    } else {
+      setYtData(null)
+    }
+    setYtLoading(true)
+
     getFactoryYoutubeSummary(factoryId, { period: ytPeriod })
       .then((data) => {
-        if (!cancelled) setYtData(data)
+        if (!cancelled) {
+          setYtData(data)
+          saveYoutubeSummaryCache(factoryId, ytPeriod, data)
+        }
       })
       .catch((e) => {
-        if (!cancelled) setYtError(e.message || 'Erro ao carregar YouTube (Upload Post)')
+        if (!cancelled) {
+          const fallback = loadYoutubeSummaryCache(factoryId, ytPeriod)
+          if (fallback?.data) {
+            setYtData(fallback.data)
+            setYtError(
+              `${e.message || 'Erro ao carregar YouTube (Upload Post)'} · Exibindo últimos dados salvos neste dispositivo.`,
+            )
+          } else {
+            setYtError(e.message || 'Erro ao carregar YouTube (Upload Post)')
+          }
+        }
       })
       .finally(() => {
         if (!cancelled) setYtLoading(false)
