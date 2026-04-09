@@ -5,6 +5,7 @@ import tempfile
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -107,35 +108,39 @@ class UploadPostReconciliationTests(TestCase):
         self.assertIn("upload_post_last_checked_at", post.external_ids)
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
-    def test_fresh_post_without_provider_ids_still_uses_normal_send_path(self, mock_up: MagicMock):
-        first_post = self._post_ytb(title="Primeiro")
-        second_post = self._post_ytb(title="Segundo")
-        mock_up.side_effect = [
-            UploadPostPublishError(
-                "timeout sem ids",
-                status_code=504,
-                retriable=False,
-                kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
-            ),
-            {
-                "success": True,
-                "request_id": "fresh-request-id",
-                "job_id": "fresh-job-id",
-                "data": {},
-            },
-        ]
+    def test_unknown_without_provider_ids_stores_client_request_id(self, mock_up: MagicMock):
+        post = self._post_ytb(title="Primeiro")
+        mock_up.side_effect = UploadPostPublishError(
+            "timeout sem ids",
+            status_code=504,
+            retriable=False,
+            kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+        )
 
         with patch("apps.social.publishers.get_publisher") as mock_native:
-            first_result = _run_post_to_platforms(first_post.id)
-            second_result = _run_post_to_platforms(second_post.id)
+            first_result = _run_post_to_platforms(post.id)
 
-        first_post.refresh_from_db()
-        second_post.refresh_from_db()
+        post.refresh_from_db()
         self.assertEqual(first_result.get("skipped"), "upload_post_unknown_awaiting_reconciliation")
-        self.assertEqual(second_result.get("status"), "DONE")
-        self.assertEqual(mock_up.call_count, 2)
-        self.assertEqual(second_post.external_ids.get("upload_post_request_id"), "fresh-request-id")
-        self.assertEqual(second_post.external_ids.get("upload_post_job_id"), "fresh-job-id")
+        self.assertTrue(str(post.external_ids.get("upload_post_request_id") or "").startswith("upreq-"))
+        self.assertNotIn("upload_post_no_provider_id_check_count", post.external_ids)
+        mock_up.assert_called_once()
+        mock_native.assert_not_called()
+
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_upload_post_passes_client_request_and_idempotency_keys(self, mock_up: MagicMock):
+        mock_up.return_value = {"success": True, "data": {}}
+        post = self._post_ytb(title="Com chaves")
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        call_kwargs = mock_up.call_args.kwargs
+        self.assertEqual(result.get("status"), "DONE")
+        self.assertTrue(call_kwargs["request_id"].startswith("upreq-"))
+        self.assertTrue(call_kwargs["idempotency_key"].startswith("upidem-"))
+        self.assertEqual(post.external_ids.get("upload_post_request_id"), call_kwargs["request_id"])
         mock_native.assert_not_called()
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
@@ -305,11 +310,59 @@ class UploadPostReconciliationTests(TestCase):
         self.assertEqual(out.decision, ReconcileDecision.WAIT)
 
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_reconcile_processing_waits(self, mock_status: MagicMock):
+        mock_status.return_value = ({"status": "processing", "results": []}, None)
+        ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
+        out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
+        self.assertEqual(out.decision, ReconcileDecision.WAIT)
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
     def test_reconcile_queued_treated_as_pending_wait(self, mock_status: MagicMock):
         mock_status.return_value = ({"status": "queued", "results": []}, None)
         ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
         out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
         self.assertEqual(out.decision, ReconcileDecision.WAIT)
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_reconcile_retryable_result_waits(self, mock_status: MagicMock):
+        mock_status.return_value = (
+            {
+                "status": "completed",
+                "results": [
+                    {
+                        "platform": "youtube",
+                        "status": "retryable",
+                        "success": False,
+                        "message": "automatic retry queued",
+                    }
+                ],
+            },
+            None,
+        )
+        ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
+        out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
+        self.assertEqual(out.decision, ReconcileDecision.WAIT)
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_reconcile_top_level_failed_allows_fallback(self, mock_status: MagicMock):
+        mock_status.return_value = (
+            {
+                "status": "failed",
+                "results": [
+                    {
+                        "platform": "youtube",
+                        "status": "failed",
+                        "success": False,
+                        "error": "provider rejected upload",
+                    }
+                ],
+            },
+            None,
+        )
+        ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
+        out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
+        self.assertEqual(out.decision, ReconcileDecision.CONFIRMED_FAILURE)
+        self.assertIn("provider rejected upload", out.detail)
 
     def test_native_invalid_grant_marks_external_ids_and_skips_publish(self):
         from apps.social.publishers.youtube import YouTubePublishError
@@ -367,3 +420,59 @@ class UploadPostPublisherTitleTests(TestCase):
         self.assertNotIn("\x01", title_field)
         self.assertNotIn("<", title_field)
         self.assertNotIn(">", title_field)
+
+    @override_settings(UPLOAD_POST_API_KEY="test-key")
+    @patch("apps.social.publishers.upload_post.requests.post")
+    def test_upload_post_sends_client_request_and_idempotency_identifiers(self, mock_post: MagicMock):
+        class _Resp:
+            status_code = 202
+            content = b"{}"
+
+            def json(self):
+                return {}
+
+        mock_post.return_value = _Resp()
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(b"video-bytes")
+            tmp_path = tmp.name
+        try:
+            result = publish_to_upload_post(
+                video_path=tmp_path,
+                brand_id=1,
+                platforms=["YOUTUBE"],
+                title="Titulo teste",
+                description_by_platform={"YOUTUBE": "desc"},
+                request_id="rq-client-1",
+                idempotency_key="idem-client-1",
+            )
+        finally:
+            os.unlink(tmp_path)
+
+        headers = mock_post.call_args.kwargs["headers"]
+        data = mock_post.call_args.kwargs["data"]
+        self.assertEqual(headers["X-Request-Id"], "rq-client-1")
+        self.assertEqual(headers["Idempotency-Key"], "idem-client-1")
+        self.assertEqual(headers["X-Idempotency-Key"], "idem-client-1")
+        self.assertIn(("request_id", "rq-client-1"), data)
+        self.assertEqual(result["request_id"], "rq-client-1")
+
+    @override_settings(UPLOAD_POST_API_KEY="test-key")
+    @patch("apps.social.publishers.upload_post.requests.post", side_effect=requests.Timeout("boom"))
+    def test_upload_post_timeout_keeps_client_request_id(self, _mock_post: MagicMock):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(b"video-bytes")
+            tmp_path = tmp.name
+        try:
+            with self.assertRaises(UploadPostPublishError) as ctx:
+                publish_to_upload_post(
+                    video_path=tmp_path,
+                    brand_id=1,
+                    platforms=["YOUTUBE"],
+                    title="Titulo teste",
+                    description_by_platform={"YOUTUBE": "desc"},
+                    request_id="rq-client-timeout",
+                )
+        finally:
+            os.unlink(tmp_path)
+
+        self.assertEqual(ctx.exception.request_id, "rq-client-timeout")

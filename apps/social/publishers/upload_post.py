@@ -1,4 +1,4 @@
-"""Publisher para Upload-Post.com (TikTok, X, Instagram)."""
+"""Publisher para Upload-Post.com (TikTok, X, Instagram, YouTube)."""
 import logging
 import os
 from datetime import timedelta
@@ -91,6 +91,8 @@ def publish_to_upload_post(
     description_by_platform: dict[str, str],
     scheduled_at=None,
     timezone_name: str = "America/Sao_Paulo",
+    request_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict:
     """
     Publica vídeo no Upload-Post para as plataformas indicadas.
@@ -98,6 +100,9 @@ def publish_to_upload_post(
     description_by_platform: {"TIKTOK": "...", "X": "...", "INSTAGRAM": "..."}
     scheduled_at: datetime para agendar (mesmo horário do YouTube). Se futuro, envia scheduled_date.
     timezone_name: IANA timezone (ex: America/Sao_Paulo).
+    request_id: identificador estável do cliente para reconciliação do status.
+    idempotency_key: chave estável para o Upload Post reaproveitar o mesmo job
+    em retries após timeout/queda de conexão.
     Retorna {"success": bool, "request_id": str?, "error": str?}
     """
     api_key = os.getenv("UPLOAD_POST_API_KEY") or getattr(settings, "UPLOAD_POST_API_KEY", "")
@@ -114,12 +119,19 @@ def publish_to_upload_post(
 
     user = f"brand_{brand_id}"
     safe_title = _sanitize_upload_post_title(title, fallback="Vídeo")
+    client_request_id = (request_id or "").strip() or None
+    provider_idempotency_key = (idempotency_key or "").strip() or None
     # Descrição: usa a primeira plataforma como base (Upload-Post pode aceitar uma só)
     description = description_by_platform.get(platforms[0], "") or safe_title
 
     scheduled_date_str = _format_scheduled_date(scheduled_at, timezone_name)
 
     headers = {"Authorization": f"Apikey {api_key}"}
+    if client_request_id:
+        headers["X-Request-Id"] = client_request_id
+    if provider_idempotency_key:
+        headers["Idempotency-Key"] = provider_idempotency_key
+        headers["X-Idempotency-Key"] = provider_idempotency_key
     try:
         with open(path, "rb") as f:
             files = {"video": (path.name, f, "video/mp4")}
@@ -129,6 +141,8 @@ def publish_to_upload_post(
                 ("description", (description or "")[:2000]),
                 ("timezone", timezone_name or "America/Sao_Paulo"),
             ]
+            if client_request_id:
+                form_data.append(("request_id", client_request_id))
             if scheduled_date_str:
                 form_data.append(("scheduled_date", scheduled_date_str))
                 logger.info(
@@ -154,6 +168,7 @@ def publish_to_upload_post(
             status_code=504,
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+            request_id=client_request_id,
         ) from e
     except (requests.ConnectionError, ConnectionResetError, BrokenPipeError, OSError) as e:
         logger.warning("[UploadPost] Erro de rede/conexão: %s", e)
@@ -161,6 +176,7 @@ def publish_to_upload_post(
             f"Erro de rede: {e}",
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+            request_id=client_request_id,
         ) from e
     except Exception as e:
         logger.exception("[UploadPost] Erro ao enviar: %s", e)
@@ -168,6 +184,7 @@ def publish_to_upload_post(
             f"Erro inesperado: {e}",
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+            request_id=client_request_id,
         ) from e
 
     err_body: dict = {}
@@ -175,7 +192,7 @@ def publish_to_upload_post(
         err_body = resp.json() if resp.content else {}
     except Exception:
         err_body = {}
-    partial_rid = str(err_body.get("request_id") or "").strip() or None
+    partial_rid = str(err_body.get("request_id") or client_request_id or "").strip() or None
     partial_jid = str(err_body.get("job_id") or "").strip() or None
 
     if resp.status_code >= 400:
@@ -208,7 +225,7 @@ def publish_to_upload_post(
     job_id_out = result.get("job_id") or partial_jid
     return {
         "success": True,
-        "request_id": result.get("request_id"),
+        "request_id": str(result.get("request_id") or client_request_id or "").strip() or None,
         "job_id": str(job_id_out).strip() if job_id_out else None,
         "data": result,
     }

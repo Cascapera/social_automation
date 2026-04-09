@@ -37,7 +37,9 @@ RECONCILIATION_STATE_PENDING = "pending"
 class UploadPostProviderStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
+    PROCESSING = "processing"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class ReconcileDecision(StrEnum):
@@ -61,6 +63,7 @@ class ReconcileOutcome:
 
 _YOUTUBE_VIDEO_ID_RE = re.compile(r"([a-zA-Z0-9_-]{11})(?=[\s?#&\"']|$)")
 _URL_LAST_SEGMENT_RE = re.compile(r"/([a-zA-Z0-9_-]{6,})(?:[?\s\"']|$)")
+_WAITING_RESULT_STATUSES = {"pending", "queued", "processing", "in_progress", "retryable"}
 
 
 def _parse_generic_id_from_message(message: str) -> str | None:
@@ -79,6 +82,82 @@ def _parse_youtube_video_id_from_message(message: str) -> str | None:
     m = _YOUTUBE_VIDEO_ID_RE.search(message)
     if m:
         return m.group(1)
+    return None
+
+
+def _normalize_provider_status(raw_status: Any) -> str:
+    raw = str(raw_status or "").strip().lower()
+    if raw == "queued":
+        return "pending"
+    return raw
+
+
+def _first_scalar_value(row: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                item_str = str(item or "").strip()
+                if item_str:
+                    return item_str
+            continue
+        value_str = str(value or "").strip()
+        if value_str:
+            return value_str
+    return ""
+
+
+def _platform_result_status(row: dict[str, Any] | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return _normalize_provider_status(row.get("status"))
+
+
+def _platform_result_detail(row: dict[str, Any] | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return _first_scalar_value(row, "error", "message", "post_url", "url")
+
+
+def _extract_youtube_video_id_from_row(row: dict[str, Any] | None) -> str | None:
+    if not isinstance(row, dict):
+        return None
+    direct_value = _first_scalar_value(row, "video_id", "publish_id", "post_id")
+    if direct_value:
+        vid = _parse_youtube_video_id_from_message(direct_value) or _parse_generic_id_from_message(direct_value)
+        if vid and len(vid) == 11:
+            return vid
+    for key in ("post_url", "url", "message", "error"):
+        value = _first_scalar_value(row, key)
+        if not value:
+            continue
+        vid = _parse_youtube_video_id_from_message(value) or _parse_generic_id_from_message(value)
+        if vid and len(vid) == 11:
+            return vid
+    return None
+
+
+def _extract_generic_platform_id_from_row(row: dict[str, Any] | None) -> str | None:
+    if not isinstance(row, dict):
+        return None
+    direct_value = _first_scalar_value(
+        row,
+        "publish_id",
+        "post_id",
+        "container_id",
+        "video_id",
+        "video_reel_id",
+        "video_urn",
+    )
+    if direct_value:
+        return direct_value
+    for key in ("post_url", "url", "message", "error"):
+        value = _first_scalar_value(row, key)
+        if not value:
+            continue
+        ext_id = _parse_generic_id_from_message(value)
+        if ext_id:
+            return ext_id
     return None
 
 
@@ -193,10 +272,7 @@ def reconcile_upload_post_status(
             next_delay_seconds=120,
         )
 
-    raw_status = str(data.get("status") or "").strip().lower()
-    # Algumas respostas usam "queued" como sinónimo de ainda não concluído.
-    if raw_status == "queued":
-        raw_status = "pending"
+    raw_status = _normalize_provider_status(data.get("status"))
     base_patch[EXT_UPLOAD_POST_LAST_STATUS] = raw_status or "unknown"
 
     try:
@@ -204,7 +280,11 @@ def reconcile_upload_post_status(
     except ValueError:
         normalized = None
 
-    if normalized in (UploadPostProviderStatus.PENDING, UploadPostProviderStatus.IN_PROGRESS):
+    if normalized in (
+        UploadPostProviderStatus.PENDING,
+        UploadPostProviderStatus.IN_PROGRESS,
+        UploadPostProviderStatus.PROCESSING,
+    ):
         return ReconcileOutcome(
             decision=ReconcileDecision.WAIT,
             detail=f"Provedor status={raw_status}",
@@ -255,9 +335,18 @@ def reconcile_upload_post_status(
                     raw_status_payload=data,
                 )
 
+            result_status = _platform_result_status(yt_row)
+            if result_status in _WAITING_RESULT_STATUSES:
+                return ReconcileOutcome(
+                    decision=ReconcileDecision.WAIT,
+                    detail=f"youtube status={result_status}",
+                    external_ids_patch=base_patch,
+                    next_delay_seconds=90,
+                    raw_status_payload=data,
+                )
             success = bool(yt_row.get("success"))
-            message = str(yt_row.get("message") or "")
-            vid = _parse_youtube_video_id_from_message(message)
+            message = _platform_result_detail(yt_row)
+            vid = _extract_youtube_video_id_from_row(yt_row)
             if not vid and rid:
                 pa, _ = fetch_post_analytics(rid, platform="youtube")
                 if isinstance(pa, dict):
@@ -301,6 +390,39 @@ def reconcile_upload_post_status(
         return ReconcileOutcome(
             decision=ReconcileDecision.CONFIRMED_SUCCESS,
             detail="completed (sem verificação YouTube)",
+            external_ids_patch={
+                **base_patch,
+                EXT_UPLOAD_POST_RECONCILIATION_STATE: "",
+            },
+            raw_status_payload=data,
+        )
+
+    if normalized == UploadPostProviderStatus.FAILED:
+        yt_row = _youtube_result_row(data)
+        if needs_youtube and yt_row:
+            result_status = _platform_result_status(yt_row)
+            if result_status in _WAITING_RESULT_STATUSES:
+                return ReconcileOutcome(
+                    decision=ReconcileDecision.WAIT,
+                    detail=f"youtube status={result_status}",
+                    external_ids_patch=base_patch,
+                    next_delay_seconds=120,
+                    raw_status_payload=data,
+                )
+            message = _platform_result_detail(yt_row) or "status agregado=failed"
+            return ReconcileOutcome(
+                decision=ReconcileDecision.CONFIRMED_FAILURE,
+                detail=f"youtube falhou no Upload Post: {message[:300]}",
+                external_ids_patch={
+                    **base_patch,
+                    EXT_UPLOAD_POST_LAST_STATUS: "failed_youtube",
+                    EXT_UPLOAD_POST_RECONCILIATION_STATE: "",
+                },
+                raw_status_payload=data,
+            )
+        return ReconcileOutcome(
+            decision=ReconcileDecision.CONFIRMED_FAILURE,
+            detail="Upload Post status=failed",
             external_ids_patch={
                 **base_patch,
                 EXT_UPLOAD_POST_RECONCILIATION_STATE: "",
@@ -361,15 +483,14 @@ def merge_completed_upload_status_into_external_ids(
         row = rows_by_plat.get(key) or {}
         if not row.get("success"):
             continue
-        msg = str(row.get("message") or "")
         logical = logical_platform_for_upload_post(u, post_platforms)
         if u == "YOUTUBE":
-            vid = _parse_youtube_video_id_from_message(msg) or _parse_generic_id_from_message(msg)
+            vid = _extract_youtube_video_id_from_row(row)
             if vid and len(vid) == 11:
                 youtube_vid = vid
                 external_ids[logical] = vid
         else:
-            ext_id = _parse_generic_id_from_message(msg)
+            ext_id = _extract_generic_platform_id_from_row(row)
             if ext_id:
                 external_ids[logical] = ext_id
 

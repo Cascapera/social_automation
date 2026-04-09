@@ -791,6 +791,32 @@ def _build_publish_idempotency_key(
     return f"publish:{platform}:{target_identity}:{upload_fingerprint}"
 
 
+def _build_upload_post_provider_keys(
+    upload_post_platforms: list[str],
+    upload_post_keys_by_platform: dict[str, str],
+) -> tuple[str, str]:
+    """
+    Gera os identificadores estáveis enviados ao Upload Post.
+
+    Reaproveita as chaves de idempotência locais já calculadas para que retries após
+    timeout/rede consultem o mesmo job remoto em vez de abrir uma nova postagem.
+    """
+    normalized_platforms = sorted(
+        {
+            str(platform).strip().upper()
+            for platform in (upload_post_platforms or [])
+            if str(platform).strip()
+        }
+    )
+    seed_parts = [
+        upload_post_keys_by_platform.get(platform) or platform
+        for platform in normalized_platforms
+    ]
+    seed = "|".join(seed_parts)
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"upreq-{digest[:32]}", f"upidem-{digest}"
+
+
 def _apply_idempotency_result(external_ids: dict, result_payload: dict | None) -> None:
     payload = result_payload or {}
     for key in payload.get("remove_external_ids") or []:
@@ -2109,6 +2135,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 for key, value in desc_by_platform.items()
                 if key in upload_post_platforms_to_execute
             }
+            upload_post_request_id, upload_post_provider_idempotency_key = _build_upload_post_provider_keys(
+                upload_post_platforms_to_execute,
+                upload_post_keys_by_platform,
+            )
             upload_post_result_keys = {
                 "TIKTOK": "tiktok",
                 "X": "x",
@@ -2125,6 +2155,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         description_by_platform=desc_by_platform,
                         scheduled_at=post.scheduled_at,
                         timezone_name=tz_name,
+                        request_id=upload_post_request_id,
+                        idempotency_key=upload_post_provider_idempotency_key,
                     )
                     if result.get("success"):
                         up_success = True
@@ -2136,6 +2168,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         ):
                             external_ids.pop(key, None)
                         request_id = str(result.get("request_id") or "").strip()
+                        if not request_id:
+                            request_id = upload_post_request_id
                         job_id_out = str(result.get("job_id") or "").strip()
                         logger.info(
                             "[UploadPost] Posting confirmation received (id %s)",
@@ -2183,7 +2217,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     last_up_error = str(e)
                     if e.kind == UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION:
                         upload_post_unknown_results_total.inc()
-                        rid = e.request_id or external_ids.get("upload_post_request_id")
+                        rid = (
+                            e.request_id
+                            or external_ids.get("upload_post_request_id")
+                            or upload_post_request_id
+                        )
                         jid = e.job_id or external_ids.get("upload_post_job_id")
                         unknown_delay = _upload_post_end_of_queue_delay_seconds(
                             post,
