@@ -100,6 +100,79 @@ class UploadPostReconciliationTests(TestCase):
         self.assertEqual(post.external_ids.get("upload_post_job_id"), "jid-1")
         self.assertIn("upload_post_last_checked_at", post.external_ids)
 
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_fresh_post_without_provider_ids_still_uses_normal_send_path(self, mock_up: MagicMock):
+        first_post = self._post_ytb(title="Primeiro")
+        second_post = self._post_ytb(title="Segundo")
+        mock_up.side_effect = [
+            UploadPostPublishError(
+                "timeout sem ids",
+                status_code=504,
+                retriable=False,
+                kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+            ),
+            {
+                "success": True,
+                "request_id": "fresh-request-id",
+                "job_id": "fresh-job-id",
+                "data": {},
+            },
+        ]
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            first_result = _run_post_to_platforms(first_post.id)
+            second_result = _run_post_to_platforms(second_post.id)
+
+        first_post.refresh_from_db()
+        second_post.refresh_from_db()
+        self.assertEqual(first_result.get("skipped"), "upload_post_unknown_awaiting_reconciliation")
+        self.assertEqual(second_result.get("status"), "DONE")
+        self.assertEqual(mock_up.call_count, 2)
+        self.assertEqual(second_post.external_ids.get("upload_post_request_id"), "fresh-request-id")
+        self.assertEqual(second_post.external_ids.get("upload_post_job_id"), "fresh-job-id")
+        mock_native.assert_not_called()
+
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_pending_reconciliation_without_provider_ids_does_not_send_normally(self, mock_up: MagicMock):
+        post = self._post_ytb(
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+            }
+        )
+
+        result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(result.get("skipped"), "upload_post_no_provider_id")
+        self.assertEqual(post.status, "PENDING")
+        mock_up.assert_not_called()
+
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_pending_reconciliation_with_provider_ids_triggers_reconcile_first(
+        self,
+        mock_status: MagicMock,
+        mock_up: MagicMock,
+    ):
+        mock_status.return_value = (
+            {"status": "in_progress", "results": []},
+            None,
+        )
+        post = self._post_ytb(
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-xyz",
+            }
+        )
+
+        result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(result.get("skipped"), "upload_post_reconciliation_wait")
+        self.assertEqual(post.status, "PENDING")
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
     def test_reconcile_completed_marks_success(self, mock_status: MagicMock):
         mock_status.return_value = (

@@ -806,6 +806,20 @@ def _build_idempotency_retryable_error(platform: str) -> dict:
     }
 
 
+def _upload_post_pending_idempotency_without_provider_ids(result_payload: dict | None) -> bool:
+    """
+    Unknown/pending Upload Post sem ``request_id``/``job_id`` não é um replay reutilizável para
+    um novo ScheduledPost. Esse caso deve voltar ao fluxo normal de envio.
+    """
+    payload = result_payload or {}
+    if not bool(payload.get("upload_post_reconciliation_pending")):
+        return False
+    ext = (payload.get("external_ids") or {}) if isinstance(payload, dict) else {}
+    request_id = str(ext.get("upload_post_request_id") or "").strip()
+    job_id = str(ext.get("upload_post_job_id") or "").strip()
+    return not request_id and not job_id
+
+
 def _try_pending_upload_post_reconciliation(
     post: ScheduledPost,
     brand: Brand | None,
@@ -1884,6 +1898,45 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             )
             if acquire_result.outcome == "succeeded":
                 existing_payload = get_existing_idempotency_result(idempotency_key) or acquire_result.record.result_payload
+                if _upload_post_pending_idempotency_without_provider_ids(existing_payload):
+                    logger.warning(
+                        "[UploadPost] Ignoring stale pending idempotency replay without provider ids "
+                        "(post_id=%s logical_platform=%s)",
+                        post.id,
+                        logical_platform,
+                    )
+                    mark_idempotency_failed(
+                        key=idempotency_key,
+                        error_message=(
+                            "Upload Post pending replay sem request_id/job_id não é reutilizável "
+                            "para um novo ScheduledPost"
+                        ),
+                        result_payload=existing_payload,
+                    )
+                    reacquire_result = acquire_idempotency_key(
+                        key=idempotency_key,
+                        operation_name="publish",
+                        aggregate_type="ScheduledPost",
+                        aggregate_id=post.id,
+                    )
+                    if reacquire_result.outcome == "in_progress":
+                        retryable_errors.append(_build_idempotency_retryable_error(logical_platform))
+                        continue
+                    if reacquire_result.outcome == "succeeded":
+                        existing_payload = (
+                            get_existing_idempotency_result(idempotency_key) or reacquire_result.record.result_payload
+                        )
+                        _apply_idempotency_result(external_ids, existing_payload)
+                        existing_external_ids = (existing_payload or {}).get("external_ids") or {}
+                        if logical_platform in YOUTUBE_PLATFORM_CODES and (
+                            existing_external_ids.get("youtube_via_upload_post")
+                            or existing_external_ids.get(logical_platform)
+                        ):
+                            upload_post_youtube_ok = True
+                        continue
+                    upload_post_keys_by_platform[up_platform] = idempotency_key
+                    upload_post_platforms_to_execute.append(up_platform)
+                    continue
                 _apply_idempotency_result(external_ids, existing_payload)
                 existing_external_ids = (existing_payload or {}).get("external_ids") or {}
                 if logical_platform in YOUTUBE_PLATFORM_CODES and (
@@ -1993,14 +2046,28 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                             if k in external_ids
                         }
                         for idempotency_key in upload_post_keys_by_platform.values():
-                            mark_idempotency_success(
-                                key=idempotency_key,
-                                result_payload={
-                                    "publisher": "upload_post",
-                                    "upload_post_reconciliation_pending": True,
-                                    "external_ids": idem_snapshot,
-                                },
-                            )
+                            if rid or jid:
+                                mark_idempotency_success(
+                                    key=idempotency_key,
+                                    result_payload={
+                                        "publisher": "upload_post",
+                                        "upload_post_reconciliation_pending": True,
+                                        "external_ids": idem_snapshot,
+                                    },
+                                )
+                            else:
+                                mark_idempotency_failed(
+                                    key=idempotency_key,
+                                    error_message=(
+                                        "Upload Post retornou resultado incerto sem request_id/job_id; "
+                                        "não reutilizar este estado para posts novos"
+                                    ),
+                                    result_payload={
+                                        "publisher": "upload_post",
+                                        "upload_post_reconciliation_pending": True,
+                                        "external_ids": idem_snapshot,
+                                    },
+                                )
                         log_event(
                             logger,
                             event="upload_post_unknown_result",
