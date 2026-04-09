@@ -208,7 +208,36 @@ class UploadPostReconciliationTests(TestCase):
         mock_native.assert_not_called()
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
-    def test_no_provider_id_after_controlled_resend_fails_instead_of_looping(self, mock_up: MagicMock):
+    def test_no_provider_id_after_controlled_resend_falls_back_to_native_youtube(self, mock_up: MagicMock):
+        post = self._post_ytb(
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_resend_count": 1,
+            }
+        )
+        native = MagicMock()
+        native.publish = MagicMock(return_value={"video_id": "native-video-id"})
+
+        with patch("apps.social.publishers.get_publisher", return_value=native):
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(result.get("status"), "DONE")
+        self.assertEqual(post.status, "DONE")
+        self.assertEqual(post.external_ids.get("YTB"), "native-video-id")
+        self.assertNotIn("upload_post_reconciliation_state", post.external_ids)
+        self.assertNotIn("upload_post_youtube_terminal_failure", post.external_ids)
+        self.assertNotIn("upload_post_skip_after_unknown_no_id", post.external_ids)
+        mock_up.assert_not_called()
+        native.publish.assert_called_once()
+
+    @patch("apps.social.tasks._native_youtube_fallback_available", return_value=False)
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_no_provider_id_after_controlled_resend_fails_without_native_fallback(
+        self,
+        mock_up: MagicMock,
+        _mock_native_available: MagicMock,
+    ):
         post = self._post_ytb(
             external_ids={
                 "upload_post_reconciliation_state": "pending",

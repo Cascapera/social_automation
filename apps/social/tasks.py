@@ -849,6 +849,17 @@ def _upload_post_end_of_queue_delay_seconds(
     return max(int(minimum_seconds or 0), UPLOAD_INTERVAL_SECONDS * max(1, pending_count))
 
 
+def _native_youtube_fallback_available(post: ScheduledPost, brand: Brand | None) -> bool:
+    if not brand:
+        return False
+    yt_platform = _first_youtube_platform(post.platforms or [])
+    if not yt_platform:
+        return False
+    if _resolve_social_account_for_platform(post, brand, yt_platform):
+        return True
+    return bool(_list_ordered_youtube_credentials(brand))
+
+
 def _try_pending_upload_post_reconciliation(
     post: ScheduledPost,
     brand: Brand | None,
@@ -938,6 +949,29 @@ def _try_pending_upload_post_reconciliation(
             detail="no_request_id_or_job_id",
         )
         if resend_count >= UPLOAD_POST_MAX_CONTROLLED_RESENDS:
+            if _native_youtube_fallback_available(post, brand):
+                ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+                ext.pop("upload_post_no_provider_id_check_count", None)
+                ext["upload_post_last_status"] = "no_provider_id_fallback_native"
+                ext["upload_post_last_checked_at"] = timezone.now().isoformat()
+                ext["upload_post_youtube_terminal_failure"] = True
+                ext["upload_post_skip_after_unknown_no_id"] = True
+                post.external_ids = ext
+                post.error = (
+                    "Upload Post: resultado incerto sem request_id/job_id após novo envio controlado. "
+                    "Tentando fallback nativo do YouTube."
+                )
+                post.save(update_fields=["external_ids", "error"])
+                log_event(
+                    logger,
+                    event="upload_post_fallback_allowed",
+                    correlation_id=correlation_id,
+                    scheduled_post_id=post.id,
+                    brand_id=brand_id,
+                    platform="youtube",
+                    reason="unknown_no_provider_id_after_resend",
+                )
+                return None
             ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
             ext.pop("upload_post_no_provider_id_check_count", None)
             ext["upload_post_last_status"] = "no_provider_id_terminal"
@@ -1896,6 +1930,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     warnings = []
     retryable_errors = []
     external_ids = dict(post.external_ids or {})
+    if external_ids.get("upload_post_skip_after_unknown_no_id"):
+        upload_post_platforms = []
     if external_ids.get("upload_post_youtube_terminal_failure"):
         upload_post_platforms = [p for p in upload_post_platforms if p != "YOUTUBE"]
     upload_fingerprint = ""
@@ -2498,6 +2534,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     if video_id:
                         external_ids[platform] = video_id
                         external_ids.pop("youtube_via_upload_post", None)
+                        external_ids.pop("upload_post_youtube_terminal_failure", None)
+                        external_ids.pop("upload_post_skip_after_unknown_no_id", None)
                     warning = (result or {}).get("warning")
                     if warning:
                         warnings.append(f"{platform}: {warning}")
@@ -2529,7 +2567,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                                 if video_id
                                 else {}
                             ),
-                            "remove_external_ids": ["youtube_via_upload_post"],
+                            "remove_external_ids": [
+                                "youtube_via_upload_post",
+                                "upload_post_youtube_terminal_failure",
+                                "upload_post_skip_after_unknown_no_id",
+                            ],
                             "provider_response": result or {},
                         },
                     )
@@ -2636,6 +2678,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 external_ids[platform] = video_id
                 if platform in ("YT", "YTB"):
                     external_ids.pop("youtube_via_upload_post", None)
+                    external_ids.pop("upload_post_youtube_terminal_failure", None)
+                    external_ids.pop("upload_post_skip_after_unknown_no_id", None)
             warning = (result or {}).get("warning")
             if warning:
                 warnings.append(f"{platform}: {warning}")
@@ -2649,7 +2693,15 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         if video_id
                         else {}
                     ),
-                    "remove_external_ids": ["youtube_via_upload_post"] if platform in ("YT", "YTB") else [],
+                    "remove_external_ids": (
+                        [
+                            "youtube_via_upload_post",
+                            "upload_post_youtube_terminal_failure",
+                            "upload_post_skip_after_unknown_no_id",
+                        ]
+                        if platform in ("YT", "YTB")
+                        else []
+                    ),
                     "provider_response": result or {},
                 },
             )
