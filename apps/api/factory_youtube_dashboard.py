@@ -14,6 +14,8 @@ Comportamento com dados parciais: cada brand pode falhar sem derrubar o payload;
 from __future__ import annotations
 
 import logging
+import os
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -34,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 CACHE_TTL_SECONDS = 600
 ALLOWED_PERIODS = frozenset({"last_day", "last_week", "last_month", "last_3months", "last_year"})
+# Pausa extra entre marcas (além do throttle no cliente HTTP) para não disparar 429 em fábricas grandes.
+_BRAND_EXTRA_DELAY_SEC = float(os.getenv("UPLOAD_POST_FACTORY_BRAND_DELAY_SEC", "0.15"))
 
 
 def upload_post_profile_username(brand_id: int) -> str:
@@ -126,52 +130,63 @@ def _collect_one_brand(
         "videos_published": None,
         "per_day_views": {},
         "youtube_profile_block": None,
+        "period_metrics_fallback": False,
     }
 
-    prof, err_prof = fetch_profile_platforms_analytics(uname, platforms="youtube")
-    if err_prof:
-        line["error"] = err_prof
-    else:
-        yt_block = (prof or {}).get("youtube") if isinstance(prof, dict) else None
-        if isinstance(yt_block, dict):
-            line["youtube_profile_block"] = yt_block
-            sub = yt_block.get("followers")
-            if sub is None:
-                sub = yt_block.get("subscribers")
-            line["subscribers"] = _opt_int(sub)
+    try:
+        prof, err_prof = fetch_profile_platforms_analytics(uname, platforms="youtube")
+        if err_prof:
+            line["error"] = err_prof
+        else:
+            yt_block = (prof or {}).get("youtube") if isinstance(prof, dict) else None
+            if isinstance(yt_block, dict):
+                line["youtube_profile_block"] = yt_block
+                sub = yt_block.get("followers")
+                if sub is None:
+                    sub = yt_block.get("subscribers")
+                line["subscribers"] = _opt_int(sub)
 
-    metrics_str = "views,likes,comments,shares,video_count"
-    total, err_tot = fetch_total_impressions(
-        uname,
-        period=period,
-        platform="youtube",
-        metrics=metrics_str,
-        breakdown=True,
-    )
-    if err_tot:
-        if not line["error"]:
-            line["error"] = err_tot
-        elif line["error"] != err_tot:
-            line["error"] = f"{line['error']}; período: {err_tot}"
-    elif isinstance(total, dict):
-        m = total.get("metrics") or {}
-        if isinstance(m, dict):
-            line["views"] = _opt_int(m.get("views"))
-            line["likes"] = _opt_int(m.get("likes"))
-            line["comments"] = _opt_int(m.get("comments"))
-            line["shares"] = _opt_int(m.get("shares"))
-            line["videos_published"] = _opt_int(m.get("video_count"))
-        pd = total.get("per_day")
-        if isinstance(pd, dict):
-            # pode ser mapa direto data -> views ou aninhado; normaliza somando valores numéricos por data
-            flat: dict[str, int] = {}
-            for k, v in pd.items():
-                if isinstance(v, dict):
-                    for dk, dv in v.items():
-                        flat[str(dk)] = flat.get(str(dk), 0) + _safe_int(dv)
-                else:
-                    flat[str(k)] = flat.get(str(k), 0) + _safe_int(v)
-            line["per_day_views"] = flat
+        metrics_str = "views,likes,comments,shares,video_count"
+        total, err_tot = fetch_total_impressions(
+            uname,
+            period=period,
+            platform="youtube",
+            metrics=metrics_str,
+            breakdown=True,
+        )
+        if err_tot:
+            if not line["error"]:
+                line["error"] = err_tot
+            elif line["error"] != err_tot:
+                line["error"] = f"{line['error']}; período: {err_tot}"
+        elif isinstance(total, dict):
+            fallback = bool(total.pop("_upload_post_fallback_no_metrics", False))
+            line["period_metrics_fallback"] = fallback
+
+            m = total.get("metrics")
+            if isinstance(m, dict) and m:
+                line["views"] = _opt_int(m.get("views"))
+                line["likes"] = _opt_int(m.get("likes"))
+                line["comments"] = _opt_int(m.get("comments"))
+                line["shares"] = _opt_int(m.get("shares"))
+                line["videos_published"] = _opt_int(m.get("video_count"))
+            elif fallback or not (isinstance(m, dict) and m):
+                # Fallback sem ``metrics``: agrega único campo total_impressions (views no período)
+                line["views"] = _opt_int(total.get("total_impressions"))
+
+            pd = total.get("per_day")
+            if isinstance(pd, dict):
+                flat: dict[str, int] = {}
+                for k, v in pd.items():
+                    if isinstance(v, dict):
+                        for dk, dv in v.items():
+                            flat[str(dk)] = flat.get(str(dk), 0) + _safe_int(dv)
+                    else:
+                        flat[str(k)] = flat.get(str(k), 0) + _safe_int(v)
+                line["per_day_views"] = flat
+    except Exception as e:
+        logger.warning("[FactoryYouTubeDashboard] brand_id=%s: %s", brand.id, e, exc_info=True)
+        line["error"] = str(e)[:500]
 
     return line
 
@@ -217,7 +232,7 @@ def _build_top_posts(
     if not to_fetch:
         return [], []
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futs = [pool.submit(_fetch_one, p) for p in to_fetch]
         for fut in as_completed(futs):
             post, rid, data, err = fut.result()
@@ -337,7 +352,9 @@ def build_factory_youtube_dashboard(factory_id: int, *, period: str | None = Non
     sum_subs = 0
     sum_videos = 0
 
-    for b in brands:
+    for i, b in enumerate(brands):
+        if i > 0 and _BRAND_EXTRA_DELAY_SEC > 0:
+            time.sleep(_BRAND_EXTRA_DELAY_SEC)
         row = _collect_one_brand(b, period=period_norm)
         # cópia segura para resposta (sem objeto ORM)
         clean = {k: v for k, v in row.items() if k != "youtube_profile_block"}
