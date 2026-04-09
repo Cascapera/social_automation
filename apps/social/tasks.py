@@ -592,6 +592,9 @@ THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer after last video before thumbnail uplo
 UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
 UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
 UPLOAD_POST_RECONCILE_BASE_DELAY_SEC = 90
+UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC = 120
+UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND = 1
+UPLOAD_POST_MAX_CONTROLLED_RESENDS = 1
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
 YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
@@ -820,6 +823,32 @@ def _upload_post_pending_idempotency_without_provider_ids(result_payload: dict |
     return not request_id and not job_id
 
 
+def _upload_post_end_of_queue_delay_seconds(
+    post: ScheduledPost,
+    brand: Brand | None,
+    *,
+    minimum_seconds: int,
+) -> int:
+    """
+    Reagenda para o fim aproximado da fila da brand, em vez de reconsultar imediatamente.
+    """
+    if not brand:
+        return max(int(minimum_seconds or 0), UPLOAD_INTERVAL_SECONDS)
+    brand_scope = (
+        Q(factory_schedule__brand_id=brand.id)
+        | Q(job__brand_id=brand.id)
+        | Q(auto_cut_corte__analysis__brand_id=brand.id)
+    )
+    pending_count = (
+        ScheduledPost.objects.filter(status="PENDING")
+        .filter(brand_scope)
+        .exclude(id=post.id)
+        .distinct()
+        .count()
+    )
+    return max(int(minimum_seconds or 0), UPLOAD_INTERVAL_SECONDS * max(1, pending_count))
+
+
 def _try_pending_upload_post_reconciliation(
     post: ScheduledPost,
     brand: Brand | None,
@@ -852,7 +881,11 @@ def _try_pending_upload_post_reconciliation(
 
     outcome = reconcile_upload_post_status(external_ids=ext, needs_youtube=needs_youtube)
     apply_external_ids_patch(ext, outcome.external_ids_patch)
-    next_delay = max(UPLOAD_POST_RECONCILE_BASE_DELAY_SEC, int(outcome.next_delay_seconds or 90))
+    next_delay = _upload_post_end_of_queue_delay_seconds(
+        post,
+        brand,
+        minimum_seconds=max(UPLOAD_POST_RECONCILE_BASE_DELAY_SEC, int(outcome.next_delay_seconds or 90)),
+    )
 
     log_event(
         logger,
@@ -894,6 +927,9 @@ def _try_pending_upload_post_reconciliation(
         return {"status": post.status, "skipped": "upload_post_reconciliation_wait"}
 
     if outcome.decision == ReconcileDecision.NO_PROVIDER_ID:
+        no_provider_id_checks = int(ext.get("upload_post_no_provider_id_check_count", 0) or 0) + 1
+        resend_count = int(ext.get("upload_post_resend_count", 0) or 0)
+        ext["upload_post_no_provider_id_check_count"] = no_provider_id_checks
         log_event(
             logger,
             event="upload_post_unknown_result",
@@ -901,10 +937,81 @@ def _try_pending_upload_post_reconciliation(
             scheduled_post_id=post.id,
             detail="no_request_id_or_job_id",
         )
+        if resend_count >= UPLOAD_POST_MAX_CONTROLLED_RESENDS:
+            ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+            ext.pop("upload_post_no_provider_id_check_count", None)
+            ext["upload_post_last_status"] = "no_provider_id_terminal"
+            ext["upload_post_last_checked_at"] = timezone.now().isoformat()
+            post.status = "FAILED"
+            post.external_ids = ext
+            post.error = (
+                "Upload Post: resultado incerto sem request_id/job_id mesmo após novo envio controlado. "
+                "Vídeo devolvido ao inventário para evitar loop infinito."
+            )
+            post.save(update_fields=["status", "external_ids", "error"])
+            try:
+                FactoryPostingAttemptLog.objects.create(
+                    posting_schedule=post.factory_schedule,
+                    attempt_number=current_attempt,
+                    started_at=timezone.now(),
+                    finished_at=timezone.now(),
+                    result="ERROR",
+                    error_message=post.error,
+                    provider_response={"external_ids": post.external_ids or {}},
+                )
+            except Exception:
+                pass
+            publish_failures_total.inc()
+            log_event(
+                logger,
+                event="upload_post_reconciliation_abandoned",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                brand_id=brand_id,
+                platform="youtube",
+                resend_count=resend_count,
+            )
+            log_event(
+                logger,
+                event="publish_finished",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                brand_id=brand_id,
+                platform="youtube",
+                status="error",
+                duration_ms=_timer.elapsed_ms(),
+                attempt_number=current_attempt,
+                error=post.error,
+            )
+            _sync_factory_posting_schedule(post)
+            return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
+
+        if no_provider_id_checks > UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND:
+            ext["upload_post_resend_count"] = resend_count + 1
+            ext["upload_post_no_provider_id_check_count"] = 0
+            ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+            ext.pop("upload_post_last_status", None)
+            ext.pop("upload_post_last_checked_at", None)
+            post.external_ids = ext
+            post.error = (
+                "Upload Post: sem request_id/job_id após confirmação tardia; iniciando novo envio controlado."
+            )
+            post.scheduled_at = timezone.now()
+            post.save(update_fields=["external_ids", "scheduled_at", "error"])
+            log_event(
+                logger,
+                event="upload_post_reconciliation_resend_started",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                brand_id=brand_id,
+                platform="youtube",
+                resend_count=ext["upload_post_resend_count"],
+            )
+            return None
         post.external_ids = ext
         post.error = (
             "Upload Post: resultado incerto e sem request_id/job_id persistido; "
-            f"nova tentativa de verificação em {next_delay}s."
+            f"nova tentativa de verificação no fim da fila em {next_delay}s."
         )
         post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
         post.save(update_fields=["external_ids", "scheduled_at", "error"])
@@ -923,6 +1030,8 @@ def _try_pending_upload_post_reconciliation(
 
     if outcome.decision == ReconcileDecision.CONFIRMED_FAILURE:
         upload_post_reconciliation_completed_total.inc()
+        ext.pop("upload_post_no_provider_id_check_count", None)
+        ext.pop("upload_post_resend_count", None)
         ext["upload_post_youtube_terminal_failure"] = True
         ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
         post.external_ids = ext
@@ -940,6 +1049,8 @@ def _try_pending_upload_post_reconciliation(
         upload_post_reconciliation_completed_total.inc()
         if not up_list:
             ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+            ext.pop("upload_post_no_provider_id_check_count", None)
+            ext.pop("upload_post_resend_count", None)
             post.external_ids = ext
             post.save(update_fields=["external_ids"])
             return None
@@ -957,6 +1068,8 @@ def _try_pending_upload_post_reconciliation(
                 ext[yp] = outcome.youtube_video_id
         ext["youtube_via_upload_post"] = True
         ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+        ext.pop("upload_post_no_provider_id_check_count", None)
+        ext.pop("upload_post_resend_count", None)
 
         if up_list and not all_filled:
             ext[EXT_UPLOAD_POST_RECONCILIATION_STATE] = RECONCILIATION_STATE_PENDING
@@ -1167,6 +1280,8 @@ def check_scheduled_posts_task():
     post_ids = {post.id for post in due_posts}
     for post in future_candidates:
         if _platforms_are_youtube_only(post.platforms):
+            if ((post.external_ids or {}).get("upload_post_reconciliation_state") or "") == "pending":
+                continue
             post_ids.add(post.id)
     post_ids_list = sorted(post_ids)
     if not post_ids_list:
@@ -1977,6 +2092,13 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     )
                     if result.get("success"):
                         up_success = True
+                        for key in (
+                            "upload_post_reconciliation_state",
+                            "upload_post_no_provider_id_check_count",
+                            "upload_post_resend_count",
+                            "upload_post_youtube_terminal_failure",
+                        ):
+                            external_ids.pop(key, None)
                         request_id = str(result.get("request_id") or "").strip()
                         job_id_out = str(result.get("job_id") or "").strip()
                         logger.info(
@@ -2027,6 +2149,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         upload_post_unknown_results_total.inc()
                         rid = e.request_id or external_ids.get("upload_post_request_id")
                         jid = e.job_id or external_ids.get("upload_post_job_id")
+                        unknown_delay = _upload_post_end_of_queue_delay_seconds(
+                            post,
+                            brand,
+                            minimum_seconds=UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC,
+                        )
                         if rid:
                             external_ids["upload_post_request_id"] = str(rid)
                         if jid:
@@ -2034,6 +2161,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         external_ids["upload_post_reconciliation_state"] = "pending"
                         external_ids["upload_post_last_status"] = f"unknown_http_{e.status_code or 'na'}"
                         external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
+                        if not rid and not jid:
+                            external_ids["upload_post_no_provider_id_check_count"] = 0
                         idem_snapshot = {
                             k: external_ids[k]
                             for k in (
@@ -2042,6 +2171,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                                 "upload_post_reconciliation_state",
                                 "upload_post_last_status",
                                 "upload_post_last_checked_at",
+                                "upload_post_no_provider_id_check_count",
+                                "upload_post_resend_count",
                             )
                             if k in external_ids
                         }
@@ -2084,13 +2215,13 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                             event="upload_post_reconciliation_scheduled",
                             correlation_id=correlation_id,
                             scheduled_post_id=post.id,
-                            delay_seconds=120,
+                            delay_seconds=unknown_delay,
                         )
                         post.status = "PENDING"
-                        post.scheduled_at = timezone.now() + timedelta(seconds=120)
+                        post.scheduled_at = timezone.now() + timedelta(seconds=unknown_delay)
                         post.error = (
                             "Upload Post: resultado incerto (timeout/rede/código intermediário). "
-                            "Confirmando status no provedor antes de fallback nativo."
+                            "Confirmando status no provedor no fim da fila antes de nova ação."
                         )
                         post.upload_fingerprint = upload_fingerprint
                         post.external_ids = external_ids

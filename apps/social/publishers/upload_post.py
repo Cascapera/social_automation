@@ -27,6 +27,16 @@ PLATFORM_MAP = {
 }
 
 
+def _sanitize_upload_post_title(title: str, fallback: str = "Vídeo") -> str:
+    """
+    Reusa a mesma sanitização do publisher nativo do YouTube para evitar divergência
+    em títulos que funcionam na API nativa mas falham ao passar pelo Upload Post.
+    """
+    from apps.social.publishers.youtube import _sanitize_youtube_title
+
+    return _sanitize_youtube_title(title, fallback=fallback)
+
+
 def _format_scheduled_date(scheduled_at, tz_name: str) -> str | None:
     """
     Formata scheduled_at para Upload-Post.
@@ -103,8 +113,9 @@ def publish_to_upload_post(
         raise UploadPostPublishError(f"Vídeo não encontrado: {path}", retriable=False)
 
     user = f"brand_{brand_id}"
+    safe_title = _sanitize_upload_post_title(title, fallback="Vídeo")
     # Descrição: usa a primeira plataforma como base (Upload-Post pode aceitar uma só)
-    description = description_by_platform.get(platforms[0], "") or title
+    description = description_by_platform.get(platforms[0], "") or safe_title
 
     scheduled_date_str = _format_scheduled_date(scheduled_at, timezone_name)
 
@@ -114,7 +125,7 @@ def publish_to_upload_post(
             files = {"video": (path.name, f, "video/mp4")}
             form_data = [
                 ("user", user),
-                ("title", (title or "Vídeo")[:200]),
+                ("title", safe_title),
                 ("description", (description or "")[:2000]),
                 ("timezone", timezone_name or "America/Sao_Paulo"),
             ]
