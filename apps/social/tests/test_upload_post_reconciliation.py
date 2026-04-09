@@ -13,7 +13,6 @@ from apps.jobs.models import Job, RenderOutput, ScheduledPost
 from apps.social.publishers.upload_post import UploadPostErrorKind, UploadPostPublishError
 from apps.social.services.upload_post_reconciliation import (
     ReconcileDecision,
-    ReconcileOutcome,
     reconcile_upload_post_status,
 )
 from apps.social.tasks import _run_post_to_platforms
@@ -146,6 +145,13 @@ class UploadPostReconciliationTests(TestCase):
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
     def test_reconcile_pending_waits(self, mock_status: MagicMock):
         mock_status.return_value = ({"status": "in_progress", "results": []}, None)
+        ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
+        out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
+        self.assertEqual(out.decision, ReconcileDecision.WAIT)
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_reconcile_queued_treated_as_pending_wait(self, mock_status: MagicMock):
+        mock_status.return_value = ({"status": "queued", "results": []}, None)
         ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
         out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
         self.assertEqual(out.decision, ReconcileDecision.WAIT)

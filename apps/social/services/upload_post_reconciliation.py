@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import requests
@@ -34,13 +34,13 @@ EXT_UPLOAD_POST_RECONCILIATION_STATE = "upload_post_reconciliation_state"
 RECONCILIATION_STATE_PENDING = "pending"
 
 
-class UploadPostProviderStatus(str, Enum):
+class UploadPostProviderStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
 
 
-class ReconcileDecision(str, Enum):
+class ReconcileDecision(StrEnum):
     """Resultado lógico após consultar o provedor."""
 
     WAIT = "wait"  # ainda processando ou erro transitório na consulta
@@ -194,6 +194,9 @@ def reconcile_upload_post_status(
         )
 
     raw_status = str(data.get("status") or "").strip().lower()
+    # Algumas respostas usam "queued" como sinónimo de ainda não concluído.
+    if raw_status == "queued":
+        raw_status = "pending"
     base_patch[EXT_UPLOAD_POST_LAST_STATUS] = raw_status or "unknown"
 
     try:
@@ -385,14 +388,3 @@ def apply_external_ids_patch(external_ids: dict[str, Any], patch: dict[str, Any]
             external_ids.pop(k, None)
             continue
         external_ids[k] = v
-
-
-def maybe_should_fallback_to_native_youtube(
-    *,
-    reconcile_outcome: ReconcileOutcome,
-    upload_post_had_youtube: bool,
-) -> bool:
-    """Fallback nativo só após falha confirmada no Upload Post para o fluxo YouTube."""
-    if not upload_post_had_youtube:
-        return True
-    return reconcile_outcome.decision == ReconcileDecision.CONFIRMED_FAILURE
