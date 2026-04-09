@@ -297,6 +297,10 @@
   font-size: 0.86rem;
 }
 
+.weekly-summary-hint {
+  margin: 0.15rem 0 0.75rem;
+}
+
 .weekly-grid-wrapper {
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -363,6 +367,12 @@
   background: rgba(96, 165, 250, 0.12);
 }
 
+.weekly-tag.posting {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.14);
+}
+
 .weekly-tag.posted {
   color: #22c55e;
   border-color: rgba(34, 197, 94, 0.45);
@@ -374,6 +384,18 @@
   border-color: rgba(22, 163, 74, 0.75);
   background: rgba(22, 163, 74, 0.2);
   font-weight: 700;
+}
+
+.weekly-tag.failed {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.14);
+}
+
+.weekly-tag.skipped {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.45);
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .collapse-toggle {

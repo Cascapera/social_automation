@@ -16,6 +16,7 @@ import {
   triggerBrandImmediateSchedule,
 } from '../api'
 import { PlatformIcon } from '../components/PlatformIcons'
+import { buildFactoryWeeklyMatrix } from '../utils/factoryWeeklySchedule'
 import './Agendamento.css'
 
 const PLATFORMS = [
@@ -482,88 +483,7 @@ export default function Agendamento() {
     setExpandedPostedDates((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
-  function getCurrentWeekRange() {
-    const now = new Date()
-    const start = new Date(now)
-    const day = start.getDay()
-    start.setDate(start.getDate() - day)
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(start)
-    end.setDate(end.getDate() + 7)
-    return { start, end }
-  }
-
-  function buildFactoryWeeklyMatrix(items) {
-    const { start, end } = getCurrentWeekRange()
-    const filtered = (items || []).filter((item) => {
-      const dt = new Date(item.scheduled_at)
-      return dt >= start && dt < end
-    })
-    const hours = Array.from({ length: 24 }, (_, h) => h)
-    const weekDays = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start)
-      d.setDate(start.getDate() + i)
-      return d
-    })
-    const brandNameById = (brands || []).reduce((acc, b) => {
-      acc[String(b.id)] = b.name
-      return acc
-    }, {})
-    const matrix = {}
-    for (const h of hours) {
-      matrix[h] = {}
-      for (let d = 0; d < 7; d++) matrix[h][d] = []
-    }
-
-    const summaryByBrand = {}
-    filtered.forEach((item) => {
-      const dt = new Date(item.scheduled_at)
-      const dayIndex = dt.getDay()
-      const hour = dt.getHours()
-      const brandName = brandNameById[String(item.brand)] || `Canal #${item.brand}`
-      const status = item.status || 'PLANNED'
-      const isPosted = status === 'DONE'
-      const isPostedOnChannel = Boolean(item.posted_on_channel)
-      const postedAt = item.posted_at ? new Date(item.posted_at) : null
-      const postedTimeLabel = postedAt
-        ? postedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        : ''
-      const tag = {
-        id: item.id,
-        brandId: item.brand,
-        brandName,
-        status,
-        isPosted,
-        isPostedOnChannel,
-        postedTimeLabel,
-        externalVideoId: item.external_video_id || '',
-        timeLabel: dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }
-      matrix[hour][dayIndex].push(tag)
-      if (!summaryByBrand[item.brand]) {
-        summaryByBrand[item.brand] = {
-          brandId: item.brand,
-          brandName,
-          posted: 0,
-          scheduled: 0,
-          total: 0,
-        }
-      }
-      summaryByBrand[item.brand].total += 1
-      if (isPosted) summaryByBrand[item.brand].posted += 1
-      else summaryByBrand[item.brand].scheduled += 1
-    })
-
-    const channelSummary = Object.values(summaryByBrand).sort((a, b) => {
-      if (a.total !== b.total) return a.total - b.total
-      if (a.posted !== b.posted) return a.posted - b.posted
-      return a.brandName.localeCompare(b.brandName)
-    })
-
-    return { start, weekDays, hours, matrix, channelSummary }
-  }
-
-  const factoryWeek = buildFactoryWeeklyMatrix(factoryWeekSchedules)
+  const factoryWeek = buildFactoryWeeklyMatrix(factoryWeekSchedules, brands)
 
   return (
     <div className="agendamento">
@@ -695,7 +615,10 @@ export default function Agendamento() {
           </div>
 
           <div className="weekly-summary">
-            <h3>Resumo por canal (menor volume primeiro)</h3>
+            <h3>Resumo por canal (menor pendência real primeiro)</h3>
+            <p className="form-hint weekly-summary-hint">
+              Pendentes contam apenas itens em planejamento ou postagem. Falhos e ignorados aparecem separados.
+            </p>
             {factoryWeek.channelSummary.length === 0 ? (
               <p className="empty-msg">Nenhum agendamento da semana atual para esta factory.</p>
             ) : (
@@ -703,9 +626,11 @@ export default function Agendamento() {
                 {factoryWeek.channelSummary.map((s) => (
                   <div key={s.brandId} className="weekly-summary-item">
                     <strong>{s.brandName}</strong>
-                    <span>Total: {s.total}</span>
-                    <span>Agendados: {s.scheduled}</span>
+                    <span>Pendentes: {s.pending}</span>
                     <span>Postados: {s.posted}</span>
+                    {s.failed > 0 && <span>Falhos: {s.failed}</span>}
+                    {s.skipped > 0 && <span>Ignorados: {s.skipped}</span>}
+                    <span>Total: {s.total}</span>
                   </div>
                 ))}
               </div>
@@ -732,27 +657,10 @@ export default function Agendamento() {
                         {tags.map((tag) => (
                           <span
                             key={tag.id}
-                            className={`weekly-tag ${
-                              tag.isPostedOnChannel
-                                ? 'posted-channel'
-                                : tag.isPosted
-                                  ? 'posted'
-                                  : 'scheduled'
-                            }`}
-                            title={`${tag.brandName} - ${tag.timeLabel} - ${
-                              tag.isPostedOnChannel
-                                ? `Postado no canal${tag.postedTimeLabel ? ` às ${tag.postedTimeLabel}` : ''}`
-                                : tag.isPosted
-                                  ? 'Postado (interno)'
-                                  : 'Agendado'
-                            }${tag.externalVideoId ? ` - ID: ${tag.externalVideoId}` : ''}`}
+                            className={`weekly-tag ${tag.tagClass}`}
+                            title={`${tag.brandName} - ${tag.timeLabel} - ${tag.titleStatusLabel}${tag.externalVideoId ? ` - ID: ${tag.externalVideoId}` : ''}`}
                           >
-                            {tag.brandName} {tag.timeLabel}{' '}
-                            {tag.isPostedOnChannel
-                              ? `Postado no canal${tag.postedTimeLabel ? ` ${tag.postedTimeLabel}` : ''}`
-                              : tag.isPosted
-                                ? 'Postado'
-                                : 'Agendado'}
+                            {tag.brandName} {tag.timeLabel} {tag.statusLabel}
                           </span>
                         ))}
                       </div>
