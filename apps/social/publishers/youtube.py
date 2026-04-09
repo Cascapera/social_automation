@@ -265,6 +265,8 @@ class YouTubePublisher(BasePublisher):
             message = str(e)
         retriable = bool(status_code in RETRIABLE_STATUS_CODES or status_code == 429)
         retry_after_seconds = None
+        if reason == "invalidGrant" or reason == "invalid_grant" or "invalid_grant" in (message or "").lower():
+            retriable = False
         if reason == "quotaExceeded":
             retriable = True
             retry_after_seconds = self._seconds_until_youtube_quota_reset()

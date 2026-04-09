@@ -22,6 +22,9 @@ from apps.common.metrics import (
     publish_reconciliation_duration_ms,
     publish_reconciliation_failures_total,
     publish_reconciliation_runs_total,
+    upload_post_reconciliation_completed_total,
+    upload_post_reconciliation_runs_total,
+    upload_post_unknown_results_total,
 )
 from apps.common.task_observability import instrument_celery_task
 from apps.jobs.logging_utils import (
@@ -588,6 +591,7 @@ UPLOAD_INTERVAL_SECONDS = 60  # One video per minute on send queue
 THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer after last video before thumbnail uploads
 UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
 UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
+UPLOAD_POST_RECONCILE_BASE_DELAY_SEC = 90
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
 YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
@@ -800,6 +804,213 @@ def _build_idempotency_retryable_error(platform: str) -> dict:
         "retry_after_seconds": IDEMPOTENCY_IN_PROGRESS_DELAY_SEC,
         "reason": "idempotencyInProgress",
     }
+
+
+def _try_pending_upload_post_reconciliation(
+    post: ScheduledPost,
+    brand: Brand | None,
+    *,
+    correlation_id: str,
+    brand_id: int | None,
+    current_attempt: int,
+    _timer: Timer,
+) -> dict | None:
+    """
+    Quando o post está PENDING com upload_post_reconciliation_state=pending, consulta o Upload Post
+    antes de tomar POSTING e reenviar vídeo.
+    """
+    from apps.social.services.upload_post_reconciliation import (
+        EXT_UPLOAD_POST_RECONCILIATION_STATE,
+        RECONCILIATION_STATE_PENDING,
+        ReconcileDecision,
+        apply_external_ids_patch,
+        merge_completed_upload_status_into_external_ids,
+        reconcile_upload_post_status,
+    )
+
+    ext = dict(post.external_ids or {})
+    if ext.get(EXT_UPLOAD_POST_RECONCILIATION_STATE) != RECONCILIATION_STATE_PENDING:
+        return None
+
+    upload_post_reconciliation_runs_total.inc()
+    up_list = _build_upload_post_platforms(brand, post) if brand else []
+    needs_youtube = "YOUTUBE" in up_list
+
+    outcome = reconcile_upload_post_status(external_ids=ext, needs_youtube=needs_youtube)
+    apply_external_ids_patch(ext, outcome.external_ids_patch)
+    next_delay = max(UPLOAD_POST_RECONCILE_BASE_DELAY_SEC, int(outcome.next_delay_seconds or 90))
+
+    log_event(
+        logger,
+        event="upload_post_reconciliation_completed",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=brand_id,
+        platform="youtube",
+        status=getattr(outcome.decision, "value", str(outcome.decision)),
+        detail=(outcome.detail or "")[:400],
+    )
+
+    if outcome.decision == ReconcileDecision.WAIT:
+        log_event(
+            logger,
+            event="upload_post_fallback_blocked",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            reason="provider_status_pending_or_transient",
+        )
+        post.external_ids = ext
+        post.error = (
+            f"Upload Post: confirmação pendente. {(outcome.detail or '')[:220]} "
+            f"Nova verificação em {next_delay}s."
+        )
+        post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
+        post.save(update_fields=["external_ids", "scheduled_at", "error"])
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=brand_id,
+            platform="youtube",
+            status="waiting",
+            duration_ms=_timer.elapsed_ms(),
+            attempt_number=current_attempt,
+        )
+        return {"status": post.status, "skipped": "upload_post_reconciliation_wait"}
+
+    if outcome.decision == ReconcileDecision.NO_PROVIDER_ID:
+        log_event(
+            logger,
+            event="upload_post_unknown_result",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            detail="no_request_id_or_job_id",
+        )
+        post.external_ids = ext
+        post.error = (
+            "Upload Post: resultado incerto e sem request_id/job_id persistido; "
+            f"nova tentativa de verificação em {next_delay}s."
+        )
+        post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
+        post.save(update_fields=["external_ids", "scheduled_at", "error"])
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=brand_id,
+            platform="youtube",
+            status="waiting",
+            duration_ms=_timer.elapsed_ms(),
+            attempt_number=current_attempt,
+        )
+        return {"status": post.status, "skipped": "upload_post_no_provider_id"}
+
+    if outcome.decision == ReconcileDecision.CONFIRMED_FAILURE:
+        upload_post_reconciliation_completed_total.inc()
+        ext["upload_post_youtube_terminal_failure"] = True
+        ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+        post.external_ids = ext
+        post.save(update_fields=["external_ids"])
+        log_event(
+            logger,
+            event="upload_post_fallback_allowed",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            reason="upload_post_confirmed_failure",
+        )
+        return None
+
+    if outcome.decision == ReconcileDecision.CONFIRMED_SUCCESS:
+        upload_post_reconciliation_completed_total.inc()
+        if not up_list:
+            ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+            post.external_ids = ext
+            post.save(update_fields=["external_ids"])
+            return None
+        raw = outcome.raw_status_payload or {}
+        post_pf = list(post.platforms or [])
+        _, all_filled = merge_completed_upload_status_into_external_ids(
+            raw,
+            post_platforms=post_pf,
+            upload_post_platforms=up_list,
+            external_ids=ext,
+        )
+        if outcome.youtube_video_id and needs_youtube:
+            yp = _first_youtube_platform(post_pf)
+            if yp:
+                ext[yp] = outcome.youtube_video_id
+        ext["youtube_via_upload_post"] = True
+        ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
+
+        if up_list and not all_filled:
+            ext[EXT_UPLOAD_POST_RECONCILIATION_STATE] = RECONCILIATION_STATE_PENDING
+            post.external_ids = ext
+            post.error = "Upload Post: processamento concluído parcialmente; aguardando IDs de todas as plataformas."
+            post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
+            post.save(update_fields=["external_ids", "scheduled_at", "error"])
+            log_event(
+                logger,
+                event="upload_post_fallback_blocked",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                reason="partial_platform_ids",
+            )
+            return {"status": post.status, "skipped": "upload_post_partial_ids"}
+
+        post.external_ids = ext
+        post.status = "DONE"
+        post.retry_count = 0
+        post.youtube_quota_retry_count = 0
+        post.posted_at = timezone.now()
+        post.error = ""
+        post.save(
+            update_fields=[
+                "status",
+                "error",
+                "posted_at",
+                "external_ids",
+                "retry_count",
+                "youtube_quota_retry_count",
+            ]
+        )
+        try:
+            FactoryPostingAttemptLog.objects.create(
+                posting_schedule=post.factory_schedule,
+                attempt_number=current_attempt,
+                started_at=timezone.now(),
+                finished_at=timezone.now(),
+                result="SUCCESS",
+                error_message="",
+                provider_response={"external_ids": post.external_ids or {}},
+            )
+        except Exception:
+            pass
+        publish_duration_ms.observe(_timer.elapsed_ms())
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=brand_id,
+            platform="youtube",
+            status="success",
+            duration_ms=_timer.elapsed_ms(),
+            attempt_number=current_attempt,
+            external_video_id=str(
+                (post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or ""
+            ),
+        )
+        _sync_factory_posting_schedule(post)
+        return {
+            "status": "DONE",
+            "errors": [],
+            "error": "",
+            "external_ids": post.external_ids or {},
+        }
+
+    return None
 
 
 @shared_task
@@ -1458,11 +1669,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
 
     correlation_id = resolve_scheduled_post_correlation_id(post)
 
-    claimed = ScheduledPost.objects.filter(id=post.id, status="PENDING").update(status="POSTING")
-    if not claimed:
+    if post.status != "PENDING":
         return {"skipped": "status não é PENDING"}
+
     current_attempt = int(post.retry_count or 0) + 1
-    post.status = "POSTING"
     brand = None
     video_path = ""
     job_obj = post.job
@@ -1507,6 +1717,22 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         brand = target_brand
 
     _brand_id = brand.id if brand else None
+
+    early_reconcile = _try_pending_upload_post_reconciliation(
+        post,
+        brand,
+        correlation_id=correlation_id,
+        brand_id=_brand_id,
+        current_attempt=current_attempt,
+        _timer=_timer,
+    )
+    if early_reconcile is not None:
+        return early_reconcile
+
+    claimed = ScheduledPost.objects.filter(id=post.id, status="PENDING").update(status="POSTING")
+    if not claimed:
+        return {"skipped": "status não é PENDING"}
+    post.status = "POSTING"
     # Upload Post targets (TIKTOK, X, INSTAGRAM, YOUTUBE) — same list later passed to the API.
     upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
     _post_platforms = list(post.platforms or [])
@@ -1541,6 +1767,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     warnings = []
     retryable_errors = []
     external_ids = dict(post.external_ids or {})
+    if external_ids.get("upload_post_youtube_terminal_failure"):
+        upload_post_platforms = [p for p in upload_post_platforms if p != "YOUTUBE"]
     upload_fingerprint = ""
     social_account_changed = False
     upload_post_youtube_ok = bool(external_ids.get("youtube_via_upload_post"))
@@ -1616,6 +1844,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         import time as _time
 
         from apps.social.publishers.upload_post import (
+            UploadPostErrorKind,
             UploadPostPublishError,
             publish_to_upload_post,
         )
@@ -1696,12 +1925,17 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     if result.get("success"):
                         up_success = True
                         request_id = str(result.get("request_id") or "").strip()
+                        job_id_out = str(result.get("job_id") or "").strip()
                         logger.info(
                             "[UploadPost] Posting confirmation received (id %s)",
                             request_id or "ok",
                         )
                         if request_id:
                             external_ids["upload_post_request_id"] = request_id
+                        if job_id_out:
+                            external_ids["upload_post_job_id"] = job_id_out
+                        external_ids["upload_post_last_status"] = "submitted"
+                        external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
                         up_results = (result.get("data") or {}).get("results") or {}
                         for up_platform in upload_post_platforms_to_execute:
                             logical_platform = _logical_upload_post_platform(post, up_platform)
@@ -1709,6 +1943,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                             external_ids_delta: dict[str, str | bool] = {}
                             if request_id:
                                 external_ids_delta["upload_post_request_id"] = request_id
+                            if job_id_out:
+                                external_ids_delta["upload_post_job_id"] = job_id_out
                             if plat_data.get("success"):
                                 vid = plat_data.get("video_id") or plat_data.get("publish_id")
                                 if vid:
@@ -1734,7 +1970,90 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     last_up_error = str(result.get("error") or "error")
                 except UploadPostPublishError as e:
                     last_up_error = str(e)
-                    if attempt < UPLOAD_POST_RETRY_COUNT:
+                    if e.kind == UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION:
+                        upload_post_unknown_results_total.inc()
+                        rid = e.request_id or external_ids.get("upload_post_request_id")
+                        jid = e.job_id or external_ids.get("upload_post_job_id")
+                        if rid:
+                            external_ids["upload_post_request_id"] = str(rid)
+                        if jid:
+                            external_ids["upload_post_job_id"] = str(jid)
+                        external_ids["upload_post_reconciliation_state"] = "pending"
+                        external_ids["upload_post_last_status"] = f"unknown_http_{e.status_code or 'na'}"
+                        external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
+                        idem_snapshot = {
+                            k: external_ids[k]
+                            for k in (
+                                "upload_post_request_id",
+                                "upload_post_job_id",
+                                "upload_post_reconciliation_state",
+                                "upload_post_last_status",
+                                "upload_post_last_checked_at",
+                            )
+                            if k in external_ids
+                        }
+                        for idempotency_key in upload_post_keys_by_platform.values():
+                            mark_idempotency_success(
+                                key=idempotency_key,
+                                result_payload={
+                                    "publisher": "upload_post",
+                                    "upload_post_reconciliation_pending": True,
+                                    "external_ids": idem_snapshot,
+                                },
+                            )
+                        log_event(
+                            logger,
+                            event="upload_post_unknown_result",
+                            correlation_id=correlation_id,
+                            scheduled_post_id=post.id,
+                            brand_id=_brand_id,
+                            platform="youtube",
+                            status="unknown",
+                            status_code=e.status_code,
+                            detail=last_up_error[:400],
+                        )
+                        log_event(
+                            logger,
+                            event="upload_post_reconciliation_scheduled",
+                            correlation_id=correlation_id,
+                            scheduled_post_id=post.id,
+                            delay_seconds=120,
+                        )
+                        post.status = "PENDING"
+                        post.scheduled_at = timezone.now() + timedelta(seconds=120)
+                        post.error = (
+                            "Upload Post: resultado incerto (timeout/rede/código intermediário). "
+                            "Confirmando status no provedor antes de fallback nativo."
+                        )
+                        post.upload_fingerprint = upload_fingerprint
+                        post.external_ids = external_ids
+                        post.save(
+                            update_fields=[
+                                "status",
+                                "scheduled_at",
+                                "error",
+                                "upload_fingerprint",
+                                "external_ids",
+                            ]
+                        )
+                        _sync_factory_posting_schedule(post)
+                        log_event(
+                            logger,
+                            event="publish_finished",
+                            correlation_id=correlation_id,
+                            scheduled_post_id=post.id,
+                            brand_id=_brand_id,
+                            platform="youtube",
+                            status="waiting",
+                            duration_ms=_timer.elapsed_ms(),
+                            attempt_number=current_attempt,
+                        )
+                        return {
+                            "status": post.status,
+                            "skipped": "upload_post_unknown_awaiting_reconciliation",
+                            "external_ids": external_ids,
+                        }
+                    if attempt < UPLOAD_POST_RETRY_COUNT and e.retriable:
                         logger.warning(
                             "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
                             attempt + 1,
@@ -1744,9 +2063,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         )
                         _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
                     else:
-                        logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                        logger.warning(
+                            "[UploadPost] Failed after %s attempts: %s",
+                            UPLOAD_POST_RETRY_COUNT + 1,
+                            last_up_error,
+                        )
                         if "YOUTUBE" in upload_post_platforms_to_execute:
-                            logger.info("[UploadPost] Falling back to YouTube API")
+                            log_event(
+                                logger,
+                                event="upload_post_fallback_allowed",
+                                correlation_id=correlation_id,
+                                scheduled_post_id=post.id,
+                                reason="confirmed_upload_post_failure",
+                            )
+                            logger.info("[UploadPost] Falling back to YouTube API (confirmed failure)")
                 except Exception as e:
                     last_up_error = str(e)
                     if attempt < UPLOAD_POST_RETRY_COUNT:
@@ -1759,9 +2089,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         )
                         _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
                     else:
-                        logger.warning("[UploadPost] Failed after %s attempts: %s", UPLOAD_POST_RETRY_COUNT + 1, last_up_error)
+                        logger.warning(
+                            "[UploadPost] Failed after %s attempts: %s",
+                            UPLOAD_POST_RETRY_COUNT + 1,
+                            last_up_error,
+                        )
                         if "YOUTUBE" in upload_post_platforms_to_execute:
-                            logger.info("[UploadPost] Falling back to YouTube API")
+                            log_event(
+                                logger,
+                                event="upload_post_fallback_allowed",
+                                correlation_id=correlation_id,
+                                scheduled_post_id=post.id,
+                                reason="confirmed_upload_post_exception",
+                            )
+                            logger.info("[UploadPost] Falling back to YouTube API (confirmed failure)")
 
         if not up_success and last_up_error:
             for idempotency_key in upload_post_keys_by_platform.values():
@@ -1811,6 +2152,37 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             else:
                 errors.append(f"{platform}: nenhuma conta conectada")
                 continue
+        if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and external_ids.get(
+            "upload_post_reconciliation_state"
+        ) == "pending":
+            log_event(
+                logger,
+                event="upload_post_fallback_blocked",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                reason="reconciliation_pending_native_skipped",
+            )
+            retryable_errors.append(
+                {
+                    "message": f"{platform}: aguardando confirmação do Upload Post antes do fallback nativo",
+                    "retry_after_seconds": 120,
+                    "reason": "uploadPostReconciliationPending",
+                }
+            )
+            continue
+        if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and external_ids.get("youtube_native_invalid_grant"):
+            msg_ig = "YouTube OAuth inválido (invalid_grant); atualize a credencial."
+            errors.append(f"{platform}: {msg_ig}")
+            log_event(
+                logger,
+                event="youtube_native_invalid_grant",
+                correlation_id=correlation_id,
+                scheduled_post_id=post.id,
+                brand_id=_brand_id,
+                platform="youtube",
+                status="credential_failure",
+            )
+            continue
         # SimpleNamespace is only for publishing with BrandYouTubeCredential; FK requires BrandSocialAccount.
         if not post.social_account_id and isinstance(account, BrandSocialAccount):
             post.social_account = account
@@ -1986,6 +2358,22 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         retriable=is_retriable,
                         youtube_credential_id=yt_cred.id,
                     )
+                    if "invalid_grant" in msg.lower() or str(reason).lower() in (
+                        "invalidgrant",
+                        "invalid_grant",
+                    ):
+                        external_ids["youtube_native_invalid_grant"] = True
+                        external_ids["youtube_native_invalid_grant_at"] = timezone.now().isoformat()
+                        log_event(
+                            logger,
+                            event="youtube_native_invalid_grant",
+                            correlation_id=correlation_id,
+                            scheduled_post_id=post.id,
+                            brand_id=_brand_id,
+                            platform="youtube",
+                            status="credential_failure",
+                            youtube_credential_id=yt_cred.id,
+                        )
                     if not is_retriable and (
                         "sem tokens" in msg.lower()
                         or "oauth do youtube não configurado" in msg.lower()
@@ -2068,6 +2456,23 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 },
             )
         except Exception as e:
+            msg = str(e)
+            reason = str(getattr(e, "reason", "") or "").strip()
+            if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and (
+                "invalid_grant" in msg.lower()
+                or str(reason).lower() in ("invalidgrant", "invalid_grant")
+            ):
+                external_ids["youtube_native_invalid_grant"] = True
+                external_ids["youtube_native_invalid_grant_at"] = timezone.now().isoformat()
+                log_event(
+                    logger,
+                    event="youtube_native_invalid_grant",
+                    correlation_id=correlation_id,
+                    scheduled_post_id=post.id,
+                    brand_id=_brand_id,
+                    platform="youtube",
+                    status="credential_failure",
+                )
             if getattr(e, "retriable", False):
                 mark_idempotency_failed(key=idempotency_key, error_message=f"{platform}: {e}")
                 retryable_errors.append(
@@ -2098,6 +2503,10 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             (item.get("reason") or "").strip() == "idempotencyInProgress"
             for item in retryable_errors
         )
+        has_upload_post_reconciliation_pending = any(
+            (item.get("reason") or "").strip() == "uploadPostReconciliationPending"
+            for item in retryable_errors
+        )
         if has_quota_exceeded:
             q = int(getattr(post, "youtube_quota_retry_count", 0) or 0) + 1
             post.youtube_quota_retry_count = q
@@ -2110,6 +2519,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             or has_upload_limit_exceeded
             or has_min_interval_not_reached
             or has_idempotency_in_progress
+            or has_upload_post_reconciliation_pending
         )
         # One retry for upload/title errors; token/quota errors do not consume attempt
         if not errors and not should_not_consume_attempt and next_retry > 1:
@@ -2129,6 +2539,8 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 delay = max([60] + requested_delays)
             elif has_idempotency_in_progress:
                 delay = max([IDEMPOTENCY_IN_PROGRESS_DELAY_SEC] + requested_delays)
+            elif has_upload_post_reconciliation_pending:
+                delay = max([120] + requested_delays)
             else:
                 delay = max([300] + requested_delays)
             msg = " ; ".join([item["message"] for item in retryable_errors])
@@ -2152,6 +2564,11 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 post.error = (
                     "Publicação aguardando conclusão de uma execução idempotente já iniciada. "
                     f"Nova tentativa automática em {delay}s. {msg}"
+                )
+            elif has_upload_post_reconciliation_pending:
+                post.error = (
+                    "Aguardando reconciliação do Upload Post antes do fallback nativo. "
+                    f"Nova tentativa em {delay}s. {msg}"
                 )
             else:
                 post.error = f"Falha temporária. 1 tentativa automática em {delay}s. Reagende manualmente se persistir. {msg}"

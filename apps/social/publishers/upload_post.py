@@ -11,6 +11,13 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+
+class UploadPostErrorKind:
+    """Classificação de erro para decisão de fallback/reconciliação."""
+
+    CONFIRMED_FAILURE = "confirmed_failure"
+    UNKNOWN_PENDING_CONFIRMATION = "unknown_pending_confirmation"
+
 UPLOAD_POST_API_URL = "https://api.upload-post.com/api/upload"
 PLATFORM_MAP = {
     "TIKTOK": "tiktok",
@@ -48,10 +55,22 @@ def _format_scheduled_date(scheduled_at, tz_name: str) -> str | None:
 class UploadPostPublishError(Exception):
     """Erro ao publicar via Upload-Post."""
 
-    def __init__(self, message: str, status_code: int | None = None, retriable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        retriable: bool = False,
+        *,
+        kind: str = UploadPostErrorKind.CONFIRMED_FAILURE,
+        request_id: str | None = None,
+        job_id: str | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.retriable = retriable
+        self.kind = kind
+        self.request_id = (request_id or "").strip() or None
+        self.job_id = (job_id or "").strip() or None
 
 
 def publish_to_upload_post(
@@ -117,25 +136,68 @@ def publish_to_upload_post(
                 data=form_data,
                 timeout=300,
             )
+    except requests.Timeout as e:
+        logger.warning("[UploadPost] Timeout ao enviar: %s", e)
+        raise UploadPostPublishError(
+            f"Timeout: {e}",
+            status_code=504,
+            retriable=False,
+            kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+        ) from e
+    except (requests.ConnectionError, ConnectionResetError, BrokenPipeError, OSError) as e:
+        logger.warning("[UploadPost] Erro de rede/conexão: %s", e)
+        raise UploadPostPublishError(
+            f"Erro de rede: {e}",
+            retriable=False,
+            kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+        ) from e
     except Exception as e:
         logger.exception("[UploadPost] Erro ao enviar: %s", e)
-        raise UploadPostPublishError(f"Erro de rede: {e}", retriable=True) from e
+        raise UploadPostPublishError(
+            f"Erro inesperado: {e}",
+            retriable=False,
+            kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+        ) from e
+
+    err_body: dict = {}
+    try:
+        err_body = resp.json() if resp.content else {}
+    except Exception:
+        err_body = {}
+    partial_rid = str(err_body.get("request_id") or "").strip() or None
+    partial_jid = str(err_body.get("job_id") or "").strip() or None
 
     if resp.status_code >= 400:
         err_msg = resp.text or f"HTTP {resp.status_code}"
         logger.warning("[UploadPost] Falha %s: %s", resp.status_code, err_msg[:500])
+        if resp.status_code in (499, 504):
+            raise UploadPostPublishError(
+                err_msg[:500],
+                status_code=resp.status_code,
+                retriable=False,
+                kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
+                request_id=partial_rid,
+                job_id=partial_jid,
+            )
         raise UploadPostPublishError(
             err_msg[:500],
             status_code=resp.status_code,
-            retriable=resp.status_code in (500, 502, 503, 504),
+            retriable=resp.status_code in (500, 502, 503),
+            kind=UploadPostErrorKind.CONFIRMED_FAILURE,
+            request_id=partial_rid,
+            job_id=partial_jid,
         )
 
     try:
         result = resp.json()
     except Exception:
         result = {}
+    if not isinstance(result, dict):
+        result = {}
+    job_id_out = result.get("job_id") or partial_jid
     return {
         "success": True,
         "request_id": result.get("request_id"),
+        "job_id": str(job_id_out).strip() if job_id_out else None,
         "data": result,
     }

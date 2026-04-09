@@ -149,6 +149,20 @@ publish_reconciliation_duration_ms = Histogram(
     buckets=_DURATION_MS_BUCKETS,
 )
 
+# --- Upload Post publish confirmation (timeout/unknown-result safety) ---
+upload_post_unknown_results_total = Counter(
+    "upload_post_unknown_results_total",
+    "Upload Post responses classified as unknown/pending confirmation (499/504/timeout/etc.)",
+)
+upload_post_reconciliation_runs_total = Counter(
+    "upload_post_reconciliation_runs_total",
+    "Upload Post status reconciliation checks started",
+)
+upload_post_reconciliation_completed_total = Counter(
+    "upload_post_reconciliation_completed_total",
+    "Upload Post reconciliation finished with a terminal decision (success or confirmed failure)",
+)
+
 # --- Grok / xAI cost observability ---
 grok_requests_total = Counter(
     "grok_requests_total",
