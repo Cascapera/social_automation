@@ -1,7 +1,6 @@
 import os
 
 from celery import Celery
-from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "social_automation.settings")
 
@@ -18,10 +17,10 @@ app.conf.beat_schedule = {
         "task": "apps.social.tasks.reconcile_youtube_schedules_task",
         "schedule": 300.0,  # every 5 min (saves quota: videos.list = 1 unit per post)
     },
-    # Fixed cron at 19:00. If the server was down or errored, use the "Immediate schedule" button.
+    # Checks every 5 min, but only schedules during the local 09h / 11h / 13h windows.
     "generate-daily-factory-schedules": {
         "task": "apps.social.tasks.generate_daily_factory_schedules_task",
-        "schedule": crontab(hour=19, minute=0),
+        "schedule": 300.0,
     },
     # Automatic fetch of videos from search channels (when auto_fetch_enabled).
     "check-and-fetch-new-videos": {

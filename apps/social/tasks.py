@@ -595,6 +595,8 @@ UPLOAD_POST_RECONCILE_BASE_DELAY_SEC = 90
 UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC = 120
 UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND = 1
 UPLOAD_POST_MAX_CONTROLLED_RESENDS = 1
+YOUTUBE_PREPUBLISH_WINDOW_SECONDS = 60 * 60  # Envia para o provedor 1h antes do slot final
+DAILY_SCHEDULE_GENERATION_HOURS = (9, 11, 13)  # janelas locais: tentativa principal + 2 catch-ups
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
 YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
@@ -1310,7 +1312,7 @@ def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noq
 def check_scheduled_posts_task():
     """
     Runs every minute via Beat.
-    - Picks PENDING posts (scheduled_at <= now or early YouTube).
+    - Picks PENDING posts (scheduled_at <= now ou dentro da janela antecipada do YouTube).
     - Groups by brand and processes each brand sequentially.
     - Structured logs for observability.
     """
@@ -1332,10 +1334,11 @@ def check_scheduled_posts_task():
         "scheduled_at",
         "id",
     )[:BATCH_LIMIT_PER_TICK]
-    # YouTube early upload: private upload with publishAt on YouTube.
+    # Janela antecipada do YouTube/Upload Post: envia aproximadamente 1h antes do slot final.
     future_candidates = ScheduledPost.objects.filter(
         status="PENDING",
-        scheduled_at__gt=now + timedelta(seconds=30),
+        scheduled_at__gt=now,
+        scheduled_at__lte=now + timedelta(seconds=YOUTUBE_PREPUBLISH_WINDOW_SECONDS),
     ).filter(has_origin).select_related("job", "job__brand", "social_account")
     post_ids = {post.id for post in due_posts}
     for post in future_candidates:
@@ -1421,12 +1424,28 @@ def check_scheduled_posts_task():
     }
 
 
+def _factory_local_day_bounds(factory: Factory, target_date_local) -> tuple[datetime, datetime]:
+    tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
+    day_start_local = datetime.combine(target_date_local, time(0, 0)).replace(tzinfo=tz)
+    day_end_local = (day_start_local + timedelta(days=1)) - timedelta(microseconds=1)
+    return day_start_local.astimezone(UTC), day_end_local.astimezone(UTC)
+
+
+def _factory_has_schedule_for_local_day(factory: Factory, target_date_local) -> bool:
+    day_start_utc, day_end_utc = _factory_local_day_bounds(factory, target_date_local)
+    return FactoryPostingSchedule.objects.filter(
+        factory=factory,
+        scheduled_at__gte=day_start_utc,
+        scheduled_at__lte=day_end_utc,
+    ).exists()
+
+
 @shared_task(bind=True)
 def generate_daily_factory_schedules_task(self):
     """
-    Every 30 min: for each active factory, if past fixed schedule time
-    (daily_schedule_start_time, default 19:00) and next day's schedule not yet generated, generate it.
-    Videos are scheduled for the following day (e.g. at 19:00 on 10/03 schedules for 11/03 8:00, 9:00...).
+    Runs during the local 09h / 11h / 13h windows for each active factory.
+    Generates the schedule for the same local day only while there is still no
+    agenda created for that day, avoiding the old burst model.
     """
     task_id: str = self.request.id or ""
     correlation_id = new_correlation_id()
@@ -1439,12 +1458,11 @@ def generate_daily_factory_schedules_task(self):
     for factory in Factory.objects.filter(is_active=True, scheduling_paused=False).order_by("id"):
         tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
         now_local = now.astimezone(tz)
-        # Always schedule for the NEXT day
-        target_date = now_local.date() + timedelta(days=1)
-        start_time = getattr(factory, "daily_schedule_start_time", None) or time(19, 0)
-        if now_local.time() < start_time:
+        if now_local.hour not in DAILY_SCHEDULE_GENERATION_HOURS:
             continue
-        if FactoryScheduleRun.objects.filter(factory=factory, run_date=target_date).exists():
+
+        target_date = now_local.date()
+        if _factory_has_schedule_for_local_day(factory, target_date):
             continue
 
         factory_timer = Timer()
@@ -1453,6 +1471,7 @@ def generate_daily_factory_schedules_task(self):
                 factory,
                 now_utc=now,
                 target_date=target_date,
+                allow_rerun=True,
                 correlation_id=correlation_id,
             )
             posts_created = int(result.get("created", 0))
