@@ -186,6 +186,37 @@ class UploadPostReconciliationTests(TestCase):
         mock_up.assert_not_called()
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_provider_not_found_starts_controlled_unknown_path(
+        self,
+        mock_status: MagicMock,
+        mock_up: MagicMock,
+    ):
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+        post = self._post_ytb(
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-missing",
+            }
+        )
+
+        result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(result.get("skipped"), "upload_post_provider_not_found")
+        self.assertEqual(post.status, "PENDING")
+        self.assertEqual(post.external_ids.get("upload_post_last_status"), "not_found")
+        self.assertEqual(post.external_ids.get("upload_post_no_provider_id_check_count"), 1)
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
     def test_second_no_provider_id_check_starts_controlled_resend(self, mock_up: MagicMock):
         mock_up.return_value = {
             "success": True,
@@ -233,6 +264,45 @@ class UploadPostReconciliationTests(TestCase):
         self.assertNotIn("upload_post_reconciliation_state", post.external_ids)
         self.assertNotIn("upload_post_youtube_terminal_failure", post.external_ids)
         self.assertNotIn("upload_post_skip_after_unknown_no_id", post.external_ids)
+        mock_up.assert_not_called()
+        native.publish.assert_called_once()
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_provider_not_found_after_controlled_resend_falls_back_to_native_youtube(
+        self,
+        mock_up: MagicMock,
+        mock_status: MagicMock,
+    ):
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+        post = self._post_ytb(
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-missing",
+                "upload_post_resend_count": 1,
+            }
+        )
+        native = MagicMock()
+        native.publish = MagicMock(return_value={"video_id": "native-video-id"})
+
+        with patch("apps.social.publishers.get_publisher", return_value=native):
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(result.get("status"), "DONE")
+        self.assertEqual(post.status, "DONE")
+        self.assertEqual(post.external_ids.get("YTB"), "native-video-id")
+        self.assertEqual(post.external_ids.get("upload_post_last_status"), "provider_not_found_fallback_native")
+        self.assertNotIn("upload_post_reconciliation_state", post.external_ids)
+        self.assertNotIn("upload_post_youtube_terminal_failure", post.external_ids)
+        self.assertNotIn("upload_post_skip_after_unknown_no_id", post.external_ids)
+        mock_status.assert_called_once()
         mock_up.assert_not_called()
         native.publish.assert_called_once()
 
@@ -363,6 +433,20 @@ class UploadPostReconciliationTests(TestCase):
         out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
         self.assertEqual(out.decision, ReconcileDecision.CONFIRMED_FAILURE)
         self.assertIn("provider rejected upload", out.detail)
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_reconcile_not_found_uses_provider_not_found_path(self, mock_status: MagicMock):
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+        ext = {"upload_post_request_id": "r1", "upload_post_reconciliation_state": "pending"}
+        out = reconcile_upload_post_status(external_ids=ext, needs_youtube=True)
+        self.assertEqual(out.decision, ReconcileDecision.PROVIDER_NOT_FOUND)
+        self.assertIn("No upload request found", out.detail)
 
     def test_native_invalid_grant_marks_external_ids_and_skips_publish(self):
         from apps.social.publishers.youtube import YouTubePublishError

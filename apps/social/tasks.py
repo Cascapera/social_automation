@@ -964,27 +964,39 @@ def _try_pending_upload_post_reconciliation(
         )
         return {"status": post.status, "skipped": "upload_post_reconciliation_wait"}
 
-    if outcome.decision == ReconcileDecision.NO_PROVIDER_ID:
+    if outcome.decision in (ReconcileDecision.NO_PROVIDER_ID, ReconcileDecision.PROVIDER_NOT_FOUND):
+        provider_not_found = outcome.decision == ReconcileDecision.PROVIDER_NOT_FOUND
         no_provider_id_checks = int(ext.get("upload_post_no_provider_id_check_count", 0) or 0) + 1
         resend_count = int(ext.get("upload_post_resend_count", 0) or 0)
         ext["upload_post_no_provider_id_check_count"] = no_provider_id_checks
+        unknown_result_detail = (
+            "request_id_not_found_in_provider" if provider_not_found else "no_request_id_or_job_id"
+        )
         log_event(
             logger,
             event="upload_post_unknown_result",
             correlation_id=correlation_id,
             scheduled_post_id=post.id,
-            detail="no_request_id_or_job_id",
+            detail=unknown_result_detail,
         )
         if resend_count >= UPLOAD_POST_MAX_CONTROLLED_RESENDS:
             if _native_youtube_fallback_available(post, brand):
                 ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
                 ext.pop("upload_post_no_provider_id_check_count", None)
-                ext["upload_post_last_status"] = "no_provider_id_fallback_native"
+                ext["upload_post_last_status"] = (
+                    "provider_not_found_fallback_native"
+                    if provider_not_found
+                    else "no_provider_id_fallback_native"
+                )
                 ext["upload_post_last_checked_at"] = timezone.now().isoformat()
                 ext["upload_post_youtube_terminal_failure"] = True
                 ext["upload_post_skip_after_unknown_no_id"] = True
                 post.external_ids = ext
                 post.error = (
+                    "Upload Post: request_id/job_id não localizado no provedor após novo envio controlado. "
+                    "Tentando fallback nativo do YouTube."
+                    if provider_not_found
+                    else
                     "Upload Post: resultado incerto sem request_id/job_id após novo envio controlado. "
                     "Tentando fallback nativo do YouTube."
                 )
@@ -996,16 +1008,26 @@ def _try_pending_upload_post_reconciliation(
                     scheduled_post_id=post.id,
                     brand_id=brand_id,
                     platform="youtube",
-                    reason="unknown_no_provider_id_after_resend",
+                    reason=(
+                        "provider_not_found_after_resend"
+                        if provider_not_found
+                        else "unknown_no_provider_id_after_resend"
+                    ),
                 )
                 return None
             ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
             ext.pop("upload_post_no_provider_id_check_count", None)
-            ext["upload_post_last_status"] = "no_provider_id_terminal"
+            ext["upload_post_last_status"] = (
+                "provider_not_found_terminal" if provider_not_found else "no_provider_id_terminal"
+            )
             ext["upload_post_last_checked_at"] = timezone.now().isoformat()
             post.status = "FAILED"
             post.external_ids = ext
             post.error = (
+                "Upload Post: request_id/job_id não localizado no provedor mesmo após novo envio controlado. "
+                "Vídeo devolvido ao inventário para evitar loop infinito."
+                if provider_not_found
+                else
                 "Upload Post: resultado incerto sem request_id/job_id mesmo após novo envio controlado. "
                 "Vídeo devolvido ao inventário para evitar loop infinito."
             )
@@ -1053,8 +1075,13 @@ def _try_pending_upload_post_reconciliation(
             ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
             ext.pop("upload_post_last_status", None)
             ext.pop("upload_post_last_checked_at", None)
+            ext.pop("upload_post_request_id", None)
+            ext.pop("upload_post_job_id", None)
             post.external_ids = ext
             post.error = (
+                "Upload Post: request_id/job_id não localizado no provedor; iniciando novo envio controlado."
+                if provider_not_found
+                else
                 "Upload Post: sem request_id/job_id após confirmação tardia; iniciando novo envio controlado."
             )
             post.scheduled_at = timezone.now()
@@ -1071,6 +1098,10 @@ def _try_pending_upload_post_reconciliation(
             return None
         post.external_ids = ext
         post.error = (
+            "Upload Post: request_id/job_id não localizado no provedor; "
+            f"nova tentativa de verificação no fim da fila em {next_delay}s."
+            if provider_not_found
+            else
             "Upload Post: resultado incerto e sem request_id/job_id persistido; "
             f"nova tentativa de verificação no fim da fila em {next_delay}s."
         )
@@ -1087,7 +1118,10 @@ def _try_pending_upload_post_reconciliation(
             duration_ms=_timer.elapsed_ms(),
             attempt_number=current_attempt,
         )
-        return {"status": post.status, "skipped": "upload_post_no_provider_id"}
+        return {
+            "status": post.status,
+            "skipped": "upload_post_provider_not_found" if provider_not_found else "upload_post_no_provider_id",
+        }
 
     if outcome.decision == ReconcileDecision.CONFIRMED_FAILURE:
         upload_post_reconciliation_completed_total.inc()

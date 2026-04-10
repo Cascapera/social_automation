@@ -49,6 +49,7 @@ class ReconcileDecision(StrEnum):
     CONFIRMED_SUCCESS = "confirmed_success"
     CONFIRMED_FAILURE = "confirmed_failure"  # Upload Post falhou de forma terminal para o escopo analisado
     NO_PROVIDER_ID = "no_provider_id"  # não há request_id/job_id — não dá para consultar
+    PROVIDER_NOT_FOUND = "provider_not_found"  # request_id/job_id existem, mas o provedor não localizou o envio
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,23 @@ def fetch_upload_post_status(
         ra = resp.headers.get("Retry-After", "?")
         return None, f"Rate limit (429), Retry-After={ra}"
 
+    if resp.status_code == 404:
+        body = (resp.text or "")[:500]
+        logger.warning(
+            "[UploadPostReconcile] HTTP %s status request_id=%s job_id=%s body=%s",
+            resp.status_code,
+            rid,
+            jid,
+            body,
+        )
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
+        if isinstance(data, dict) and str(data.get("status") or "").strip().lower() == "not_found":
+            return data, None
+        return None, f"HTTP 404: {body}"
+
     if resp.status_code >= 400:
         body = (resp.text or "")[:500]
         logger.warning(
@@ -274,6 +292,16 @@ def reconcile_upload_post_status(
 
     raw_status = _normalize_provider_status(data.get("status"))
     base_patch[EXT_UPLOAD_POST_LAST_STATUS] = raw_status or "unknown"
+
+    if raw_status == "not_found":
+        detail = _first_scalar_value(data, "message", "detail") or "No upload request found with this ID"
+        return ReconcileOutcome(
+            decision=ReconcileDecision.PROVIDER_NOT_FOUND,
+            detail=detail[:300],
+            external_ids_patch=base_patch,
+            next_delay_seconds=300,
+            raw_status_payload=data,
+        )
 
     try:
         normalized = UploadPostProviderStatus(raw_status) if raw_status else None
