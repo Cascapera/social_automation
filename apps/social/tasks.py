@@ -36,7 +36,6 @@ from apps.jobs.logging_utils import (
 from apps.jobs.models import (
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
-    FactoryScheduleRun,
     Job,
     PostedVideoLog,
     RenderOutput,
