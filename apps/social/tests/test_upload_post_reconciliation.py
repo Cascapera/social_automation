@@ -14,7 +14,13 @@ from django.utils import timezone
 
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutSuggestion
 from apps.brands.models import Brand, BrandSocialAccount, Factory
-from apps.jobs.models import FactoryPostingSchedule, Job, RenderOutput, ScheduledPost, VideoInventoryItem
+from apps.jobs.models import (
+    FactoryPostingSchedule,
+    Job,
+    RenderOutput,
+    ScheduledPost,
+    VideoInventoryItem,
+)
 from apps.social.publishers.upload_post import (
     UploadPostErrorKind,
     UploadPostPublishError,
