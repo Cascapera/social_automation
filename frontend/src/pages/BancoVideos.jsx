@@ -399,6 +399,7 @@ export default function BancoVideos() {
                   <table className="banco-table">
                     <thead>
                       <tr>
+                        <th>Nº</th>
                         {viewMode === 'factory' && <th>Brand</th>}
                         <th>Tipo</th>
                         <th className="banco-titulo">Título</th>
@@ -412,6 +413,9 @@ export default function BancoVideos() {
                     <tbody>
                       {awaitingItems.map((item) => (
                         <tr key={item.id}>
+                          <td title={item.scheduled_post_id ? `Vídeo #${item.id} • Post #${item.scheduled_post_id}` : `Vídeo #${item.id}`}>
+                            {item.scheduled_post_id ? `Post #${item.scheduled_post_id}` : `Vídeo #${item.id}`}
+                          </td>
                           {viewMode === 'factory' && (
                             <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
                           )}

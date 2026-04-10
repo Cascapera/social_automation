@@ -683,6 +683,7 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
 class VideoInventoryItemSerializer(serializers.ModelSerializer):
     source_display_name = serializers.SerializerMethodField(read_only=True)
     status_message = serializers.SerializerMethodField(read_only=True)
+    scheduled_post_id = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = VideoInventoryItem
@@ -700,6 +701,7 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
             "source_metadata",
             "status",
             "status_message",
+            "scheduled_post_id",
             "scheduled_for",
             "posted_at",
             "attempt_count",
@@ -708,15 +710,26 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def _latest_posting_schedule(self, obj):
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}) or {}
+        schedules = prefetched.get("posting_schedules")
+        if schedules is not None:
+            latest = None
+            for schedule in schedules:
+                if latest is None or getattr(schedule, "id", 0) > getattr(latest, "id", 0):
+                    latest = schedule
+            return latest
+        try:
+            return obj.posting_schedules.select_related("scheduled_post").order_by("-id").first()
+        except Exception:
+            return None
+
     def get_status_message(self, obj):
         """
         Mensagem de detalhe para status Postando: "Na fila" ou "Aguardando confirmação".
         """
         if obj.status in ("SCHEDULED", "POSTING"):
-            try:
-                schedule = obj.posting_schedules.select_related("scheduled_post").order_by("-id").first()
-            except Exception:
-                schedule = None
+            schedule = self._latest_posting_schedule(obj)
             post = getattr(schedule, "scheduled_post", None) if schedule else None
             external_ids = getattr(post, "external_ids", None) or {}
             has_yt_id = bool(
@@ -726,6 +739,10 @@ class VideoInventoryItemSerializer(serializers.ModelSerializer):
                 return "Enviando..."
             return "Aguardando confirmação" if has_yt_id else "Na fila"
         return None
+
+    def get_scheduled_post_id(self, obj):
+        schedule = self._latest_posting_schedule(obj)
+        return getattr(schedule, "scheduled_post_id", None) if schedule else None
 
     def get_source_display_name(self, obj):
         """Nome do vídeo original (o mesmo que aparece nos jobs) para exibir na coluna Nome da fonte."""
