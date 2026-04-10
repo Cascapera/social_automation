@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -42,7 +43,11 @@ from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
 )
-from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
+from apps.jobs.services.factory_scheduler import (
+    allocate_inventory_item_to_slot,
+    generate_daily_schedule_for_factory,
+    pick_inventory_item_for_slot,
+)
 from apps.social.services.idempotency import (
     acquire_idempotency_key,
     get_existing_idempotency_result,
@@ -60,6 +65,7 @@ YOUTUBE_CHECK_CLIENT_ENABLED = bool(
     (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
     and (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
 )
+SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS = 1
 
 
 def _cleanup_local_media_if_possible(post: ScheduledPost) -> None:
@@ -494,6 +500,212 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         item.last_error = post.error or ""
         item.attempt_count = int(post.retry_count or 0) + quota_retries
         item.save(update_fields=["status", "last_error", "attempt_count", "updated_at"])
+
+
+@transaction.atomic
+def _replace_ambiguous_short_slot(
+    post: ScheduledPost,
+    *,
+    current_attempt: int,
+    correlation_id: str,
+    duration_ms: float,
+    provider_not_found: bool,
+    detail: str,
+    external_ids: dict,
+) -> dict | None:
+    try:
+        schedule = (
+            FactoryPostingSchedule.objects.select_for_update()
+            .select_related("inventory_item", "factory", "brand", "daily_plan_item")
+            .get(scheduled_post_id=post.id)
+        )
+    except FactoryPostingSchedule.DoesNotExist:
+        return None
+
+    if schedule.video_type != "SHORT" or not schedule.inventory_item_id:
+        return None
+
+    inventory_item = VideoInventoryItem.objects.select_for_update().get(pk=schedule.inventory_item_id)
+    replacement_count = int((external_ids or {}).get("short_slot_replacement_count", 0) or 0)
+    attempts = int(post.retry_count or 0) + int(getattr(post, "youtube_quota_retry_count", 0) or 0)
+    detail_text = (detail or "").strip()
+    reason_prefix = (
+        "Upload Post: request_id/job_id não localizado no provedor para este short."
+        if provider_not_found
+        else "Upload Post: reconciliação inconclusiva para este short."
+    )
+    old_external_ids = dict(external_ids or {})
+    old_external_ids.pop("upload_post_reconciliation_state", None)
+    old_external_ids.pop("upload_post_no_provider_id_check_count", None)
+    old_external_ids.pop("upload_post_resend_count", None)
+
+    replacement_item = None
+    if replacement_count < SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS:
+        replacement_item = pick_inventory_item_for_slot(
+            factory=schedule.factory,
+            brand=schedule.brand,
+            video_type="SHORT",
+            exclude_item_ids={inventory_item.id},
+        )
+
+    if replacement_item:
+        post_error = (
+            f"{reason_prefix} Slot trocado automaticamente para outro vídeo. {detail_text[:220]}"
+            if detail_text
+            else f"{reason_prefix} Slot trocado automaticamente para outro vídeo."
+        )
+        old_external_ids["upload_post_last_status"] = (
+            "provider_not_found_replaced" if provider_not_found else "no_provider_id_replaced"
+        )
+        post.status = "FAILED"
+        post.error = post_error
+        post.external_ids = old_external_ids
+        post.save(update_fields=["status", "error", "external_ids"])
+
+        inventory_item.status = "FAILED"
+        inventory_item.scheduled_for = None
+        inventory_item.last_error = post_error
+        inventory_item.attempt_count = attempts
+        inventory_item.save(
+            update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"]
+        )
+
+        replacement_external_ids = {
+            "short_slot_replacement_count": replacement_count + 1,
+            "short_slot_replaced_from_post_id": post.id,
+            "short_slot_replaced_from_inventory_item_id": inventory_item.id,
+        }
+        replacement_post, schedule = allocate_inventory_item_to_slot(
+            factory=schedule.factory,
+            brand=schedule.brand,
+            item=replacement_item,
+            video_type="SHORT",
+            scheduled_at=schedule.scheduled_at,
+            schedule=schedule,
+            plan_item=schedule.daily_plan_item,
+            correlation_id=post.correlation_id or "",
+            external_ids=replacement_external_ids,
+        )
+
+        try:
+            FactoryPostingAttemptLog.objects.create(
+                posting_schedule=schedule,
+                attempt_number=current_attempt,
+                started_at=timezone.now(),
+                finished_at=timezone.now(),
+                result="ERROR",
+                error_message=post_error,
+                provider_response={
+                    "external_ids": old_external_ids,
+                    "replacement_post_id": replacement_post.id,
+                    "replacement_inventory_item_id": replacement_item.id,
+                    "failed_inventory_item_id": inventory_item.id,
+                },
+            )
+        except Exception:
+            pass
+
+        publish_failures_total.inc()
+        log_event(
+            logger,
+            event="upload_post_short_slot_replaced",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            replacement_post_id=replacement_post.id,
+            replacement_inventory_item_id=replacement_item.id,
+            failed_inventory_item_id=inventory_item.id,
+            provider_status="not_found" if provider_not_found else "unknown_no_provider_id",
+        )
+        log_event(
+            logger,
+            event="publish_finished",
+            correlation_id=correlation_id,
+            scheduled_post_id=post.id,
+            brand_id=schedule.brand_id,
+            platform="youtube",
+            status="error",
+            duration_ms=duration_ms,
+            attempt_number=current_attempt,
+            error=post_error,
+        )
+        return {
+            "status": replacement_post.status,
+            "skipped": "short_slot_replaced",
+            "replacement_post_id": replacement_post.id,
+            "replacement_inventory_item_id": replacement_item.id,
+        }
+
+    terminal_reason = (
+        "Já houve uma substituição automática anterior para este slot."
+        if replacement_count >= SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS
+        else "Não havia outro short disponível para assumir o slot."
+    )
+    post_error = (
+        f"{reason_prefix} {terminal_reason} {detail_text[:220]}"
+        if detail_text
+        else f"{reason_prefix} {terminal_reason}"
+    )
+    old_external_ids["upload_post_last_status"] = (
+        "provider_not_found_terminal" if provider_not_found else "no_provider_id_terminal"
+    )
+    post.status = "FAILED"
+    post.error = post_error
+    post.external_ids = old_external_ids
+    post.save(update_fields=["status", "error", "external_ids"])
+
+    schedule.status = "FAILED"
+    schedule.attempt_count = attempts
+    schedule.next_retry_at = None
+    schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
+
+    inventory_item.status = "FAILED"
+    inventory_item.scheduled_for = None
+    inventory_item.last_error = post_error
+    inventory_item.attempt_count = attempts
+    inventory_item.save(
+        update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"]
+    )
+
+    try:
+        FactoryPostingAttemptLog.objects.create(
+            posting_schedule=schedule,
+            attempt_number=current_attempt,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+            result="ERROR",
+            error_message=post_error,
+            provider_response={"external_ids": old_external_ids},
+        )
+    except Exception:
+        pass
+
+    publish_failures_total.inc()
+    log_event(
+        logger,
+        event="upload_post_short_slot_failed",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=schedule.brand_id,
+        platform="youtube",
+        reason=(
+            "replacement_limit_reached"
+            if replacement_count >= SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS
+            else "no_replacement_short_available"
+        ),
+    )
+    log_event(
+        logger,
+        event="publish_finished",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=schedule.brand_id,
+        platform="youtube",
+        status="error",
+        duration_ms=duration_ms,
+        attempt_number=current_attempt,
+        error=post_error,
+    )
+    return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
 
 
 def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, external_video_id: str, metadata: dict | None = None) -> None:
@@ -980,6 +1192,17 @@ def _try_pending_upload_post_reconciliation(
             detail=unknown_result_detail,
         )
         if resend_count >= UPLOAD_POST_MAX_CONTROLLED_RESENDS:
+            short_replacement_result = _replace_ambiguous_short_slot(
+                post,
+                current_attempt=current_attempt,
+                correlation_id=correlation_id,
+                duration_ms=_timer.elapsed_ms(),
+                provider_not_found=provider_not_found,
+                detail=outcome.detail or "",
+                external_ids=ext,
+            )
+            if short_replacement_result is not None:
+                return short_replacement_result
             if _native_youtube_fallback_available(post, brand):
                 ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
                 ext.pop("upload_post_no_provider_id_check_count", None)

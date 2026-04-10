@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -11,8 +12,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutSuggestion
 from apps.brands.models import Brand, BrandSocialAccount, Factory
-from apps.jobs.models import Job, RenderOutput, ScheduledPost
+from apps.jobs.models import FactoryPostingSchedule, Job, RenderOutput, ScheduledPost, VideoInventoryItem
 from apps.social.publishers.upload_post import (
     UploadPostErrorKind,
     UploadPostPublishError,
@@ -29,6 +31,9 @@ User = get_user_model()
 
 class UploadPostReconciliationTests(TestCase):
     def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
         self.factory = Factory.objects.create(name="Factory UP Rec")
         self.brand = Brand.objects.create(
             name="Brand UP Rec",
@@ -46,11 +51,21 @@ class UploadPostReconciliationTests(TestCase):
             channel_id="channel-yt-1",
             account_name="Canal Teste",
         )
+        self.short_account = BrandSocialAccount.objects.create(
+            brand=self.brand,
+            platform="YT",
+            channel_id="channel-yt-short",
+            account_name="Canal Shorts",
+        )
         self.job = Job.objects.create(user=self.user, brand=self.brand, name="Job UP")
         RenderOutput.objects.create(
             job=self.job,
             file=SimpleUploadedFile("video.mp4", b"x" * 2048, content_type="video/mp4"),
         )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
 
     def _post_ytb(self, **kwargs) -> ScheduledPost:
         defaults = dict(
@@ -63,6 +78,87 @@ class UploadPostReconciliationTests(TestCase):
         )
         defaults.update(kwargs)
         return ScheduledPost.objects.create(**defaults)
+
+    def _create_autocut_analysis(self, name: str) -> AutoCutAnalysis:
+        analysis = AutoCutAnalysis.objects.create(
+            brand=self.brand,
+            name=name,
+            status="done",
+        )
+        analysis.file.save(
+            f"{name}.mp4",
+            SimpleUploadedFile(f"{name}.mp4", b"analysis-video", content_type="video/mp4"),
+            save=True,
+        )
+        return analysis
+
+    def _create_short_inventory_item(self, name: str, *, status: str = "AVAILABLE") -> VideoInventoryItem:
+        analysis = self._create_autocut_analysis(name)
+        suggestion = AutoCutSuggestion.objects.create(
+            analysis=analysis,
+            cut_type="short",
+            start_tc="00:00",
+            end_tc="00:30",
+            title=f"{name} short",
+            source_asset_id=f"source-{name}",
+        )
+        corte = AutoCutCorte.objects.create(
+            analysis=analysis,
+            suggestion=suggestion,
+            format="vertical",
+            needs_subtitle=True,
+            user_wants_finalize=True,
+            is_finalized=True,
+            subtitle_segments=[{"start": 0.0, "end": 1.0, "text": "oi"}],
+        )
+        corte.file.save(
+            f"{name}_cut.mp4",
+            SimpleUploadedFile(f"{name}_cut.mp4", b"cut-video", content_type="video/mp4"),
+            save=True,
+        )
+        return VideoInventoryItem.objects.create(
+            factory=self.factory,
+            brand=self.brand,
+            auto_cut_corte=corte,
+            video_type="SHORT",
+            title=suggestion.title,
+            source_asset_id=suggestion.source_asset_id,
+            source_metadata={"analysis_id": analysis.id, "suggestion_id": suggestion.id},
+            status=status,
+            last_error="",
+        )
+
+    def _factory_short_post(
+        self,
+        item: VideoInventoryItem,
+        *,
+        scheduled_at=None,
+        external_ids: dict | None = None,
+    ) -> tuple[ScheduledPost, FactoryPostingSchedule]:
+        slot_at = scheduled_at or (timezone.now() + timedelta(minutes=40))
+        item.status = "SCHEDULED"
+        item.scheduled_for = slot_at
+        item.save(update_fields=["status", "scheduled_for", "updated_at"])
+        post = ScheduledPost.objects.create(
+            auto_cut_corte=item.auto_cut_corte,
+            platforms=["YT"],
+            social_account=self.short_account,
+            scheduled_at=slot_at,
+            title=item.title,
+            description=item.description,
+            status="PENDING",
+            external_ids=external_ids or {},
+        )
+        schedule = FactoryPostingSchedule.objects.create(
+            factory=self.factory,
+            brand=self.brand,
+            inventory_item=item,
+            video_type="SHORT",
+            scheduled_at=slot_at,
+            status="PLANNED",
+            scheduled_post=post,
+        )
+        return post, schedule
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
     def test_http_504_does_not_call_native_youtube_same_run(self, mock_up: MagicMock):
@@ -305,6 +401,152 @@ class UploadPostReconciliationTests(TestCase):
         mock_status.assert_called_once()
         mock_up.assert_not_called()
         native.publish.assert_called_once()
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_short_provider_not_found_after_resend_replaces_slot_with_new_short(
+        self,
+        mock_up: MagicMock,
+        mock_status: MagicMock,
+    ):
+        current_item = self._create_short_inventory_item("primary")
+        replacement_item = self._create_short_inventory_item("replacement")
+        slot_at = timezone.now() + timedelta(minutes=35)
+        post, schedule = self._factory_short_post(
+            current_item,
+            scheduled_at=slot_at,
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-missing",
+                "upload_post_resend_count": 1,
+            },
+        )
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        current_item.refresh_from_db()
+        replacement_item.refresh_from_db()
+        replacement_post = ScheduledPost.objects.get(pk=result["replacement_post_id"])
+
+        self.assertEqual(result.get("skipped"), "short_slot_replaced")
+        self.assertEqual(post.status, "FAILED")
+        self.assertEqual(post.external_ids.get("upload_post_last_status"), "provider_not_found_replaced")
+        self.assertEqual(current_item.status, "FAILED")
+        self.assertIn("Slot trocado automaticamente", current_item.last_error)
+        self.assertEqual(schedule.inventory_item_id, replacement_item.id)
+        self.assertEqual(schedule.scheduled_post_id, replacement_post.id)
+        self.assertEqual(schedule.status, "PLANNED")
+        self.assertEqual(schedule.scheduled_at, slot_at)
+        self.assertEqual(replacement_post.scheduled_at, slot_at)
+        self.assertEqual(replacement_post.platforms, ["YT"])
+        self.assertEqual(replacement_post.external_ids.get("short_slot_replacement_count"), 1)
+        self.assertEqual(replacement_post.external_ids.get("short_slot_replaced_from_post_id"), post.id)
+        self.assertEqual(
+            replacement_post.external_ids.get("short_slot_replaced_from_inventory_item_id"),
+            current_item.id,
+        )
+        self.assertEqual(replacement_item.status, "SCHEDULED")
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+        mock_native.assert_not_called()
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_short_provider_not_found_without_replacement_fails_slot(
+        self,
+        mock_up: MagicMock,
+        mock_status: MagicMock,
+    ):
+        current_item = self._create_short_inventory_item("lonely")
+        post, schedule = self._factory_short_post(
+            current_item,
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-missing",
+                "upload_post_resend_count": 1,
+            },
+        )
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        current_item.refresh_from_db()
+
+        self.assertEqual(result.get("status"), "FAILED")
+        self.assertEqual(post.status, "FAILED")
+        self.assertEqual(schedule.status, "FAILED")
+        self.assertEqual(schedule.scheduled_post_id, post.id)
+        self.assertEqual(current_item.status, "FAILED")
+        self.assertIn("Não havia outro short disponível", current_item.last_error)
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+        mock_native.assert_not_called()
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_short_provider_not_found_with_replacement_limit_marks_failure_without_loop(
+        self,
+        mock_up: MagicMock,
+        mock_status: MagicMock,
+    ):
+        current_item = self._create_short_inventory_item("current")
+        spare_item = self._create_short_inventory_item("spare")
+        post, schedule = self._factory_short_post(
+            current_item,
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-missing",
+                "upload_post_resend_count": 1,
+                "short_slot_replacement_count": 1,
+            },
+        )
+        scheduled_post_count = ScheduledPost.objects.count()
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        current_item.refresh_from_db()
+        spare_item.refresh_from_db()
+
+        self.assertEqual(result.get("status"), "FAILED")
+        self.assertEqual(post.status, "FAILED")
+        self.assertEqual(schedule.status, "FAILED")
+        self.assertEqual(schedule.inventory_item_id, current_item.id)
+        self.assertEqual(ScheduledPost.objects.count(), scheduled_post_count)
+        self.assertEqual(current_item.status, "FAILED")
+        self.assertEqual(spare_item.status, "AVAILABLE")
+        self.assertIn("Já houve uma substituição automática anterior", current_item.last_error)
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+        mock_native.assert_not_called()
 
     @patch("apps.social.tasks._native_youtube_fallback_available", return_value=False)
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")

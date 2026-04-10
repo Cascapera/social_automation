@@ -73,6 +73,124 @@ def _first_social_account_for_video_type(brand: Brand, video_type: str) -> Brand
     )
 
 
+def _available_inventory_items_for_slot(
+    *,
+    factory: Factory,
+    brand: Brand,
+    video_type: str,
+    exclude_item_ids: set[int] | None = None,
+) -> list[VideoInventoryItem]:
+    qs = (
+        VideoInventoryItem.objects.select_for_update()
+        .filter(factory=factory, brand=brand, status="AVAILABLE", video_type=video_type)
+        .exclude(auto_cut_corte_id__isnull=True)
+        .order_by("id")
+    )
+    if exclude_item_ids:
+        qs = qs.exclude(id__in=sorted(exclude_item_ids))
+    return list(qs)
+
+
+def pick_inventory_item_for_slot(
+    *,
+    factory: Factory,
+    brand: Brand,
+    video_type: str,
+    exclude_item_ids: set[int] | None = None,
+) -> VideoInventoryItem | None:
+    items = _available_inventory_items_for_slot(
+        factory=factory,
+        brand=brand,
+        video_type=video_type,
+        exclude_item_ids=exclude_item_ids,
+    )
+    if not items:
+        return None
+    ordered = _order_with_source_diversity(items)
+    return ordered[0] if ordered else None
+
+
+def allocate_inventory_item_to_slot(
+    *,
+    factory: Factory,
+    brand: Brand,
+    item: VideoInventoryItem,
+    video_type: str,
+    scheduled_at: datetime,
+    schedule: FactoryPostingSchedule | None = None,
+    plan_item: DailyPostingPlanItem | None = None,
+    correlation_id: str = "",
+    external_ids: dict | None = None,
+) -> tuple[ScheduledPost, FactoryPostingSchedule]:
+    platform = "YT" if video_type == "SHORT" else "YTB"
+    account = _first_social_account_for_video_type(brand, video_type)
+    slot_at_utc = scheduled_at.astimezone(UTC)
+    scheduled_post = ScheduledPost.objects.create(
+        job=None,
+        auto_cut_corte=item.auto_cut_corte,
+        platforms=[platform],
+        social_account=account,
+        scheduled_at=slot_at_utc,
+        title=(item.title or "")[:200],
+        description=item.description or "",
+        privacy_status="private",
+        status="PENDING",
+        external_ids=external_ids or {},
+        correlation_id=correlation_id or "",
+    )
+
+    target_schedule = schedule
+    if target_schedule is None:
+        fps_kwargs = {
+            "factory": factory,
+            "brand": brand,
+            "inventory_item": item,
+            "video_type": video_type,
+            "scheduled_at": slot_at_utc,
+            "status": "PLANNED",
+            "scheduled_post": scheduled_post,
+        }
+        if plan_item:
+            fps_kwargs["daily_plan_item"] = plan_item
+        target_schedule = FactoryPostingSchedule.objects.create(**fps_kwargs)
+    else:
+        target_schedule.inventory_item = item
+        target_schedule.video_type = video_type
+        target_schedule.scheduled_at = slot_at_utc
+        target_schedule.status = "PLANNED"
+        target_schedule.scheduled_post = scheduled_post
+        target_schedule.attempt_count = 0
+        target_schedule.next_retry_at = None
+        if plan_item is not None:
+            target_schedule.daily_plan_item = plan_item
+        target_schedule.save(
+            update_fields=[
+                "inventory_item",
+                "video_type",
+                "scheduled_at",
+                "status",
+                "scheduled_post",
+                "attempt_count",
+                "next_retry_at",
+                "daily_plan_item",
+                "updated_at",
+            ]
+        )
+
+    target_plan_item = plan_item or getattr(target_schedule, "daily_plan_item", None)
+    if target_plan_item:
+        DailyPostingPlanItem.objects.filter(pk=target_plan_item.pk).update(
+            status=DailyPostingPlanItem.Status.CONSUMED,
+            inventory_item_id=item.id,
+            scheduled_post_id=scheduled_post.id,
+        )
+
+    item.status = "SCHEDULED"
+    item.scheduled_for = slot_at_utc
+    item.save(update_fields=["status", "scheduled_for", "updated_at"])
+    return scheduled_post, target_schedule
+
+
 @transaction.atomic
 def generate_daily_schedule_for_factory(
     factory: Factory,
@@ -190,17 +308,15 @@ def generate_daily_schedule_for_factory(
             not in occupied
         ]
 
-        short_items = list(
-            VideoInventoryItem.objects.select_for_update()
-            .filter(factory=factory, brand=brand, status="AVAILABLE", video_type="SHORT")
-            .exclude(auto_cut_corte_id__isnull=True)
-            .order_by("id")
+        short_items = _available_inventory_items_for_slot(
+            factory=factory,
+            brand=brand,
+            video_type="SHORT",
         )
-        long_items = list(
-            VideoInventoryItem.objects.select_for_update()
-            .filter(factory=factory, brand=brand, status="AVAILABLE", video_type="LONG")
-            .exclude(auto_cut_corte_id__isnull=True)
-            .order_by("id")
+        long_items = _available_inventory_items_for_slot(
+            factory=factory,
+            brand=brand,
+            video_type="LONG",
         )
         short_queue = _order_with_source_diversity(short_items)
         long_queue = _order_with_source_diversity(long_items)
@@ -210,44 +326,14 @@ def generate_daily_schedule_for_factory(
             if not queue:
                 continue
             item = queue.pop(0)
-            platform = "YT" if slot_plan.video_type == "SHORT" else "YTB"
-            account = _first_social_account_for_video_type(brand, slot_plan.video_type)
-            slot_at_utc = slot_plan.scheduled_at.astimezone(UTC)
-            post_at_utc = slot_at_utc
-            scheduled_post = ScheduledPost.objects.create(
-                job=None,
-                auto_cut_corte=item.auto_cut_corte,
-                platforms=[platform],
-                social_account=account,
-                scheduled_at=post_at_utc,
-                title=(item.title or "")[:200],
-                description=item.description or "",
-                privacy_status="private",
-                status="PENDING",
+            allocate_inventory_item_to_slot(
+                factory=factory,
+                brand=brand,
+                item=item,
+                video_type=slot_plan.video_type,
+                scheduled_at=slot_plan.scheduled_at,
+                plan_item=slot_plan.plan_item,
             )
-            fps_kwargs = {
-                "factory": factory,
-                "brand": brand,
-                "inventory_item": item,
-                "video_type": slot_plan.video_type,
-                "scheduled_at": slot_at_utc,
-                "status": "PLANNED",
-                "scheduled_post": scheduled_post,
-            }
-            if slot_plan.plan_item:
-                fps_kwargs["daily_plan_item"] = slot_plan.plan_item
-            FactoryPostingSchedule.objects.create(**fps_kwargs)
-
-            if slot_plan.plan_item:
-                DailyPostingPlanItem.objects.filter(pk=slot_plan.plan_item.pk).update(
-                    status=DailyPostingPlanItem.Status.CONSUMED,
-                    inventory_item_id=item.id,
-                    scheduled_post_id=scheduled_post.id,
-                )
-
-            item.status = "SCHEDULED"
-            item.scheduled_for = post_at_utc
-            item.save(update_fields=["status", "scheduled_for", "updated_at"])
             created_count += 1
 
     log_event(
