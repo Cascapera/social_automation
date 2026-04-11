@@ -502,6 +502,97 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         item.save(update_fields=["status", "last_error", "attempt_count", "updated_at"])
 
 
+def _factory_slot_deadline(post: ScheduledPost) -> datetime | None:
+    try:
+        schedule = getattr(post, "factory_schedule", None)
+    except Exception:
+        schedule = None
+    if schedule and getattr(schedule, "scheduled_at", None):
+        return schedule.scheduled_at
+    if not getattr(post, "id", None):
+        return None
+    schedule = FactoryPostingSchedule.objects.filter(scheduled_post_id=post.id).only("scheduled_at").first()
+    return getattr(schedule, "scheduled_at", None) if schedule else None
+
+
+def _fail_expired_factory_slot(
+    post: ScheduledPost,
+    *,
+    correlation_id: str,
+    brand_id: int | None,
+    current_attempt: int,
+    duration_ms: float,
+    reason: str,
+    check_time: datetime | None = None,
+) -> dict | None:
+    deadline = _factory_slot_deadline(post)
+    if not deadline:
+        return None
+    when = check_time or timezone.now()
+    if when <= deadline:
+        return None
+
+    ext = dict(post.external_ids or {})
+    ext["slot_expired"] = True
+    ext["slot_expired_at"] = timezone.now().isoformat()
+    ext["slot_deadline_at"] = deadline.isoformat()
+    ext.pop("upload_post_reconciliation_state", None)
+    ext.pop("upload_post_no_provider_id_check_count", None)
+    ext.pop("upload_post_resend_count", None)
+
+    post.status = "FAILED"
+    post.external_ids = ext
+    post.error = (
+        f"Janela de postagem expirada para o slot {deadline.isoformat()}. "
+        f"{(reason or '').strip()[:260]}".strip()
+    )
+    post.save(update_fields=["status", "external_ids", "error"])
+
+    try:
+        FactoryPostingAttemptLog.objects.create(
+            posting_schedule=post.factory_schedule,
+            attempt_number=current_attempt,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+            result="ERROR",
+            error_message=post.error,
+            provider_response={
+                "external_ids": post.external_ids or {},
+                "slot_deadline_at": deadline.isoformat(),
+                "checked_at": when.isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+    publish_failures_total.inc()
+    log_event(
+        logger,
+        event="publish_window_expired",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=brand_id,
+        platform="youtube",
+        slot_deadline_at=deadline.isoformat(),
+        checked_at=when.isoformat(),
+        status="error",
+    )
+    log_event(
+        logger,
+        event="publish_finished",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=brand_id,
+        platform="youtube",
+        status="error",
+        duration_ms=duration_ms,
+        attempt_number=current_attempt,
+        error=post.error,
+    )
+    _sync_factory_posting_schedule(post)
+    return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
+
+
 @transaction.atomic
 def _replace_ambiguous_short_slot(
     post: ScheduledPost,
@@ -1125,6 +1216,17 @@ def _try_pending_upload_post_reconciliation(
     if ext.get(EXT_UPLOAD_POST_RECONCILIATION_STATE) != RECONCILIATION_STATE_PENDING:
         return None
 
+    expired_result = _fail_expired_factory_slot(
+        post,
+        correlation_id=correlation_id,
+        brand_id=brand_id,
+        current_attempt=current_attempt,
+        duration_ms=_timer.elapsed_ms(),
+        reason="O horário do slot já passou antes de concluir a reconciliação do Upload Post.",
+    )
+    if expired_result is not None:
+        return expired_result
+
     upload_post_reconciliation_runs_total.inc()
     up_list = _build_upload_post_platforms(brand, post) if brand else []
     needs_youtube = "YOUTUBE" in up_list
@@ -1149,6 +1251,18 @@ def _try_pending_upload_post_reconciliation(
     )
 
     if outcome.decision == ReconcileDecision.WAIT:
+        next_check_at = timezone.now() + timedelta(seconds=next_delay)
+        expired_result = _fail_expired_factory_slot(
+            post,
+            correlation_id=correlation_id,
+            brand_id=brand_id,
+            current_attempt=current_attempt,
+            duration_ms=_timer.elapsed_ms(),
+            reason="A reconciliação do Upload Post só teria nova tentativa depois do horário do slot.",
+            check_time=next_check_at,
+        )
+        if expired_result is not None:
+            return expired_result
         log_event(
             logger,
             event="upload_post_fallback_blocked",
@@ -1161,7 +1275,7 @@ def _try_pending_upload_post_reconciliation(
             f"Upload Post: confirmação pendente. {(outcome.detail or '')[:220]} "
             f"Nova verificação em {next_delay}s."
         )
-        post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
+        post.scheduled_at = next_check_at
         post.save(update_fields=["external_ids", "scheduled_at", "error"])
         log_event(
             logger,
@@ -1319,6 +1433,18 @@ def _try_pending_upload_post_reconciliation(
                 resend_count=ext["upload_post_resend_count"],
             )
             return None
+        next_check_at = timezone.now() + timedelta(seconds=next_delay)
+        expired_result = _fail_expired_factory_slot(
+            post,
+            correlation_id=correlation_id,
+            brand_id=brand_id,
+            current_attempt=current_attempt,
+            duration_ms=_timer.elapsed_ms(),
+            reason="O slot expiraria antes de uma nova checagem do resultado incerto do Upload Post.",
+            check_time=next_check_at,
+        )
+        if expired_result is not None:
+            return expired_result
         post.external_ids = ext
         post.error = (
             "Upload Post: request_id/job_id não localizado no provedor; "
@@ -1328,7 +1454,7 @@ def _try_pending_upload_post_reconciliation(
             "Upload Post: resultado incerto e sem request_id/job_id persistido; "
             f"nova tentativa de verificação no fim da fila em {next_delay}s."
         )
-        post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
+        post.scheduled_at = next_check_at
         post.save(update_fields=["external_ids", "scheduled_at", "error"])
         log_event(
             logger,
@@ -1390,10 +1516,22 @@ def _try_pending_upload_post_reconciliation(
         ext.pop("upload_post_resend_count", None)
 
         if up_list and not all_filled:
+            next_check_at = timezone.now() + timedelta(seconds=next_delay)
+            expired_result = _fail_expired_factory_slot(
+                post,
+                correlation_id=correlation_id,
+                brand_id=brand_id,
+                current_attempt=current_attempt,
+                duration_ms=_timer.elapsed_ms(),
+                reason="O Upload Post concluiu parcialmente, mas a próxima verificação cairia depois do horário do slot.",
+                check_time=next_check_at,
+            )
+            if expired_result is not None:
+                return expired_result
             ext[EXT_UPLOAD_POST_RECONCILIATION_STATE] = RECONCILIATION_STATE_PENDING
             post.external_ids = ext
             post.error = "Upload Post: processamento concluído parcialmente; aguardando IDs de todas as plataformas."
-            post.scheduled_at = timezone.now() + timedelta(seconds=next_delay)
+            post.scheduled_at = next_check_at
             post.save(update_fields=["external_ids", "scheduled_at", "error"])
             log_event(
                 logger,
@@ -2182,6 +2320,17 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
 
     _brand_id = brand.id if brand else None
 
+    expired_result = _fail_expired_factory_slot(
+        post,
+        correlation_id=correlation_id,
+        brand_id=_brand_id,
+        current_attempt=current_attempt,
+        duration_ms=_timer.elapsed_ms(),
+        reason="O horário do slot já passou antes de iniciar uma nova tentativa de publicação.",
+    )
+    if expired_result is not None:
+        return expired_result
+
     early_reconcile = _try_pending_upload_post_reconciliation(
         post,
         brand,
@@ -2218,8 +2367,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     if brand and getattr(brand, "factory_id", None):
         try:
             if brand.factory and brand.factory.scheduling_paused:
+                next_check_at = timezone.now() + timedelta(minutes=5)
+                expired_result = _fail_expired_factory_slot(
+                    post,
+                    correlation_id=correlation_id,
+                    brand_id=_brand_id,
+                    current_attempt=current_attempt,
+                    duration_ms=_timer.elapsed_ms(),
+                    reason="A factory permaneceu pausada até além do horário do slot.",
+                    check_time=next_check_at,
+                )
+                if expired_result is not None:
+                    return expired_result
                 post.status = "PENDING"
-                post.scheduled_at = timezone.now() + timedelta(minutes=5)
+                post.scheduled_at = next_check_at
                 post.error = "Agendamento da factory pausado. Aguardando retomada."
                 post.save(update_fields=["status", "scheduled_at", "error"])
                 _sync_factory_posting_schedule(post)
@@ -2566,8 +2727,20 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                             scheduled_post_id=post.id,
                             delay_seconds=unknown_delay,
                         )
+                        next_check_at = timezone.now() + timedelta(seconds=unknown_delay)
+                        expired_result = _fail_expired_factory_slot(
+                            post,
+                            correlation_id=correlation_id,
+                            brand_id=_brand_id,
+                            current_attempt=current_attempt,
+                            duration_ms=_timer.elapsed_ms(),
+                            reason="O resultado incerto do Upload Post só seria reavaliado depois do horário do slot.",
+                            check_time=next_check_at,
+                        )
+                        if expired_result is not None:
+                            return expired_result
                         post.status = "PENDING"
-                        post.scheduled_at = timezone.now() + timedelta(seconds=unknown_delay)
+                        post.scheduled_at = next_check_at
                         post.error = (
                             "Upload Post: resultado incerto (timeout/rede/código intermediário). "
                             "Confirmando status no provedor no fim da fila antes de nova ação."
@@ -3107,12 +3280,24 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             else:
                 delay = max([300] + requested_delays)
             msg = " ; ".join([item["message"] for item in retryable_errors])
+            next_retry_at = timezone.now() + timedelta(seconds=delay)
+            expired_result = _fail_expired_factory_slot(
+                post,
+                correlation_id=correlation_id,
+                brand_id=_brand_id,
+                current_attempt=current_attempt,
+                duration_ms=_timer.elapsed_ms(),
+                reason="A próxima tentativa automática cairia depois do horário do slot.",
+                check_time=next_retry_at,
+            )
+            if expired_result is not None:
+                return expired_result
             post.status = "PENDING"
             if should_not_consume_attempt:
                 post.retry_count = int(post.retry_count or 0)
             else:
                 post.retry_count = next_retry
-            post.scheduled_at = timezone.now() + timedelta(seconds=delay)
+            post.scheduled_at = next_retry_at
             if has_quota_exceeded:
                 post.error = (
                     "Cota do YouTube excedida (quotaExceeded). "

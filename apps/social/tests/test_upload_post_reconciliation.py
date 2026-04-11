@@ -408,6 +408,98 @@ class UploadPostReconciliationTests(TestCase):
         mock_up.assert_not_called()
         native.publish.assert_called_once()
 
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_factory_slot_expired_stops_new_attempt_and_returns_video_to_inventory(self, mock_up: MagicMock):
+        current_item = self._create_short_inventory_item("expired-immediate")
+        slot_at = timezone.now() - timedelta(minutes=1)
+        post, schedule = self._factory_short_post(current_item, scheduled_at=slot_at)
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        current_item.refresh_from_db()
+
+        self.assertEqual(result.get("status"), "FAILED")
+        self.assertEqual(post.status, "FAILED")
+        self.assertTrue(post.external_ids.get("slot_expired"))
+        self.assertEqual(schedule.status, "FAILED")
+        self.assertEqual(current_item.status, "AVAILABLE")
+        self.assertIn("Janela de postagem expirada", post.error)
+        self.assertIn("Janela de postagem expirada", current_item.last_error)
+        mock_up.assert_not_called()
+        mock_native.assert_not_called()
+
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    def test_reconciliation_wait_beyond_slot_expires_window_instead_of_retrying(
+        self,
+        mock_status: MagicMock,
+        mock_up: MagicMock,
+    ):
+        current_item = self._create_short_inventory_item("expired-reconcile")
+        slot_at = timezone.now() + timedelta(seconds=30)
+        post, schedule = self._factory_short_post(
+            current_item,
+            scheduled_at=slot_at,
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-xyz",
+            },
+        )
+        mock_status.return_value = ({"status": "in_progress", "results": []}, None)
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        current_item.refresh_from_db()
+
+        self.assertEqual(result.get("status"), "FAILED")
+        self.assertEqual(post.status, "FAILED")
+        self.assertTrue(post.external_ids.get("slot_expired"))
+        self.assertEqual(schedule.status, "FAILED")
+        self.assertEqual(current_item.status, "AVAILABLE")
+        self.assertIn("reconciliação", post.error.lower())
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+        mock_native.assert_not_called()
+
+    def test_retryable_publisher_error_beyond_slot_expires_window_instead_of_rescheduling(self):
+        from apps.social.publishers.youtube import YouTubePublishError
+
+        self.brand.upload_post_youtube_enabled = False
+        self.brand.save(update_fields=["upload_post_youtube_enabled"])
+        current_item = self._create_short_inventory_item("expired-retry")
+        slot_at = timezone.now() + timedelta(seconds=30)
+        post, schedule = self._factory_short_post(current_item, scheduled_at=slot_at)
+        native = MagicMock()
+        native.publish = MagicMock(
+            side_effect=YouTubePublishError(
+                "temporary backend error",
+                reason="backendError",
+                retriable=True,
+                retry_after_seconds=120,
+            )
+        )
+
+        with patch("apps.social.publishers.get_publisher", return_value=native):
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        current_item.refresh_from_db()
+
+        self.assertEqual(result.get("status"), "FAILED")
+        self.assertEqual(post.status, "FAILED")
+        self.assertTrue(post.external_ids.get("slot_expired"))
+        self.assertEqual(schedule.status, "FAILED")
+        self.assertEqual(current_item.status, "AVAILABLE")
+        self.assertIn("próxima tentativa automática", post.error.lower())
+        native.publish.assert_called_once()
+
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
     def test_short_provider_not_found_after_resend_replaces_slot_with_new_short(
