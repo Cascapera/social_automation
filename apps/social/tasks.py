@@ -35,6 +35,7 @@ from apps.jobs.logging_utils import (
     resolve_scheduled_post_correlation_id,
 )
 from apps.jobs.models import (
+    DailyPostingPlanItem,
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
     Job,
@@ -607,7 +608,7 @@ def _replace_ambiguous_short_slot(
     try:
         schedule = (
             FactoryPostingSchedule.objects.select_for_update()
-            .select_related("inventory_item", "factory", "brand", "daily_plan_item")
+            .select_related("inventory_item", "factory", "brand")
             .get(scheduled_post_id=post.id)
         )
     except FactoryPostingSchedule.DoesNotExist:
@@ -629,6 +630,11 @@ def _replace_ambiguous_short_slot(
     old_external_ids.pop("upload_post_reconciliation_state", None)
     old_external_ids.pop("upload_post_no_provider_id_check_count", None)
     old_external_ids.pop("upload_post_resend_count", None)
+    plan_item = (
+        DailyPostingPlanItem.objects.filter(pk=schedule.daily_plan_item_id).first()
+        if schedule.daily_plan_item_id
+        else None
+    )
 
     replacement_item = None
     if replacement_count < SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS:
@@ -673,7 +679,7 @@ def _replace_ambiguous_short_slot(
             video_type="SHORT",
             scheduled_at=schedule.scheduled_at,
             schedule=schedule,
-            plan_item=schedule.daily_plan_item,
+            plan_item=plan_item,
             correlation_id=post.correlation_id or "",
             external_ids=replacement_external_ids,
         )

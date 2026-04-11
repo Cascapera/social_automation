@@ -15,6 +15,8 @@ from django.utils import timezone
 from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutSuggestion
 from apps.brands.models import Brand, BrandSocialAccount, Factory
 from apps.jobs.models import (
+    DailyPostingPlan,
+    DailyPostingPlanItem,
     FactoryPostingSchedule,
     Job,
     RenderOutput,
@@ -140,6 +142,7 @@ class UploadPostReconciliationTests(TestCase):
         *,
         scheduled_at=None,
         external_ids: dict | None = None,
+        with_daily_plan_item: bool = False,
     ) -> tuple[ScheduledPost, FactoryPostingSchedule]:
         slot_at = scheduled_at or (timezone.now() + timedelta(minutes=40))
         item.status = "SCHEDULED"
@@ -155,6 +158,24 @@ class UploadPostReconciliationTests(TestCase):
             status="PENDING",
             external_ids=external_ids or {},
         )
+        plan_item = None
+        if with_daily_plan_item:
+            plan = DailyPostingPlan.objects.create(
+                brand=self.brand,
+                plan_date=slot_at.date(),
+                timezone=self.factory.timezone or "America/Sao_Paulo",
+                status=DailyPostingPlan.Status.GENERATED,
+                planned_posts_count=1,
+            )
+            plan_item = DailyPostingPlanItem.objects.create(
+                plan=plan,
+                order_index=0,
+                video_type="SHORT",
+                scheduled_at=slot_at,
+                status=DailyPostingPlanItem.Status.CONSUMED,
+                inventory_item=item,
+                scheduled_post=post,
+            )
         schedule = FactoryPostingSchedule.objects.create(
             factory=self.factory,
             brand=self.brand,
@@ -163,6 +184,7 @@ class UploadPostReconciliationTests(TestCase):
             scheduled_at=slot_at,
             status="PLANNED",
             scheduled_post=post,
+            daily_plan_item=plan_item,
         )
         return post, schedule
 
@@ -553,6 +575,54 @@ class UploadPostReconciliationTests(TestCase):
             replacement_post.external_ids.get("short_slot_replaced_from_inventory_item_id"),
             current_item.id,
         )
+        self.assertEqual(replacement_item.status, "SCHEDULED")
+        mock_status.assert_called_once()
+        mock_up.assert_not_called()
+        mock_native.assert_not_called()
+
+    @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_short_provider_not_found_with_daily_plan_item_replaces_slot_without_lock_error(
+        self,
+        mock_up: MagicMock,
+        mock_status: MagicMock,
+    ):
+        current_item = self._create_short_inventory_item("planned-primary")
+        replacement_item = self._create_short_inventory_item("planned-replacement")
+        slot_at = timezone.now() + timedelta(minutes=35)
+        post, schedule = self._factory_short_post(
+            current_item,
+            scheduled_at=slot_at,
+            external_ids={
+                "upload_post_reconciliation_state": "pending",
+                "upload_post_request_id": "req-missing",
+                "upload_post_resend_count": 1,
+            },
+            with_daily_plan_item=True,
+        )
+        mock_status.return_value = (
+            {
+                "status": "not_found",
+                "message": "No upload request found with this ID",
+            },
+            None,
+        )
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        schedule.refresh_from_db()
+        replacement_item.refresh_from_db()
+        replacement_post = ScheduledPost.objects.get(pk=result["replacement_post_id"])
+        plan_item = DailyPostingPlanItem.objects.get(pk=schedule.daily_plan_item_id)
+
+        self.assertEqual(result.get("skipped"), "short_slot_replaced")
+        self.assertEqual(schedule.inventory_item_id, replacement_item.id)
+        self.assertEqual(schedule.scheduled_post_id, replacement_post.id)
+        self.assertIsNotNone(schedule.daily_plan_item_id)
+        self.assertEqual(plan_item.inventory_item_id, replacement_item.id)
+        self.assertEqual(plan_item.scheduled_post_id, replacement_post.id)
         self.assertEqual(replacement_item.status, "SCHEDULED")
         mock_status.assert_called_once()
         mock_up.assert_not_called()
