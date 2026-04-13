@@ -16,6 +16,7 @@ from apps.jobs.services.pipeline_execution import (
     STAGE_SUBTITLE_BURN,
     STAGE_TRANSCRIPTION,
     get_or_create_job_pipeline_execution,
+    start_stage,
 )
 from apps.jobs.tasks import burn_subtitles_task, generate_subtitles_task, process_job
 
@@ -131,12 +132,12 @@ class PipelineExecutionTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(PipelineExecution.objects.count(), 1)
 
-    def test_repeated_stage_execution_reuses_same_row(self):
+    def test_repeated_transcription_skips_after_completed_idempotent(self):
         job = self._create_job(status="DONE")
         self._create_output(job)
         segments = [{"start": 0.0, "end": 1.0, "text": "teste"}]
 
-        with patch("apps.jobs.tasks.generate_subtitles", return_value=segments):
+        with patch("apps.jobs.tasks.generate_subtitles", return_value=segments) as gen_mock:
             generate_subtitles_task.run(job.id)
             generate_subtitles_task.run(job.id)
 
@@ -151,8 +152,48 @@ class PipelineExecutionTests(TestCase):
         stage_execution = stage_qs.get()
 
         self.assertEqual(stage_qs.count(), 1)
-        self.assertEqual(stage_execution.retry_count, 1)
+        self.assertEqual(stage_execution.retry_count, 0)
         self.assertEqual(stage_execution.status, StageExecution.Status.COMPLETED)
+        self.assertEqual(gen_mock.call_count, 1)
+
+    def test_transcription_skips_when_stage_already_running(self):
+        """Concurrent duplicate task: stage RUNNING → no second Whisper invocation."""
+        job = self._create_job(status="DONE")
+        self._create_output(job)
+        pe, _ = get_or_create_job_pipeline_execution(job)
+        start_stage(
+            pe,
+            stage_name=STAGE_TRANSCRIPTION,
+            queue_name="transcription",
+            task_name="other_worker",
+            input_payload={"job_id": job.id},
+        )
+        with patch("apps.jobs.tasks.generate_subtitles") as gen_mock:
+            generate_subtitles_task.run(job.id)
+        gen_mock.assert_not_called()
+
+    def test_two_distinct_jobs_transcribe_in_parallel_mock(self):
+        job_one = self._create_job(status="DONE")
+        job_two = self._create_job(status="DONE")
+        self._create_output(job_one)
+        self._create_output(job_two)
+        segments = [{"start": 0.0, "end": 1.0, "text": "a"}]
+
+        with patch("apps.jobs.tasks.generate_subtitles", return_value=segments) as gen_mock:
+            generate_subtitles_task.run(job_one.id)
+            generate_subtitles_task.run(job_two.id)
+
+        self.assertEqual(gen_mock.call_count, 2)
+        for jid in (job_one.id, job_two.id):
+            pe = PipelineExecution.objects.get(
+                aggregate_type=JOB_AGGREGATE_TYPE,
+                aggregate_id=jid,
+            )
+            st = StageExecution.objects.get(
+                pipeline_execution=pe,
+                stage_name=STAGE_TRANSCRIPTION,
+            )
+            self.assertEqual(st.status, StageExecution.Status.COMPLETED)
 
     def test_pipeline_is_completed_after_final_integrated_stage(self):
         job = self._create_job(

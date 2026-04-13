@@ -93,6 +93,45 @@ def get_or_create_pipeline_execution(
     return pipeline_execution, created
 
 
+def begin_transcription_stage_or_skip(
+    pipeline_execution: PipelineExecution,
+    *,
+    queue_name: str,
+    task_name: str,
+    job_id: int,
+) -> bool:
+    """
+    Start the transcription stage or skip if another worker already owns it.
+
+    Returns True if this invocation should run Whisper; False if the stage is
+    already COMPLETED (idempotent no-op) or RUNNING (concurrent duplicate task).
+
+    The check and start_stage run in one DB transaction with row locks so two
+    parallel Celery processes cannot both pass the guard for the same job.
+    """
+    with transaction.atomic():
+        pipeline_execution = PipelineExecution.objects.select_for_update().get(
+            pk=pipeline_execution.pk
+        )
+        stage_execution, _ = _get_or_create_stage_locked(
+            pipeline_execution=pipeline_execution,
+            stage_name=STAGE_TRANSCRIPTION,
+        )
+        if stage_execution.status in (
+            StageExecution.Status.COMPLETED,
+            StageExecution.Status.RUNNING,
+        ):
+            return False
+        start_stage(
+            pipeline_execution,
+            stage_name=STAGE_TRANSCRIPTION,
+            queue_name=queue_name,
+            task_name=task_name,
+            input_payload={"job_id": job_id},
+        )
+        return True
+
+
 def get_or_create_job_pipeline_execution(job: Job) -> tuple[PipelineExecution, bool]:
     metadata = {
         key: value

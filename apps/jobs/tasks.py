@@ -25,6 +25,7 @@ from .services.pipeline_execution import (
     STAGE_JOB_PROCESSING,
     STAGE_SUBTITLE_BURN,
     STAGE_TRANSCRIPTION,
+    begin_transcription_stage_or_skip,
     complete_stage,
     fail_stage,
     get_or_create_job_pipeline_execution,
@@ -145,13 +146,20 @@ def generate_subtitles_task(self, job_id: int) -> None:
     pipeline_execution, _ = get_or_create_job_pipeline_execution(job)
     task_name, queue_name = _resolve_task_context(self)
     queue_name = queue_name or settings.CELERY_QUEUE_TRANSCRIPTION
-    start_stage(
+    if not begin_transcription_stage_or_skip(
         pipeline_execution,
-        stage_name=STAGE_TRANSCRIPTION,
         queue_name=queue_name,
         task_name=task_name,
-        input_payload={"job_id": job.id},
-    )
+        job_id=job.id,
+    ):
+        logger.info(
+            "transcription_skipped_duplicate_or_in_flight",
+            extra={
+                "source_video_id": job.id,
+                "task_id": self.request.id or "",
+            },
+        )
+        return
 
     try:
         out = job.output
