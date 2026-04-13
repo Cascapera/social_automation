@@ -5,11 +5,9 @@ on:
     branches: [main, master, develop]
   pull_request:
 
-# Só cancela execuções antigas em PRs (novo commit substitui o anterior).
-# Em push para branches, não cancelar: evita "The operation was canceled" no meio do pip/test.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   backend:
@@ -25,9 +23,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          cache-dependency-path: requirements-dev.txt
 
       - name: Install dependencies
         run: |
