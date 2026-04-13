@@ -1,4 +1,6 @@
 .env
+# Local LLM / agent notes (not part of the app)
+llm.txt
 # Exported yt-dlp cookies (keep folder empty except .gitkeep)
 secrets/*
 !secrets/.gitkeep
