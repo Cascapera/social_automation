@@ -9,6 +9,7 @@ import {
   downloadJobVideo,
   getDashboardMetrics,
   getFactoryYoutubeSummary,
+  getFactoryYoutubeVideos,
 } from '../api'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../components/PaginationControls'
 import {
@@ -24,6 +25,7 @@ const PLATFORMS = [
   { id: 'YT', label: 'YouTube Shorts' },
   { id: 'YTB', label: 'YouTube' },
 ]
+const YOUTUBE_VIDEOS_PAGE_SIZE = 10
 
 function formatInt(n) {
   if (n == null || Number.isNaN(Number(n))) return '—'
@@ -33,6 +35,31 @@ function formatInt(n) {
 function formatDecimal(n, maxFrac = 2) {
   if (n == null || Number.isNaN(Number(n))) return '—'
   return Number(n).toLocaleString('pt-BR', { maximumFractionDigits: maxFrac })
+}
+
+function formatPercentRatio(n, maxFrac = 1) {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  return `${(Number(n) * 100).toLocaleString('pt-BR', { maximumFractionDigits: maxFrac })}%`
+}
+
+function formatShortDate(value) {
+  if (!value) return '—'
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return String(value)
+  return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return String(value)
+  return dt.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 /** Minutos totais (número) → texto legível */
@@ -62,24 +89,119 @@ function brandYoutubeStatus(b) {
   return has ? 'OK' : 'Sem dados'
 }
 
-function YoutubeTimeseriesBars({ rows, formatInt: fmt }) {
-  const list = Array.isArray(rows) ? rows.slice(-45) : []
+function buildTickIndices(length, maxTicks = 6) {
+  if (length <= 0) return []
+  if (length <= maxTicks) return Array.from({ length }, (_, idx) => idx)
+  const step = (length - 1) / (maxTicks - 1)
+  return Array.from(new Set(Array.from({ length: maxTicks }, (_, idx) => Math.round(idx * step))))
+}
+
+function youtubeAnalyticsStatusLabel(status) {
+  const labels = {
+    available: 'Analytics disponível',
+    unavailable: 'Sem analytics',
+    no_metrics_returned: 'Sem métricas retornadas',
+    fetch_error: 'Falha ao buscar',
+    api_key_missing: 'Upload Post indisponível',
+    pending: 'Carregando',
+  }
+  return labels[status] || status || '—'
+}
+
+function YoutubeTimeseriesChart({ rows, formatInt: fmt }) {
+  const list = Array.isArray(rows) ? rows.filter((row) => row?.date) : []
   if (!list.length) return null
-  const max = Math.max(...list.map((r) => r.views || 0), 1)
+
+  const width = 760
+  const height = 300
+  const margin = { top: 16, right: 16, bottom: 42, left: 58 }
+  const innerWidth = width - margin.left - margin.right
+  const innerHeight = height - margin.top - margin.bottom
+  const max = Math.max(...list.map((row) => Number(row.views) || 0), 1)
+  const points = list.map((row, index) => {
+    const value = Number(row.views) || 0
+    const x =
+      list.length === 1
+        ? margin.left + innerWidth / 2
+        : margin.left + (index / (list.length - 1)) * innerWidth
+    const y = margin.top + innerHeight - (value / max) * innerHeight
+    return { ...row, value, x, y }
+  })
+  const linePath = points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(' ')
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${(
+    margin.top + innerHeight
+  ).toFixed(2)} L ${points[0].x.toFixed(2)} ${(margin.top + innerHeight).toFixed(2)} Z`
+  const xTickIndices = buildTickIndices(points.length)
+  const peakPoint = points.reduce((best, current) => (current.value > best.value ? current : best), points[0])
+
   return (
-    <div className="yt-ts-wrap">
-      {list.map((r) => (
-        <div key={r.date} className="yt-ts-row">
-          <span className="yt-ts-date">{r.date}</span>
-          <div className="yt-ts-bar-track" aria-hidden>
-            <div
-              className="yt-ts-bar-fill"
-              style={{ width: `${Math.max(4, ((r.views || 0) / max) * 100)}%` }}
-            />
-          </div>
-          <span className="yt-ts-num">{fmt(r.views)}</span>
-        </div>
-      ))}
+    <div className="yt-chart-card">
+      <svg
+        className="yt-chart-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Visualizações por dia no YouTube"
+      >
+        <defs>
+          <linearGradient id="ytViewsGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(29, 155, 240, 0.36)" />
+            <stop offset="100%" stopColor="rgba(29, 155, 240, 0.04)" />
+          </linearGradient>
+        </defs>
+
+        {[0, 1, 2, 3, 4].map((step) => {
+          const ratio = step / 4
+          const y = margin.top + innerHeight - ratio * innerHeight
+          const labelValue = Math.round(max * ratio)
+          return (
+            <g key={step}>
+              <line
+                className="yt-chart-grid"
+                x1={margin.left}
+                y1={y}
+                x2={margin.left + innerWidth}
+                y2={y}
+              />
+              <text className="yt-chart-y-label" x={margin.left - 10} y={y + 4}>
+                {fmt(labelValue)}
+              </text>
+            </g>
+          )
+        })}
+
+        <path className="yt-chart-area" d={areaPath} />
+        <path className="yt-chart-line" d={linePath} />
+
+        {points.map((point, index) => (
+          <circle
+            key={`${point.date}-${index}`}
+            className="yt-chart-point"
+            cx={point.x}
+            cy={point.y}
+            r={points.length > 90 ? 2 : 3}
+          >
+            <title>{`${formatShortDate(point.date)}: ${fmt(point.value)} views`}</title>
+          </circle>
+        ))}
+
+        {xTickIndices.map((index) => {
+          const point = points[index]
+          return (
+            <text key={`tick-${point.date}-${index}`} className="yt-chart-x-label" x={point.x} y={height - 12}>
+              {formatShortDate(point.date)}
+            </text>
+          )
+        })}
+      </svg>
+
+      <div className="yt-chart-summary">
+        <span>{formatInt(list.length)} dias com dados</span>
+        <span>
+          Pico: {fmt(peakPoint.value)} em {formatShortDate(peakPoint.date)}
+        </span>
+      </div>
     </div>
   )
 }
@@ -106,9 +228,18 @@ export default function Dashboard() {
   const [ytLoading, setYtLoading] = useState(false)
   const [ytError, setYtError] = useState('')
   const [ytPeriod, setYtPeriod] = useState('last_month')
+  const [ytVideos, setYtVideos] = useState([])
+  const [ytVideosCount, setYtVideosCount] = useState(0)
+  const [ytVideosPage, setYtVideosPage] = useState(1)
+  const [ytVideosMeta, setYtVideosMeta] = useState({})
+  const [ytVideosOrdering, setYtVideosOrdering] = useState('viral_score')
+  const [ytVideosLoading, setYtVideosLoading] = useState(false)
+  const [ytVideosError, setYtVideosError] = useState('')
 
   const canLoadMetrics =
     viewMode === 'factory' ? !!factoryId : !!brandId
+  const canLoadYoutube = viewMode === 'factory' && !!factoryId
+  const youtubeBrandScope = viewMode === 'factory' && brandId ? brandId : null
 
   useEffect(() => {
     if (!canLoadMetrics) {
@@ -143,14 +274,14 @@ export default function Dashboard() {
   }, [canLoadMetrics, viewMode, factoryId, brandId])
 
   useEffect(() => {
-    if (viewMode !== 'factory' || !factoryId) {
+    if (!canLoadYoutube) {
       setYtData(null)
       setYtLoading(false)
       setYtError('')
       return
     }
     let cancelled = false
-    const entry = loadYoutubeSummaryCache(factoryId, ytPeriod)
+    const entry = loadYoutubeSummaryCache(factoryId, ytPeriod, youtubeBrandScope)
 
     if (entry && isYoutubeSummaryCacheFresh(entry)) {
       setYtData(entry.data)
@@ -169,16 +300,20 @@ export default function Dashboard() {
     }
     setYtLoading(true)
 
-    getFactoryYoutubeSummary(factoryId, { period: ytPeriod })
+    getFactoryYoutubeSummary(factoryId, {
+      period: ytPeriod,
+      brandId: youtubeBrandScope,
+      includeTopPosts: false,
+    })
       .then((data) => {
         if (!cancelled) {
           setYtData(data)
-          saveYoutubeSummaryCache(factoryId, ytPeriod, data)
+          saveYoutubeSummaryCache(factoryId, ytPeriod, data, youtubeBrandScope)
         }
       })
       .catch((e) => {
         if (!cancelled) {
-          const fallback = loadYoutubeSummaryCache(factoryId, ytPeriod)
+          const fallback = loadYoutubeSummaryCache(factoryId, ytPeriod, youtubeBrandScope)
           if (fallback?.data) {
             setYtData(fallback.data)
             setYtError(
@@ -195,7 +330,56 @@ export default function Dashboard() {
     return () => {
       cancelled = true
     }
-  }, [viewMode, factoryId, ytPeriod])
+  }, [canLoadYoutube, factoryId, ytPeriod, youtubeBrandScope])
+
+  useEffect(() => {
+    setYtVideosPage(1)
+  }, [canLoadYoutube, factoryId, ytPeriod, youtubeBrandScope, ytVideosOrdering])
+
+  useEffect(() => {
+    if (!canLoadYoutube) {
+      setYtVideos([])
+      setYtVideosCount(0)
+      setYtVideosMeta({})
+      setYtVideosLoading(false)
+      setYtVideosError('')
+      return
+    }
+
+    let cancelled = false
+    setYtVideosLoading(true)
+    setYtVideosError('')
+
+    getFactoryYoutubeVideos(factoryId, {
+      period: ytPeriod,
+      brandId: youtubeBrandScope,
+      ordering: ytVideosOrdering,
+      page: ytVideosPage,
+      pageSize: YOUTUBE_VIDEOS_PAGE_SIZE,
+    })
+      .then((data) => {
+        if (!cancelled) {
+          setYtVideos(data.items)
+          setYtVideosCount(data.count)
+          setYtVideosMeta(data.meta || {})
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setYtVideos([])
+          setYtVideosCount(0)
+          setYtVideosMeta({})
+          setYtVideosError(e.message || 'Erro ao carregar vídeos do YouTube')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setYtVideosLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [canLoadYoutube, factoryId, ytPeriod, youtubeBrandScope, ytVideosOrdering, ytVideosPage])
 
   function loadJobs() {
     if (!brandId) {
@@ -298,6 +482,19 @@ export default function Dashboard() {
   }
 
   const jobs = tab === 'ativos' ? activeJobs : archivedJobs
+  const youtubeScopeNote = youtubeBrandScope
+    ? 'Escopo filtrado pela brand selecionada no menu.'
+    : 'Escopo agregado de todas as brands da factory selecionada.'
+  const youtubeCoverageNote =
+    ytVideosMeta?.total_videos > 0
+      ? `${formatInt(ytVideosMeta.upload_post_analytics_available)} de ${formatInt(
+          ytVideosMeta.total_videos,
+        )} vídeos têm analytics Upload Post disponíveis.`
+      : ''
+  const youtubeRankingNote =
+    ytVideosOrdering === 'viral_score'
+      ? 'Viral Score combina views/dia, taxa de engajamento e recencia.'
+      : 'Ranking por views totais, mantendo o Viral Score visível para contexto.'
 
   return (
     <div className="dashboard">
@@ -380,16 +577,19 @@ export default function Dashboard() {
       </section>
 
       {viewMode === 'factory' && factoryId && (
-        <section className="dashboard-youtube-section" aria-label="YouTube Upload Post">
+        <section className="dashboard-youtube-section" aria-label="Analytics do YouTube">
           <div className="dashboard-youtube-header">
-            <h2 className="dashboard-metrics-title">YouTube (Upload Post)</h2>
+            <div>
+              <h2 className="dashboard-metrics-title">YouTube</h2>
+              <p className="form-hint yt-scope-note">{youtubeScopeNote}</p>
+            </div>
             <div className="dashboard-youtube-controls">
               <label className="yt-period-label">
                 Período
                 <select
                   value={ytPeriod}
                   onChange={(e) => setYtPeriod(e.target.value)}
-                  disabled={ytLoading}
+                  disabled={ytLoading || ytVideosLoading}
                 >
                   <option value="last_week">Última semana</option>
                   <option value="last_month">Último mês</option>
@@ -397,11 +597,22 @@ export default function Dashboard() {
                   <option value="last_year">Último ano</option>
                 </select>
               </label>
+              <label className="yt-period-label">
+                Ranking
+                <select
+                  value={ytVideosOrdering}
+                  onChange={(e) => setYtVideosOrdering(e.target.value)}
+                  disabled={ytVideosLoading}
+                >
+                  <option value="viral_score">Viral Score</option>
+                  <option value="views">Views</option>
+                </select>
+              </label>
             </div>
           </div>
-          {ytLoading && <p className="form-hint metrics-loading">Carregando analytics YouTube…</p>}
+          {ytLoading && <p className="form-hint metrics-loading">Carregando resumo YouTube…</p>}
           {ytError && <p className="page-error metrics-inline-error">{ytError}</p>}
-          {!ytLoading && !ytError && ytData && (
+          {ytData && (
             <>
               {ytData.meta?.config_error && (
                 <div className="yt-config-banner" role="status">
@@ -413,7 +624,7 @@ export default function Dashboard() {
               )}
               {ytData.meta?.has_period_metrics === false && !ytData.meta?.config_error && (
                 <p className="form-hint yt-meta-note">
-                  Nenhuma métrica de período foi retornada pelo Upload Post para as marcas desta factory.
+                  Nenhuma métrica de período foi retornada pelo Upload Post para o escopo selecionado.
                   Verifique o status por marca na tabela abaixo ou a conexão do perfil <code>brand_&lt;id&gt;</code>.
                 </p>
               )}
@@ -478,79 +689,16 @@ export default function Dashboard() {
               <div className="yt-subsection">
                 <h3 className="yt-subsection-title">Views por dia</h3>
                 {ytData.timeseries?.length ? (
-                  <YoutubeTimeseriesBars rows={ytData.timeseries} formatInt={formatInt} />
+                  <YoutubeTimeseriesChart rows={ytData.timeseries} formatInt={formatInt} />
                 ) : (
-                  <p className="form-hint">Sem série temporal para o período (ou perfis ainda sem dados no Upload Post).</p>
+                  <p className="form-hint">
+                    Sem série temporal para o período (ou perfis ainda sem dados no Upload Post).
+                  </p>
                 )}
                 {ytData.meta?.timeseries_note && (
                   <p className="form-hint yt-meta-note">{ytData.meta.timeseries_note}</p>
                 )}
               </div>
-
-              <div className="yt-subsection">
-                <h3 className="yt-subsection-title">Top vídeos (views)</h3>
-                {!ytData.top_posts?.length ? (
-                  <p className="form-hint">
-                    Nenhum post com métricas disponível. É necessário ter publicações via Upload Post com{' '}
-                    <code>upload_post_request_id</code> registrado.
-                  </p>
-                ) : (
-                  <table className="metrics-table yt-top-table">
-                    <thead>
-                      <tr>
-                        <th>Título</th>
-                        <th>Views</th>
-                        <th>Curtidas</th>
-                        <th>Comentários</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ytData.top_posts.map((row) => (
-                        <tr key={row.request_id}>
-                          <td>{row.title || '—'}</td>
-                          <td>{formatInt(row.views)}</td>
-                          <td>{formatInt(row.likes)}</td>
-                          <td>{formatInt(row.comments)}</td>
-                          <td>
-                            {row.post_url ? (
-                              <a href={row.post_url} target="_blank" rel="noreferrer">
-                                Abrir
-                              </a>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {!!ytData.top_posts_engagement?.length && (
-                <div className="yt-subsection">
-                  <h3 className="yt-subsection-title">Top engajamento (likes + comentários + shares)</h3>
-                  <table className="metrics-table yt-top-table">
-                    <thead>
-                      <tr>
-                        <th>Título</th>
-                        <th>Score</th>
-                        <th>Views</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ytData.top_posts_engagement.map((row) => (
-                        <tr key={`eng-${row.request_id}`}>
-                          <td>{row.title || '—'}</td>
-                          <td>{formatInt(row.engagement_score)}</td>
-                          <td>{formatInt(row.views)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
 
               <div className="yt-subsection">
                 <h3 className="yt-subsection-title">Por marca / canal (Upload Post)</h3>
@@ -591,6 +739,113 @@ export default function Dashboard() {
               </div>
             </>
           )}
+
+          {!ytLoading && !ytData && !ytError && (
+            <p className="form-hint yt-meta-note">
+              O resumo agregado do YouTube não está disponível para o período selecionado.
+            </p>
+          )}
+
+          <div className="yt-subsection">
+            <h3 className="yt-subsection-title">Vídeos com melhor performance</h3>
+            {youtubeCoverageNote && <p className="form-hint yt-videos-summary">{youtubeCoverageNote}</p>}
+            <p className="form-hint yt-videos-ranking-note">{youtubeRankingNote}</p>
+            {ytVideosLoading && <p className="form-hint metrics-loading">Carregando vídeos publicados…</p>}
+            {ytVideosError && <p className="page-error metrics-inline-error">{ytVideosError}</p>}
+            {!ytVideosLoading && !ytVideosError && !ytVideos.length ? (
+              <p className="form-hint">
+                Nenhum vídeo publicado foi encontrado no período e escopo selecionados.
+              </p>
+            ) : (
+              <>
+                <div className="yt-videos-table-wrap">
+                  <table className="metrics-table yt-videos-table">
+                    <thead>
+                      <tr>
+                        <th>Vídeo publicado</th>
+                        <th>Vídeo original</th>
+                        <th>Brand / canal</th>
+                        <th>Viral Score</th>
+                        <th>Views/dia</th>
+                        <th>Tx. engaj.</th>
+                        <th>Views</th>
+                        <th>Curtidas</th>
+                        <th>Comentários</th>
+                        <th>Impressões</th>
+                        <th>Compart.</th>
+                        <th>Publicado em</th>
+                        <th>Fonte / status</th>
+                        <th>URL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ytVideos.map((row) => (
+                        <tr
+                          key={row.request_id || row.external_video_id || row.scheduled_post_id}
+                        >
+                          <td className="yt-video-title-cell">
+                            <span className="yt-video-primary">{row.published_title || '—'}</span>
+                          </td>
+                          <td className="yt-video-title-cell">
+                            <span className="yt-video-secondary">{row.original_title || '—'}</span>
+                          </td>
+                          <td>{row.brand_name || '—'}</td>
+                          <td className="yt-video-metric-strong">{formatDecimal(row.viral_score, 1)}</td>
+                          <td>{formatDecimal(row.views_per_day, 1)}</td>
+                          <td>{formatPercentRatio(row.engagement_rate, 1)}</td>
+                          <td>{formatInt(row.views)}</td>
+                          <td>{formatInt(row.likes)}</td>
+                          <td>{formatInt(row.comments)}</td>
+                          <td>{formatInt(row.impressions)}</td>
+                          <td>{formatInt(row.shares)}</td>
+                          <td>{formatDateTime(row.published_at)}</td>
+                          <td>
+                            <div className="yt-source-stack">
+                              <span
+                                className={`yt-pill ${
+                                  row.analytics_source === 'upload_post' ? 'yt-pill-info' : 'yt-pill-muted'
+                                }`}
+                              >
+                                {row.analytics_source || '—'}
+                              </span>
+                              <span
+                                className={`yt-pill ${
+                                  row.analytics_status === 'available'
+                                    ? 'yt-pill-success'
+                                    : row.analytics_status === 'fetch_error'
+                                      ? 'yt-pill-error'
+                                      : 'yt-pill-warning'
+                                }`}
+                              >
+                                {youtubeAnalyticsStatusLabel(row.analytics_status)}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            {row.post_url ? (
+                              <a href={row.post_url} target="_blank" rel="noreferrer">
+                                Abrir
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <PaginationControls
+                  className="yt-videos-pagination"
+                  page={ytVideosPage}
+                  pageSize={YOUTUBE_VIDEOS_PAGE_SIZE}
+                  totalCount={ytVideosCount}
+                  onPageChange={setYtVideosPage}
+                  disabled={ytVideosLoading}
+                />
+              </>
+            )}
+          </div>
         </section>
       )}
 

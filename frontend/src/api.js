@@ -171,14 +171,47 @@ export async function getDashboardMetrics({ brandId = null, factoryId = null } =
 /**
  * YouTube (Upload Post): métricas agregadas por factory. Backend chama a API Upload Post.
  * @param {number} factoryId
- * @param {{ period?: string, refresh?: boolean }} [opts]
+ * @param {{ period?: string, refresh?: boolean, brandId?: number|string|null, includeTopPosts?: boolean }} [opts]
  */
-export async function getFactoryYoutubeSummary(factoryId, { period = 'last_month', refresh = false } = {}) {
+export async function getFactoryYoutubeSummary(
+  factoryId,
+  { period = 'last_month', refresh = false, brandId = null, includeTopPosts = false } = {},
+) {
   if (!factoryId) throw new Error('factoryId obrigatório')
   const params = new URLSearchParams()
   if (period) params.append('period', period)
+  if (brandId) params.append('brand', String(brandId))
+  params.append('include_top_posts', includeTopPosts ? '1' : '0')
   if (refresh) params.append('refresh', '1')
   return apiRequest(`/dashboard/factory/${factoryId}/youtube-summary/?${params.toString()}`)
+}
+
+export async function getFactoryYoutubeVideos(
+  factoryId,
+  {
+    period = 'last_month',
+    refresh = false,
+    brandId = null,
+    ordering = 'views',
+    page = 1,
+    pageSize = 10,
+  } = {},
+) {
+  if (!factoryId) throw new Error('factoryId obrigatório')
+  const params = new URLSearchParams()
+  if (period) params.append('period', period)
+  if (brandId) params.append('brand', String(brandId))
+  if (ordering) params.append('ordering', ordering)
+  if (refresh) params.append('refresh', '1')
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/dashboard/factory/${factoryId}/youtube-videos/?${params.toString()}`)
+  const list = normalizeListResponse(data)
+  return {
+    ...list,
+    meta: data?.meta || {},
+    scope: data?.scope || {},
+  }
 }
 
 export async function getBrand(brandId) {

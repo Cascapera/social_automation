@@ -34,6 +34,14 @@ test('save e load devolvem os mesmos dados', () => {
   assert.equal(typeof entry.fetchedAt, 'number')
 })
 
+test('cache separa factory inteira de brand específica', () => {
+  saveYoutubeSummaryCache(42, 'last_month', { scope: 'factory' })
+  saveYoutubeSummaryCache(42, 'last_month', { scope: 'brand-7' }, 7)
+
+  assert.deepEqual(loadYoutubeSummaryCache(42, 'last_month')?.data, { scope: 'factory' })
+  assert.deepEqual(loadYoutubeSummaryCache(42, 'last_month', 7)?.data, { scope: 'brand-7' })
+})
+
 test('cache fresco dentro do TTL', () => {
   const now = 1_000_000
   assert.equal(isYoutubeSummaryCacheFresh({ fetchedAt: now }, now + 1000), true)
@@ -52,7 +60,7 @@ test('cache expirado fora do TTL', () => {
 })
 
 test('load devolve null para JSON inválido', () => {
-  mem['yt_factory_summary_v1:1:last_month'] = 'not-json{'
+  mem['yt_factory_summary_v1:1:last_month:all'] = 'not-json{'
   assert.equal(loadYoutubeSummaryCache(1, 'last_month'), null)
 })
 
