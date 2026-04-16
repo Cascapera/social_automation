@@ -19,3 +19,11 @@ DATABASES = {
         "NAME": ":memory:",
     }
 }
+
+# Testes sempre com cache em memória, independente de DJANGO_DEBUG no ambiente.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "OPTIONS": {"MAX_ENTRIES": 100},
+    }
+}

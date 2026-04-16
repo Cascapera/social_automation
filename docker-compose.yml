@@ -79,7 +79,7 @@ services:
     networks:
       - app
     # Prefork + concurrency 2: parallel transcription jobs (solo = one task at a time).
-    command: celery -A config worker -l INFO -Q transcription -c 2
+    command: celery -A config worker -l INFO -Q transcription -c 3
 
   # FFmpeg / NVENC (finalize, export, burn subs) + default processing (extract_cuts, etc.)
   # GPU: required for h264_nvenc in parallel with CPU transcription (celery has no GPU).

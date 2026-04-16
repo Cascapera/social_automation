@@ -911,7 +911,12 @@ YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
 
 
-@shared_task
+@shared_task(
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=1800,
+    time_limit=2100,
+)
 def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None = None):
     """
     Upload YouTube thumbnails for a brand after all videos in batch are published.
@@ -1769,7 +1774,12 @@ def _try_pending_upload_post_reconciliation(
     return None
 
 
-@shared_task
+@shared_task(
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=1800,
+    time_limit=2100,
+)
 def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noqa: C901
     """
     Process a brand's post queue sequentially.
@@ -3594,7 +3604,12 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     }
 
 
-@shared_task
+@shared_task(
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=300,
+    time_limit=600,
+)
 def post_to_platforms_task(scheduled_post_id: int):
     """Publish a ScheduledPost to configured platforms."""
     return _run_post_to_platforms(scheduled_post_id)
@@ -3612,7 +3627,7 @@ def _get_referenced_media_paths() -> set:
     Collect all file paths referenced in the database.
     Returns set of paths relative to MEDIA_ROOT, normalized.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
+    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk
     from apps.brands.models import BrandAsset
     from apps.cuts.models import Cut
     from apps.mediahub.models import SourceVideo
@@ -3628,6 +3643,10 @@ def _get_referenced_media_paths() -> set:
             refs.add(_normalize_media_path(corte.file.name))
         if corte.thumbnail and getattr(corte.thumbnail, "name", None):
             refs.add(_normalize_media_path(corte.thumbnail.name))
+    # AutoCutReadyChunk.file
+    for name in AutoCutReadyChunk.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
     # RenderOutput.file (exports/)
     for name in RenderOutput.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
         if name:
@@ -3647,18 +3666,24 @@ def _get_referenced_media_paths() -> set:
     return refs
 
 
-def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
+def _cleanup_orphan_media_files(dry_run: bool = False, min_age_hours: int = 24) -> dict:
     """
     Remove files under storage/media that have no database row.
     Folders: auto_cuts/sources, auto_cuts/cortes, auto_cuts/thumbnails,
             sources, exports, cuts, brands/assets.
+    Files modified in the last `min_age_hours` hours are skipped to avoid
+    racing with in-flight uploads/renders that haven't persisted their DB
+    row yet.
     If dry_run=True, only list orphans without deleting.
     """
+    import time as _time
+
     media_root = Path(settings.MEDIA_ROOT)
     if not media_root.exists():
-        return {"orphans_deleted": 0, "orphans_found": [], "errors": []}
+        return {"orphans_deleted": 0, "orphans_found": [], "skipped_recent": 0, "errors": []}
 
     refs = _get_referenced_media_paths()
+    mtime_cutoff = _time.time() - (min_age_hours * 3600)
     folders = [
         "auto_cuts/sources",
         "auto_cuts/cortes",
@@ -3669,6 +3694,7 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
         "brands/assets",
     ]
     deleted = 0
+    skipped_recent = 0
     orphans_found = []
     errors = []
     for folder in folders:
@@ -3681,17 +3707,26 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
                     continue
                 try:
                     rel = str(f.relative_to(media_root)).replace("\\", "/")
-                    if rel not in refs:
-                        orphans_found.append(rel)
-                        if not dry_run:
-                            f.unlink()
-                            deleted += 1
-                            logger.info("[CLEANUP] Orphan removed: %s", rel)
+                    if rel in refs:
+                        continue
+                    if f.stat().st_mtime > mtime_cutoff:
+                        skipped_recent += 1
+                        continue
+                    orphans_found.append(rel)
+                    if not dry_run:
+                        f.unlink()
+                        deleted += 1
+                        logger.info("[CLEANUP] Orphan removed: %s", rel)
                 except Exception as e:
                     errors.append(f"orphan_{f}: {e}")
         except Exception as e:
             errors.append(f"folder_{folder}: {e}")
-    return {"orphans_deleted": deleted, "orphans_found": orphans_found, "errors": errors}
+    return {
+        "orphans_deleted": deleted,
+        "orphans_found": orphans_found,
+        "skipped_recent": skipped_recent,
+        "errors": errors,
+    }
 
 
 @shared_task
@@ -3788,19 +3823,31 @@ def cleanup_posted_media_task():
             summary["errors"].append(f"corte_{corte.id}: {e}")
 
     # 2) Job output (final video): DONE jobs with all posts complete
-    done_jobs = Job.objects.filter(status="DONE").select_related("output")
+    # Requer ≥1 post DONE e nenhum PENDING/POSTING, alinhado à Seção 1 (cuts).
+    # Evita deletar o output de Jobs renderizados mas nunca agendados/publicados.
+    posted_job_ids = set(
+        ScheduledPost.objects.filter(
+            status="DONE",
+            job_id__isnull=False,
+        ).values_list("job_id", flat=True)
+    )
+    active_job_ids = set(
+        ScheduledPost.objects.filter(
+            status__in=["PENDING", "POSTING"],
+            job_id__isnull=False,
+        ).values_list("job_id", flat=True)
+    )
+    eligible_job_ids = posted_job_ids - active_job_ids
+    done_jobs = Job.objects.filter(
+        id__in=eligible_job_ids,
+        status="DONE",
+    ).select_related("output")
     for job in done_jobs:
         try:
             output = job.output
         except Exception:
             output = None
         if not output or not output.file:
-            continue
-        has_pending = ScheduledPost.objects.filter(
-            job_id=job.id,
-            status__in=["PENDING", "POSTING"],
-        ).exists()
-        if has_pending:
             continue
         try:
             fp = Path(output.file.path) if output.file.name else None
@@ -3815,17 +3862,37 @@ def cleanup_posted_media_task():
             logger.warning("[CLEANUP] Failed to delete job output %s: %s", job.id, e)
             summary["errors"].append(f"job_{job.id}: {e}")
 
-    # 3) AutoCutAnalysis: original upload video for finished analyses
+    # 3) AutoCutAnalysis: original upload for finished analyses.
+    # Alinha critérios com a Seção 1 (cuts): exige ≥1 corte efetivamente publicado
+    # (ScheduledPost DONE), sem posts ativos, sem inventário em trânsito
+    # (AVAILABLE/SCHEDULED/POSTING/FAILED). Protege também analyses sem cortes
+    # e analyses cujos cortes nunca chegaram ao VideoInventoryItem (routing sem
+    # factory). Evita perda do fonte em análises concluídas mas não publicadas.
     for analysis in AutoCutAnalysis.objects.filter(status="done"):
         if not analysis.file or not analysis.file.name:
             continue
-        # Only delete if no cuts from this analysis are still available/scheduled
-        cortes_from_analysis = AutoCutCorte.objects.filter(analysis=analysis).values_list("id", flat=True)
-        has_available_or_scheduled = VideoInventoryItem.objects.filter(
-            auto_cut_corte_id__in=cortes_from_analysis,
-            status__in=["AVAILABLE", "SCHEDULED"],
+        corte_ids = list(
+            AutoCutCorte.objects.filter(analysis=analysis).values_list("id", flat=True)
+        )
+        if not corte_ids:
+            continue
+        has_active_inventory = VideoInventoryItem.objects.filter(
+            auto_cut_corte_id__in=corte_ids,
+            status__in=["AVAILABLE", "SCHEDULED", "POSTING", "FAILED"],
         ).exists()
-        if has_available_or_scheduled:
+        if has_active_inventory:
+            continue
+        has_active_posts = ScheduledPost.objects.filter(
+            auto_cut_corte_id__in=corte_ids,
+            status__in=["PENDING", "POSTING"],
+        ).exists()
+        if has_active_posts:
+            continue
+        has_done_post = ScheduledPost.objects.filter(
+            auto_cut_corte_id__in=corte_ids,
+            status="DONE",
+        ).exists()
+        if not has_done_post:
             continue
         try:
             fp = Path(analysis.file.path) if analysis.file.name else None
