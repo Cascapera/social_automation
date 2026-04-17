@@ -1293,9 +1293,10 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
 
         from apps.social.tasks import post_to_platforms_task
 
-        queued_immediately = next_try <= (now + timedelta(seconds=35))
-        if queued_immediately:
-            post_to_platforms_task.delay(post.id)
+        # Publicação avulsa: upa agora; o provedor (YouTube publishAt /
+        # Upload-Post scheduled_date) faz o agendamento nativo no horário.
+        post_to_platforms_task.delay(post.id)
+        queued_immediately = True
 
         return Response(
             {

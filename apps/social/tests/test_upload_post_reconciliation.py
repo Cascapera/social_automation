@@ -142,7 +142,7 @@ class UploadPostReconciliationTests(TestCase):
         *,
         scheduled_at=None,
         external_ids: dict | None = None,
-        with_daily_plan_item: bool = False,
+        with_daily_plan_item: bool = True,
     ) -> tuple[ScheduledPost, FactoryPostingSchedule]:
         slot_at = scheduled_at or (timezone.now() + timedelta(minutes=40))
         item.status = "SCHEDULED"

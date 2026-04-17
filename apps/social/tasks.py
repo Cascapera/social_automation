@@ -485,8 +485,9 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         schedule.attempt_count = attempts
         schedule.next_retry_at = None
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        item.status = "AVAILABLE"
-        item.scheduled_for = None
+        is_standalone = schedule.daily_plan_item_id is None
+        item.status = "FAILED" if is_standalone else "AVAILABLE"
+        item.scheduled_for = schedule.scheduled_at if is_standalone else None
         item.last_error = post.error or ""
         item.attempt_count = attempts
         item.save(update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"])
@@ -508,12 +509,21 @@ def _factory_slot_deadline(post: ScheduledPost) -> datetime | None:
         schedule = getattr(post, "factory_schedule", None)
     except Exception:
         schedule = None
+    # Publicação avulsa (sem daily_plan_item): não tem deadline de slot.
+    if schedule and getattr(schedule, "daily_plan_item_id", None) is None:
+        return None
     if schedule and getattr(schedule, "scheduled_at", None):
         return schedule.scheduled_at
     if not getattr(post, "id", None):
         return None
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post_id=post.id).only("scheduled_at").first()
-    return getattr(schedule, "scheduled_at", None) if schedule else None
+    schedule = (
+        FactoryPostingSchedule.objects.filter(scheduled_post_id=post.id)
+        .only("scheduled_at", "daily_plan_item_id")
+        .first()
+    )
+    if not schedule or schedule.daily_plan_item_id is None:
+        return None
+    return schedule.scheduled_at
 
 
 def _fail_expired_factory_slot(
@@ -615,6 +625,9 @@ def _replace_ambiguous_short_slot(
         return None
 
     if schedule.video_type != "SHORT" or not schedule.inventory_item_id:
+        return None
+    # Publicação avulsa: o usuário escolheu este vídeo; não substitui por outro.
+    if schedule.daily_plan_item_id is None:
         return None
 
     inventory_item = VideoInventoryItem.objects.select_for_update().get(pk=schedule.inventory_item_id)
