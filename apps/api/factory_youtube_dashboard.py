@@ -633,7 +633,9 @@ def build_factory_youtube_videos(
         return row, data, err
 
     if upload_post_rows:
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        # Serial: o throttle já é thread-safe, mas o rate limit da Upload Post é agressivo —
+        # um worker só reduz risco de burst e mantém o cooldown global efetivo.
+        with ThreadPoolExecutor(max_workers=1) as pool:
             futs = [pool.submit(_fetch_one, item) for item in upload_post_rows]
             for fut in as_completed(futs):
                 row, data, err = fut.result()
@@ -642,7 +644,11 @@ def build_factory_youtube_videos(
                     row["fetch_error"] = err
                     continue
 
-                plat = (data.get("platforms") or {}).get("youtube") or {}
+                platforms_block = data.get("platforms") if isinstance(data, dict) else None
+                if isinstance(platforms_block, dict):
+                    plat = platforms_block.get("youtube") or {}
+                else:
+                    plat = {}
                 pm = plat.get("post_metrics") if isinstance(plat, dict) else None
                 if isinstance(pm, dict):
                     row["views"] = _opt_int(pm.get("views"))
