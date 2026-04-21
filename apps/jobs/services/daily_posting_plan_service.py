@@ -31,10 +31,16 @@ logger = logging.getLogger(__name__)
 _REPEAT_PENALTY_WEIGHT = 0.35
 
 
-def _rng_for_brand_day(brand_id: int, day: date):
+def _rng_for_brand_day(brand_id: int, day: date, attempt: int = 0):
     import random
 
-    payload = f"{brand_id}:{day.isoformat()}:{getattr(settings, 'SECRET_KEY', '') or 'no-secret'}"
+    secret = getattr(settings, "SECRET_KEY", "") or "no-secret"
+    if attempt > 0:
+        # Retentativas perturbam a seed para sair de casos patológicos do gerador
+        # (ex.: distribuição de shorts inviável num segmento entre longos ancorados).
+        payload = f"{brand_id}:{day.isoformat()}:attempt={attempt}:{secret}"
+    else:
+        payload = f"{brand_id}:{day.isoformat()}:{secret}"
     h = hashlib.sha256(payload.encode("utf-8")).digest()
     seed = int.from_bytes(h[:8], "big")
     return random.Random(seed)
@@ -391,12 +397,16 @@ class DailyPostingPlanService:
         *,
         correlation_id: str | None = None,
         force_regenerate: bool = False,
+        attempt: int = 0,
     ) -> DailyPostingPlan:
         """
         Retorna o plano existente se já estiver GENERADO (idempotente).
         Se force_regenerate=True, apaga itens anteriores apenas quando o plano não tiver itens CONSUMED.
+        attempt > 0 indica retentativa do scheduler: força regeneração e perturba a seed do rng.
         """
-        rng = _rng_for_brand_day(brand.id, day)
+        if attempt > 0:
+            force_regenerate = True
+        rng = _rng_for_brand_day(brand.id, day, attempt=attempt)
         cfg = ChannelScheduleConfig.from_brand(brand)
 
         plan = (

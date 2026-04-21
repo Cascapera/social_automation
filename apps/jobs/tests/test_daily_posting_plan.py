@@ -162,6 +162,22 @@ class DailyPostingPlanServiceTests(TestCase):
         self.assertEqual(plan.status, DailyPostingPlan.Status.GENERATED)
         self.assertGreaterEqual(plan.planned_posts_count, 2)
 
+    def test_rng_attempt_perturbs_seed(self):
+        """attempt>0 deve produzir sequência diferente preservando attempt=0."""
+        d = date(2026, 4, 20)
+        base = _rng_for_brand_day(1, d)
+        retry1 = _rng_for_brand_day(1, d, attempt=1)
+        retry2 = _rng_for_brand_day(1, d, attempt=2)
+        base_seq = [base.random() for _ in range(5)]
+        retry1_seq = [retry1.random() for _ in range(5)]
+        retry2_seq = [retry2.random() for _ in range(5)]
+        self.assertNotEqual(base_seq, retry1_seq)
+        self.assertNotEqual(base_seq, retry2_seq)
+        self.assertNotEqual(retry1_seq, retry2_seq)
+        # attempt=0 deve produzir a MESMA sequência do default (retrocompatível).
+        base_again = _rng_for_brand_day(1, d, attempt=0)
+        self.assertEqual(base_seq, [base_again.random() for _ in range(5)])
+
     def test_long_slot_anchors_long_near_configured_hour(self):
         """Com long_slot_times preenchido, o longo fica ancorado perto do horário (± jitter)."""
         self.brand.daily_min_long_posts = 1

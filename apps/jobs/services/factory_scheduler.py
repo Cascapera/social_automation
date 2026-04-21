@@ -22,6 +22,10 @@ from apps.jobs.services.daily_posting_plan_service import DailyPostingPlanServic
 
 logger = logging.getLogger(__name__)
 
+# Retentativas adicionais quando uma brand termina com plano em ERROR no run.
+# Total de tentativas = 1 + MAX_SCHEDULE_RETRIES.
+MAX_SCHEDULE_RETRIES = 2
+
 
 @dataclass
 class SlotPlan:
@@ -191,6 +195,123 @@ def allocate_inventory_item_to_slot(
     return scheduled_post, target_schedule
 
 
+def _schedule_brand_for_day(
+    *,
+    factory: Factory,
+    brand: Brand,
+    local_day: date,
+    tz: ZoneInfo,
+    now_local: datetime,
+    day_start_utc: datetime,
+    day_end_utc: datetime,
+    enqueue_immediately: bool,
+    correlation_id: str | None,
+    attempt: int,
+) -> tuple[str, int]:
+    """
+    Processa uma brand para o dia informado.
+    Retorna (status, created_count):
+      status = "ok" | "skipped" | "disabled" | "error".
+    """
+    if not getattr(brand, "scheduler_enabled", True) or getattr(brand, "scheduler_paused", False):
+        log_event(
+            logger,
+            event="brand_schedule_skipped",
+            correlation_id=correlation_id,
+            brand_id=brand.id,
+            factory_id=factory.id,
+            reason="scheduler_disabled_or_paused",
+        )
+        return "disabled", 0
+
+    day_plan = DailyPostingPlanService.get_or_generate_for_day(
+        brand,
+        local_day,
+        correlation_id=correlation_id,
+        force_regenerate=False,
+        attempt=attempt,
+    )
+    if day_plan.status == DailyPostingPlan.Status.SKIPPED:
+        return "skipped", 0
+    if day_plan.status == DailyPostingPlan.Status.ERROR:
+        log_event(
+            logger,
+            event="brand_schedule_no_plan_items",
+            correlation_id=correlation_id,
+            brand_id=brand.id,
+            plan_id=day_plan.id,
+            plan_status=day_plan.status,
+            last_error=(day_plan.last_error or "")[:200],
+            attempt=attempt,
+        )
+        return "error", 0
+
+    plans: list[SlotPlan] = []
+    for dpi in day_plan.items.filter(status=DailyPostingPlanItem.Status.PLANNED).order_by("order_index", "id"):
+        slot_local = dpi.scheduled_at.astimezone(tz)
+        if not enqueue_immediately and slot_local < now_local:
+            continue
+        plans.append(
+            SlotPlan(
+                brand=brand,
+                video_type=dpi.video_type,
+                scheduled_at=slot_local,
+                plan_item=dpi,
+            )
+        )
+    plans.sort(key=lambda p: p.scheduled_at)
+
+    occupied = set(
+        FactoryPostingSchedule.objects.filter(
+            factory=factory,
+            brand=brand,
+            scheduled_at__gte=day_start_utc,
+            scheduled_at__lte=day_end_utc,
+            daily_plan_item__isnull=False,
+        ).values_list("video_type", "scheduled_at")
+    )
+    plans = [
+        p
+        for p in plans
+        if (
+            p.video_type,
+            p.scheduled_at.astimezone(UTC),
+        )
+        not in occupied
+    ]
+
+    short_items = _available_inventory_items_for_slot(
+        factory=factory,
+        brand=brand,
+        video_type="SHORT",
+    )
+    long_items = _available_inventory_items_for_slot(
+        factory=factory,
+        brand=brand,
+        video_type="LONG",
+    )
+    short_queue = _order_with_source_diversity(short_items)
+    long_queue = _order_with_source_diversity(long_items)
+
+    created_count = 0
+    for slot_plan in plans:
+        queue = short_queue if slot_plan.video_type == "SHORT" else long_queue
+        if not queue:
+            continue
+        item = queue.pop(0)
+        allocate_inventory_item_to_slot(
+            factory=factory,
+            brand=brand,
+            item=item,
+            video_type=slot_plan.video_type,
+            scheduled_at=slot_plan.scheduled_at,
+            plan_item=slot_plan.plan_item,
+        )
+        created_count += 1
+
+    return "ok", created_count
+
+
 @transaction.atomic
 def generate_daily_schedule_for_factory(
     factory: Factory,
@@ -243,99 +364,75 @@ def generate_daily_schedule_for_factory(
         brands_qs = brands_qs.filter(id=brand_id)
     brands = list(brands_qs)
 
+    failed_brands: list[Brand] = []
     for brand in brands:
-        if not getattr(brand, "scheduler_enabled", True) or getattr(brand, "scheduler_paused", False):
-            log_event(
-                logger,
-                event="brand_schedule_skipped",
-                correlation_id=correlation_id,
-                brand_id=brand.id,
-                factory_id=factory.id,
-                reason="scheduler_disabled_or_paused",
-            )
-            continue
-
-        day_plan = DailyPostingPlanService.get_or_generate_for_day(
-            brand,
-            local_day,
+        status, count = _schedule_brand_for_day(
+            factory=factory,
+            brand=brand,
+            local_day=local_day,
+            tz=tz,
+            now_local=now_local,
+            day_start_utc=day_start_utc,
+            day_end_utc=day_end_utc,
+            enqueue_immediately=enqueue_immediately,
             correlation_id=correlation_id,
-            force_regenerate=False,
+            attempt=0,
         )
-        if day_plan.status == DailyPostingPlan.Status.SKIPPED:
-            continue
-        if day_plan.status == DailyPostingPlan.Status.ERROR:
+        created_count += count
+        if status == "error":
+            failed_brands.append(brand)
+
+    retried_recovered = 0
+    retried_exhausted = 0
+    for brand in failed_brands:
+        recovered = False
+        for attempt in range(1, MAX_SCHEDULE_RETRIES + 1):
             log_event(
                 logger,
-                event="brand_schedule_no_plan_items",
+                event="brand_schedule_retry_started",
                 correlation_id=correlation_id,
+                factory_id=factory.id,
                 brand_id=brand.id,
-                plan_id=day_plan.id,
-                plan_status=day_plan.status,
-                last_error=(day_plan.last_error or "")[:200],
+                attempt=attempt,
             )
-            continue
-
-        plans: list[SlotPlan] = []
-        for dpi in day_plan.items.filter(status=DailyPostingPlanItem.Status.PLANNED).order_by("order_index", "id"):
-            slot_local = dpi.scheduled_at.astimezone(tz)
-            if not enqueue_immediately and slot_local < now_local:
-                continue
-            plans.append(
-                SlotPlan(
-                    brand=brand,
-                    video_type=dpi.video_type,
-                    scheduled_at=slot_local,
-                    plan_item=dpi,
+            status, count = _schedule_brand_for_day(
+                factory=factory,
+                brand=brand,
+                local_day=local_day,
+                tz=tz,
+                now_local=now_local,
+                day_start_utc=day_start_utc,
+                day_end_utc=day_end_utc,
+                enqueue_immediately=enqueue_immediately,
+                correlation_id=correlation_id,
+                attempt=attempt,
+            )
+            if status == "ok":
+                created_count += count
+                retried_recovered += 1
+                recovered = True
+                log_event(
+                    logger,
+                    event="brand_schedule_retry_succeeded",
+                    correlation_id=correlation_id,
+                    factory_id=factory.id,
+                    brand_id=brand.id,
+                    attempt=attempt,
+                    number_of_posts=count,
                 )
+                break
+            if status in ("skipped", "disabled"):
+                break
+        if not recovered:
+            retried_exhausted += 1
+            log_event(
+                logger,
+                event="brand_schedule_retry_exhausted",
+                correlation_id=correlation_id,
+                factory_id=factory.id,
+                brand_id=brand.id,
+                max_attempts=MAX_SCHEDULE_RETRIES + 1,
             )
-        plans.sort(key=lambda p: p.scheduled_at)
-
-        occupied = set(
-            FactoryPostingSchedule.objects.filter(
-                factory=factory,
-                brand=brand,
-                scheduled_at__gte=day_start_utc,
-                scheduled_at__lte=day_end_utc,
-                daily_plan_item__isnull=False,
-            ).values_list("video_type", "scheduled_at")
-        )
-        plans = [
-            p
-            for p in plans
-            if (
-                p.video_type,
-                p.scheduled_at.astimezone(UTC),
-            )
-            not in occupied
-        ]
-
-        short_items = _available_inventory_items_for_slot(
-            factory=factory,
-            brand=brand,
-            video_type="SHORT",
-        )
-        long_items = _available_inventory_items_for_slot(
-            factory=factory,
-            brand=brand,
-            video_type="LONG",
-        )
-        short_queue = _order_with_source_diversity(short_items)
-        long_queue = _order_with_source_diversity(long_items)
-
-        for slot_plan in plans:
-            queue = short_queue if slot_plan.video_type == "SHORT" else long_queue
-            if not queue:
-                continue
-            item = queue.pop(0)
-            allocate_inventory_item_to_slot(
-                factory=factory,
-                brand=brand,
-                item=item,
-                video_type=slot_plan.video_type,
-                scheduled_at=slot_plan.scheduled_at,
-                plan_item=slot_plan.plan_item,
-            )
-            created_count += 1
 
     log_event(
         logger,
@@ -347,5 +444,14 @@ def generate_daily_schedule_for_factory(
         status="success",
         duration_ms=timer.elapsed_ms(),
         target_date=str(local_day),
+        retried_brand_count=len(failed_brands),
+        retried_recovered=retried_recovered,
+        retried_exhausted=retried_exhausted,
     )
-    return {"factory_id": factory.id, "created": created_count, "run_id": run.id}
+    return {
+        "factory_id": factory.id,
+        "created": created_count,
+        "run_id": run.id,
+        "retried_recovered": retried_recovered,
+        "retried_exhausted": retried_exhausted,
+    }
