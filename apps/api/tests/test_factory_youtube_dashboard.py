@@ -470,6 +470,99 @@ class FactoryYoutubeVideosEndpointTests(TestCase):
             ],
         )
 
+    def test_ordering_by_recent_uses_published_at(self):
+        payload = self._build_payload(ordering="recent")
+        self.assertEqual(
+            [row["published_title"] for row in payload["results"]],
+            [
+                "Analytics Parcial",
+                "Corte Campeão",
+                "Publicado via Job",
+                "Nativo sem Analytics",
+                "Gigante Antigo",
+            ],
+        )
+
+    def test_ordering_by_likes(self):
+        payload = self._build_payload(ordering="likes")
+        self.assertEqual(
+            [row["published_title"] for row in payload["results"]],
+            [
+                "Corte Campeão",
+                "Publicado via Job",
+                "Gigante Antigo",
+                "Analytics Parcial",
+                "Nativo sem Analytics",
+            ],
+        )
+
+    def test_ordering_by_comments(self):
+        payload = self._build_payload(ordering="comments")
+        self.assertEqual(
+            [row["published_title"] for row in payload["results"]],
+            [
+                "Corte Campeão",
+                "Publicado via Job",
+                "Gigante Antigo",
+                "Analytics Parcial",
+                "Nativo sem Analytics",
+            ],
+        )
+
+    def test_ordering_by_engagement_total(self):
+        payload = self._build_payload(ordering="engagement")
+        self.assertEqual(
+            [row["published_title"] for row in payload["results"]],
+            [
+                "Corte Campeão",
+                "Publicado via Job",
+                "Gigante Antigo",
+                "Analytics Parcial",
+                "Nativo sem Analytics",
+            ],
+        )
+
+    def test_ordering_by_engagement_rate(self):
+        payload = self._build_payload(ordering="engagement_rate")
+        self.assertEqual(
+            [row["published_title"] for row in payload["results"]],
+            [
+                "Corte Campeão",
+                "Publicado via Job",
+                "Gigante Antigo",
+                "Analytics Parcial",
+                "Nativo sem Analytics",
+            ],
+        )
+
+    def test_ordering_by_views_per_day(self):
+        payload = self._build_payload(ordering="views_per_day")
+        self.assertEqual(
+            [row["published_title"] for row in payload["results"]],
+            [
+                "Corte Campeão",
+                "Publicado via Job",
+                "Gigante Antigo",
+                "Analytics Parcial",
+                "Nativo sem Analytics",
+            ],
+        )
+
+    def test_meta_exposes_expanded_orderings(self):
+        payload = self._build_payload(ordering="views")
+        available = payload["meta"]["available_orderings"]
+        for key in (
+            "views",
+            "viral_score",
+            "recent",
+            "likes",
+            "comments",
+            "engagement",
+            "engagement_rate",
+            "views_per_day",
+        ):
+            self.assertIn(key, available)
+
     def test_video_list_orders_by_views_and_paginates(self):
         r1 = self._request_videos(page=1, page_size=2)
         self.assertEqual(r1.status_code, status.HTTP_200_OK)

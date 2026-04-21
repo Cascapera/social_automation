@@ -492,9 +492,16 @@ export default function Dashboard() {
         )} vídeos têm analytics Upload Post disponíveis.`
       : ''
   const youtubeRankingNote =
-    ytVideosOrdering === 'viral_score'
-      ? 'Viral Score combina views/dia, taxa de engajamento e recencia.'
-      : 'Ranking por views totais, mantendo o Viral Score visível para contexto.'
+    {
+      viral_score: 'Viral Score combina views/dia, taxa de engajamento e recência.',
+      views: 'Ranking por views totais no período.',
+      recent: 'Ranking pelos vídeos publicados mais recentemente.',
+      likes: 'Ranking pelos vídeos mais curtidos no período.',
+      comments: 'Ranking pelos vídeos com mais comentários no período.',
+      engagement: 'Ranking pela soma de curtidas, comentários e compartilhamentos.',
+      engagement_rate: 'Ranking pela taxa de engajamento (engajamento / views).',
+      views_per_day: 'Ranking pela média diária de views desde a publicação.',
+    }[ytVideosOrdering] || 'Ranking por views totais no período.'
 
   return (
     <div className="dashboard">
@@ -605,7 +612,13 @@ export default function Dashboard() {
                   disabled={ytVideosLoading}
                 >
                   <option value="viral_score">Viral Score</option>
-                  <option value="views">Views</option>
+                  <option value="views">Mais vistos</option>
+                  <option value="recent">Mais recentes</option>
+                  <option value="likes">Mais curtidos</option>
+                  <option value="comments">Mais comentados</option>
+                  <option value="engagement">Mais engajados (absoluto)</option>
+                  <option value="engagement_rate">Maior taxa de engajamento</option>
+                  <option value="views_per_day">Maior views/dia</option>
                 </select>
               </label>
             </div>

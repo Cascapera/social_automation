@@ -48,13 +48,36 @@ PERIOD_TO_DAYS = {
     "last_3months": 90,
     "last_year": 365,
 }
-VIDEO_ORDERING_ALIASES = {
+AVAILABLE_VIDEO_ORDERINGS = (
+    "views",
+    "viral_score",
+    "recent",
+    "likes",
+    "comments",
+    "engagement",
+    "engagement_rate",
+    "views_per_day",
+)
+VIDEO_ORDERING_ALIASES: dict[str, str] = {}
+for _ordering in AVAILABLE_VIDEO_ORDERINGS:
+    VIDEO_ORDERING_ALIASES[_ordering] = _ordering
+    VIDEO_ORDERING_ALIASES[f"{_ordering}_desc"] = _ordering
+    VIDEO_ORDERING_ALIASES[f"-{_ordering}"] = _ordering
+# Aliases adicionais amigáveis
+VIDEO_ORDERING_ALIASES.update({
+    "published_at": "recent",
+    "-published_at": "recent",
+    "posted_at": "recent",
+    "engagement_total": "engagement",
+})
+_ORDERING_PRIMARY_FIELD = {
     "views": "views",
-    "views_desc": "views",
-    "-views": "views",
     "viral_score": "viral_score",
-    "viral_score_desc": "viral_score",
-    "-viral_score": "viral_score",
+    "likes": "likes",
+    "comments": "comments",
+    "engagement": "engagement_total",
+    "engagement_rate": "engagement_rate",
+    "views_per_day": "views_per_day",
 }
 VIRAL_SCORE_WEIGHTS = {
     "views_per_day": 0.6,
@@ -331,26 +354,26 @@ def _viral_score(
 
 def _sort_video_rows(rows: list[dict[str, Any]], *, ordering: str) -> list[dict[str, Any]]:
     ordering_norm = normalize_video_ordering(ordering)
-    if ordering_norm == "viral_score":
+
+    if ordering_norm == "recent":
         return sorted(
             rows,
             key=lambda row: (
-                row.get("viral_score") is None,
-                -(row.get("viral_score") or 0.0),
+                row.get("_sort_published_ts") in (None, 0, 0.0),
                 -(row.get("_sort_published_ts") or 0.0),
                 -(row.get("views") or 0),
                 -(row.get("scheduled_post_id") or 0),
             ),
         )
 
+    primary_field = _ORDERING_PRIMARY_FIELD.get(ordering_norm, "views")
     return sorted(
         rows,
         key=lambda row: (
-            row.get("views") is None,
-            -(row.get("views") or 0),
-            row.get("viral_score") is None,
-            -(row.get("viral_score") or 0.0),
+            row.get(primary_field) is None,
+            -float(row.get(primary_field) or 0),
             -(row.get("_sort_published_ts") or 0.0),
+            -(row.get("views") or 0),
             -(row.get("scheduled_post_id") or 0),
         ),
     )
@@ -719,7 +742,7 @@ def build_factory_youtube_videos(
             "youtube_api_no_analytics_videos": native_without_analytics,
             "total_videos": len(ordered),
             "ordering": ordering_norm,
-            "available_orderings": ["views", "viral_score"],
+            "available_orderings": list(AVAILABLE_VIDEO_ORDERINGS),
             "default_ordering": "views",
             "viral_score_description": "Combina views/dia, taxa de engajamento e recencia.",
             "viral_score_weights": VIRAL_SCORE_WEIGHTS,
