@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any
 from urllib.parse import quote
@@ -26,18 +27,63 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_POST_API_ROOT = "https://api.upload-post.com/api"
 
-_UPLOAD_POST_MIN_INTERVAL = float(os.getenv("UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC", "0.35"))
+_UPLOAD_POST_MIN_INTERVAL = float(os.getenv("UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC", "0.6"))
+# Pausa global após 429/erro de conexão/5xx para evitar bloqueio de borda (Cloudflare/WAF).
+_UPLOAD_POST_COOLDOWN_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_COOLDOWN_SEC", "30"))
+# Teto de espera aceitável dentro de uma única chamada — acima disso devolvemos erro
+# imediato em vez de bloquear a request por muito tempo.
+_UPLOAD_POST_MAX_WAIT_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC", "5"))
+
+_throttle_lock = threading.Lock()
 _last_request_mono: float = 0.0
+_cooldown_until_mono: float = 0.0
 
 
-def _throttle_upload_post() -> None:
-    """Garante intervalo mínimo entre requisições de analytics ao Upload Post."""
+def _throttle_upload_post() -> tuple[bool, float]:
+    """
+    Garante intervalo mínimo entre requisições e respeita cooldown global após falhas.
+
+    Retorna ``(ok, wait_needed)``:
+    - ``ok=True``: caller pode prosseguir com a requisição.
+    - ``ok=False``: cooldown ativo e espera estimada seria maior que ``_UPLOAD_POST_MAX_WAIT_SEC``;
+      caller deve abortar com erro de rate limit em vez de bloquear.
+    """
     global _last_request_mono
-    now = time.monotonic()
-    wait = _UPLOAD_POST_MIN_INTERVAL - (now - _last_request_mono)
-    if wait > 0:
-        time.sleep(wait)
-    _last_request_mono = time.monotonic()
+    with _throttle_lock:
+        now = time.monotonic()
+        wait_interval = _UPLOAD_POST_MIN_INTERVAL - (now - _last_request_mono)
+        wait_cooldown = _cooldown_until_mono - now
+        wait = max(wait_interval, wait_cooldown)
+        if wait > _UPLOAD_POST_MAX_WAIT_SEC:
+            return False, wait
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_mono = time.monotonic()
+        return True, max(wait, 0.0)
+
+
+class _UploadPostCooldownError(Exception):
+    """Cooldown interno excede o teto de espera; caller deve converter em mensagem de erro."""
+
+    def __init__(self, wait_needed: float):
+        super().__init__(f"cooldown {wait_needed:.1f}s")
+        self.wait_needed = wait_needed
+
+
+def _trip_cooldown(reason: str) -> None:
+    """Arma o cooldown global ao detectar 429/5xx/erro de conexão."""
+    global _cooldown_until_mono
+    if _UPLOAD_POST_COOLDOWN_SEC <= 0:
+        return
+    with _throttle_lock:
+        target = time.monotonic() + _UPLOAD_POST_COOLDOWN_SEC
+        if target > _cooldown_until_mono:
+            _cooldown_until_mono = target
+            logger.warning(
+                "[UploadPostAnalytics] cooldown %.1fs ativado (%s)",
+                _UPLOAD_POST_COOLDOWN_SEC,
+                reason,
+            )
 
 
 def get_upload_post_api_key() -> str:
@@ -112,7 +158,9 @@ def fetch_profile_platforms_analytics(profile_username: str, platforms: str = "y
     if not key:
         return None, "UPLOAD_POST_API_KEY não configurada"
 
-    _throttle_upload_post()
+    ok, wait_needed = _throttle_upload_post()
+    if not ok:
+        return None, f"Upload Post em cooldown ({wait_needed:.0f}s). Aguarde antes de recarregar."
     url = f"{UPLOAD_POST_API_ROOT}/analytics/{quote(profile_username, safe='')}"
     try:
         resp = requests.get(
@@ -123,16 +171,20 @@ def fetch_profile_platforms_analytics(profile_username: str, platforms: str = "y
         )
     except requests.RequestException as e:
         logger.warning("[UploadPostAnalytics] rede profile=%s: %s", profile_username, e)
+        _trip_cooldown(f"network:{type(e).__name__}")
         return None, f"Erro de rede: {e}"
 
     if resp.status_code == 429:
         ra = resp.headers.get("Retry-After", "?")
+        _trip_cooldown("http_429")
         return None, f"Rate limit (429). Aguarde {ra}s ou aumente UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC."
 
     if resp.status_code == 404:
         return None, "Perfil não encontrado no Upload Post (conecte o canal brand_<id> no painel)"
     if resp.status_code == 401:
         return None, "Upload Post: API key inválida ou expirada"
+    if resp.status_code >= 500:
+        _trip_cooldown(f"http_{resp.status_code}")
     if resp.status_code >= 400:
         msg = _format_http_error_body(resp)
         logger.warning("[UploadPostAnalytics] profile=%s status=%s: %s", profile_username, resp.status_code, msg)
@@ -161,7 +213,9 @@ def _fetch_total_impressions_request(
     metrics: str | None,
     breakdown: bool,
 ) -> requests.Response:
-    _throttle_upload_post()
+    ok, wait_needed = _throttle_upload_post()
+    if not ok:
+        raise _UploadPostCooldownError(wait_needed)
     url = f"{UPLOAD_POST_API_ROOT}/uploadposts/total-impressions/{quote(profile_username, safe='')}"
     params: dict[str, Any] = {
         "platform": platform,
@@ -201,11 +255,14 @@ def fetch_total_impressions(
     def _parse_response(resp: requests.Response) -> tuple[dict[str, Any] | None, str | None]:
         if resp.status_code == 429:
             ra = resp.headers.get("Retry-After", "?")
+            _trip_cooldown("http_429")
             return None, f"Rate limit (429). Aguarde {ra}s ou aumente UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC."
         if resp.status_code == 404:
             return None, "Perfil não encontrado no Upload Post"
         if resp.status_code == 401:
             return None, "Upload Post: API key inválida ou expirada"
+        if resp.status_code >= 500:
+            _trip_cooldown(f"http_{resp.status_code}")
         if resp.status_code >= 400:
             return None, _format_http_error_body(resp)
         try:
@@ -232,8 +289,11 @@ def fetch_total_impressions(
             metrics=metrics,
             breakdown=breakdown,
         )
+    except _UploadPostCooldownError as e:
+        return None, f"Upload Post em cooldown ({e.wait_needed:.0f}s). Aguarde antes de recarregar."
     except requests.RequestException as e:
         logger.warning("[UploadPostAnalytics] rede total-impressions profile=%s: %s", profile_username, e)
+        _trip_cooldown(f"network:{type(e).__name__}")
         return None, f"Erro de rede: {e}"
 
     data, err = _parse_response(resp)
@@ -258,7 +318,10 @@ def fetch_total_impressions(
                 metrics=None,
                 breakdown=breakdown,
             )
+        except _UploadPostCooldownError as e:
+            return None, f"Upload Post em cooldown ({e.wait_needed:.0f}s). Aguarde antes de recarregar."
         except requests.RequestException as e:
+            _trip_cooldown(f"network:{type(e).__name__}")
             return None, f"Erro de rede (retry): {e}"
         data2, err2 = _parse_response(resp2)
         if err2 is None and isinstance(data2, dict):
@@ -281,7 +344,9 @@ def fetch_post_analytics(request_id: str, platform: str = "youtube") -> tuple[di
     if not rid:
         return None, "request_id vazio"
 
-    _throttle_upload_post()
+    ok, wait_needed = _throttle_upload_post()
+    if not ok:
+        return None, f"Upload Post em cooldown ({wait_needed:.0f}s). Aguarde antes de recarregar."
     url = f"{UPLOAD_POST_API_ROOT}/uploadposts/post-analytics/{quote(rid, safe='')}"
     try:
         resp = requests.get(
@@ -291,14 +356,18 @@ def fetch_post_analytics(request_id: str, platform: str = "youtube") -> tuple[di
             timeout=25,
         )
     except requests.RequestException as e:
+        _trip_cooldown(f"network:{type(e).__name__}")
         return None, f"Erro de rede: {e}"
 
     if resp.status_code == 429:
         ra = resp.headers.get("Retry-After", "?")
+        _trip_cooldown("http_429")
         return None, f"Rate limit (429). Aguarde {ra}s"
 
     if resp.status_code == 404:
         return None, "Post não encontrado no Upload Post"
+    if resp.status_code >= 500:
+        _trip_cooldown(f"http_{resp.status_code}")
     if resp.status_code >= 400:
         return None, _format_http_error_body(resp)
 

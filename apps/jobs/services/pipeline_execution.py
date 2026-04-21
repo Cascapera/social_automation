@@ -57,19 +57,26 @@ def get_or_create_pipeline_execution(
         "aggregate_type": aggregate_type,
         "aggregate_id": aggregate_id,
     }
-    defaults = {
-        "correlation_id": correlation_id or "",
-        "status": PipelineExecution.Status.PENDING,
-        "metadata_json": _normalize_payload(metadata),
-    }
-    try:
-        pipeline_execution, created = PipelineExecution.objects.get_or_create(
-            **lookup,
-            defaults=defaults,
-        )
-    except IntegrityError:
-        pipeline_execution = PipelineExecution.objects.get(**lookup)
-        created = False
+    pipeline_execution = (
+        PipelineExecution.objects.filter(**lookup).order_by("-attempt_number").first()
+    )
+    created = False
+    if pipeline_execution is None:
+        try:
+            pipeline_execution = PipelineExecution.objects.create(
+                **lookup,
+                attempt_number=1,
+                correlation_id=correlation_id or "",
+                status=PipelineExecution.Status.PENDING,
+                metadata_json=_normalize_payload(metadata),
+            )
+            created = True
+        except IntegrityError:
+            pipeline_execution = (
+                PipelineExecution.objects.filter(**lookup)
+                .order_by("-attempt_number")
+                .first()
+            )
 
     update_fields: list[str] = []
     if correlation_id and pipeline_execution.correlation_id != correlation_id:
@@ -142,6 +149,60 @@ def get_or_create_job_pipeline_execution(job: Job) -> tuple[PipelineExecution, b
         if value is not None
     }
     return get_or_create_pipeline_execution(
+        pipeline_type=JOB_PIPELINE_TYPE,
+        aggregate_type=JOB_AGGREGATE_TYPE,
+        aggregate_id=job.id,
+        correlation_id=job.correlation_id,
+        metadata=metadata,
+    )
+
+
+def start_new_pipeline_attempt(
+    *,
+    pipeline_type: str,
+    aggregate_type: str,
+    aggregate_id: int,
+    correlation_id: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> PipelineExecution:
+    """Cria uma nova tentativa (attempt_number = max+1) preservando histórico."""
+    lookup = {
+        "pipeline_type": pipeline_type,
+        "aggregate_type": aggregate_type,
+        "aggregate_id": aggregate_id,
+    }
+    last_error: IntegrityError | None = None
+    for _ in range(3):
+        with transaction.atomic():
+            last = (
+                PipelineExecution.objects.filter(**lookup)
+                .order_by("-attempt_number")
+                .first()
+            )
+            next_attempt = (last.attempt_number + 1) if last else 1
+            try:
+                return PipelineExecution.objects.create(
+                    **lookup,
+                    attempt_number=next_attempt,
+                    correlation_id=correlation_id or "",
+                    status=PipelineExecution.Status.PENDING,
+                    metadata_json=_normalize_payload(metadata),
+                )
+            except IntegrityError as exc:
+                last_error = exc
+                continue
+    raise RuntimeError(
+        "Falha ao alocar nova PipelineExecution após 3 tentativas"
+    ) from last_error
+
+
+def start_new_job_pipeline_attempt(job: Job) -> PipelineExecution:
+    metadata = {
+        key: value
+        for key, value in {"brand_id": job.brand_id, "user_id": job.user_id}.items()
+        if value is not None
+    }
+    return start_new_pipeline_attempt(
         pipeline_type=JOB_PIPELINE_TYPE,
         aggregate_type=JOB_AGGREGATE_TYPE,
         aggregate_id=job.id,

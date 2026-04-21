@@ -485,8 +485,9 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
         schedule.attempt_count = attempts
         schedule.next_retry_at = None
         schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        item.status = "AVAILABLE"
-        item.scheduled_for = None
+        is_standalone = schedule.daily_plan_item_id is None
+        item.status = "FAILED" if is_standalone else "AVAILABLE"
+        item.scheduled_for = schedule.scheduled_at if is_standalone else None
         item.last_error = post.error or ""
         item.attempt_count = attempts
         item.save(update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"])
@@ -508,12 +509,21 @@ def _factory_slot_deadline(post: ScheduledPost) -> datetime | None:
         schedule = getattr(post, "factory_schedule", None)
     except Exception:
         schedule = None
+    # Publicação avulsa (sem daily_plan_item): não tem deadline de slot.
+    if schedule and getattr(schedule, "daily_plan_item_id", None) is None:
+        return None
     if schedule and getattr(schedule, "scheduled_at", None):
         return schedule.scheduled_at
     if not getattr(post, "id", None):
         return None
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post_id=post.id).only("scheduled_at").first()
-    return getattr(schedule, "scheduled_at", None) if schedule else None
+    schedule = (
+        FactoryPostingSchedule.objects.filter(scheduled_post_id=post.id)
+        .only("scheduled_at", "daily_plan_item_id")
+        .first()
+    )
+    if not schedule or schedule.daily_plan_item_id is None:
+        return None
+    return schedule.scheduled_at
 
 
 def _fail_expired_factory_slot(
@@ -615,6 +625,9 @@ def _replace_ambiguous_short_slot(
         return None
 
     if schedule.video_type != "SHORT" or not schedule.inventory_item_id:
+        return None
+    # Publicação avulsa: o usuário escolheu este vídeo; não substitui por outro.
+    if schedule.daily_plan_item_id is None:
         return None
 
     inventory_item = VideoInventoryItem.objects.select_for_update().get(pk=schedule.inventory_item_id)
@@ -903,6 +916,7 @@ UPLOAD_POST_RECONCILE_BASE_DELAY_SEC = 90
 UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC = 120
 UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND = 1
 UPLOAD_POST_MAX_CONTROLLED_RESENDS = 1
+UPLOAD_POST_CLIENT_REQUEST_ID_KEY = "upload_post_client_request_id"
 YOUTUBE_PREPUBLISH_WINDOW_SECONDS = 60 * 60  # Envia para o provedor 1h antes do slot final
 DAILY_SCHEDULE_GENERATION_HOURS = (9, 11, 13)  # janelas locais: tentativa principal + 2 catch-ups
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
@@ -910,7 +924,12 @@ YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
 
 
-@shared_task
+@shared_task(
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=1800,
+    time_limit=2100,
+)
 def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None = None):
     """
     Upload YouTube thumbnails for a brand after all videos in batch are published.
@@ -1183,6 +1202,170 @@ def _upload_post_end_of_queue_delay_seconds(
         .count()
     )
     return max(int(minimum_seconds or 0), UPLOAD_INTERVAL_SECONDS * max(1, pending_count))
+
+
+def _schedule_upload_post_unknown_reconciliation(
+    post: ScheduledPost,
+    *,
+    brand: Brand | None,
+    correlation_id: str,
+    brand_id: int | None,
+    current_attempt: int,
+    _timer: Timer,
+    upload_fingerprint: str,
+    external_ids: dict,
+    upload_post_keys_by_platform: dict[str, str],
+    provider_request_id: str | None = None,
+    client_request_id: str | None = None,
+    job_id: str | None = None,
+    status_code: int | None = None,
+    last_status: str,
+    detail: str,
+) -> dict | None:
+    upload_post_unknown_results_total.inc()
+
+    provider_request_id = str(provider_request_id or "").strip() or None
+    client_request_id = str(client_request_id or "").strip() or None
+    job_id = str(job_id or "").strip() or None
+    detail = (detail or "").strip()
+    has_provider_reference = bool(provider_request_id or job_id)
+    unknown_delay = _upload_post_end_of_queue_delay_seconds(
+        post,
+        brand,
+        minimum_seconds=UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC,
+    )
+
+    if provider_request_id:
+        external_ids["upload_post_request_id"] = provider_request_id
+    else:
+        external_ids.pop("upload_post_request_id", None)
+    if client_request_id:
+        external_ids[UPLOAD_POST_CLIENT_REQUEST_ID_KEY] = client_request_id
+    if job_id:
+        external_ids["upload_post_job_id"] = job_id
+    else:
+        external_ids.pop("upload_post_job_id", None)
+    external_ids["upload_post_reconciliation_state"] = "pending"
+    external_ids["upload_post_last_status"] = last_status
+    external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
+    if not has_provider_reference:
+        external_ids["upload_post_no_provider_id_check_count"] = 0
+    else:
+        external_ids.pop("upload_post_no_provider_id_check_count", None)
+
+    idem_snapshot = {
+        k: external_ids[k]
+        for k in (
+            "upload_post_request_id",
+            UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
+            "upload_post_job_id",
+            "upload_post_reconciliation_state",
+            "upload_post_last_status",
+            "upload_post_last_checked_at",
+            "upload_post_no_provider_id_check_count",
+            "upload_post_resend_count",
+        )
+        if k in external_ids
+    }
+    for idempotency_key in upload_post_keys_by_platform.values():
+        if has_provider_reference:
+            mark_idempotency_success(
+                key=idempotency_key,
+                result_payload={
+                    "publisher": "upload_post",
+                    "upload_post_reconciliation_pending": True,
+                    "external_ids": idem_snapshot,
+                },
+            )
+        else:
+            mark_idempotency_failed(
+                key=idempotency_key,
+                error_message=(
+                    "Upload Post aceitou/retornou resultado incerto sem request_id/job_id do provedor; "
+                    "não reutilizar este estado para posts novos"
+                ),
+                result_payload={
+                    "publisher": "upload_post",
+                    "upload_post_reconciliation_pending": True,
+                    "external_ids": idem_snapshot,
+                },
+            )
+
+    log_event(
+        logger,
+        event="upload_post_unknown_result",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=brand_id,
+        platform="youtube",
+        status="unknown",
+        status_code=status_code,
+        detail=detail[:400],
+    )
+    log_event(
+        logger,
+        event="upload_post_reconciliation_scheduled",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        delay_seconds=unknown_delay,
+    )
+    next_check_at = timezone.now() + timedelta(seconds=unknown_delay)
+    expired_result = _fail_expired_factory_slot(
+        post,
+        correlation_id=correlation_id,
+        brand_id=brand_id,
+        current_attempt=current_attempt,
+        duration_ms=_timer.elapsed_ms(),
+        reason=(
+            "O resultado incerto do Upload Post só seria reavaliado depois do horário do slot."
+            if has_provider_reference
+            else "A confirmação do Upload Post sem IDs do provedor só seria reavaliada depois do horário do slot."
+        ),
+        check_time=next_check_at,
+    )
+    if expired_result is not None:
+        return expired_result
+
+    post.status = "PENDING"
+    post.scheduled_at = next_check_at
+    if has_provider_reference:
+        post.error = (
+            "Upload Post: resultado incerto (timeout/rede/código intermediário). "
+            "Confirmando status no provedor no fim da fila antes de nova ação."
+        )
+    else:
+        post.error = (
+            "Upload Post: confirmação recebida sem request_id/job_id do provedor. "
+            "Reavaliando no fim da fila antes de nova ação."
+        )
+    post.upload_fingerprint = upload_fingerprint
+    post.external_ids = external_ids
+    post.save(
+        update_fields=[
+            "status",
+            "scheduled_at",
+            "error",
+            "upload_fingerprint",
+            "external_ids",
+        ]
+    )
+    _sync_factory_posting_schedule(post)
+    log_event(
+        logger,
+        event="publish_finished",
+        correlation_id=correlation_id,
+        scheduled_post_id=post.id,
+        brand_id=brand_id,
+        platform="youtube",
+        status="waiting",
+        duration_ms=_timer.elapsed_ms(),
+        attempt_number=current_attempt,
+    )
+    return {
+        "status": post.status,
+        "skipped": "upload_post_unknown_awaiting_reconciliation",
+        "external_ids": external_ids,
+    }
 
 
 def _native_youtube_fallback_available(post: ScheduledPost, brand: Brand | None) -> bool:
@@ -1501,6 +1684,7 @@ def _try_pending_upload_post_reconciliation(
             ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
             ext.pop("upload_post_no_provider_id_check_count", None)
             ext.pop("upload_post_resend_count", None)
+            ext.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
             post.external_ids = ext
             post.save(update_fields=["external_ids"])
             return None
@@ -1520,6 +1704,7 @@ def _try_pending_upload_post_reconciliation(
         ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
         ext.pop("upload_post_no_provider_id_check_count", None)
         ext.pop("upload_post_resend_count", None)
+        ext.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
 
         if up_list and not all_filled:
             next_check_at = timezone.now() + timedelta(seconds=next_delay)
@@ -1602,7 +1787,12 @@ def _try_pending_upload_post_reconciliation(
     return None
 
 
-@shared_task
+@shared_task(
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=1800,
+    time_limit=2100,
+)
 def process_brand_posting_queue_task(brand_id: int, post_ids: list[int]):  # noqa: C901
     """
     Process a brand's post queue sequentially.
@@ -2601,7 +2791,6 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         idempotency_key=upload_post_provider_idempotency_key,
                     )
                     if result.get("success"):
-                        up_success = True
                         for key in (
                             "upload_post_reconciliation_state",
                             "upload_post_no_provider_id_check_count",
@@ -2609,27 +2798,35 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                             "upload_post_youtube_terminal_failure",
                         ):
                             external_ids.pop(key, None)
-                        request_id = str(result.get("request_id") or "").strip()
-                        if not request_id:
-                            request_id = upload_post_request_id
+                        external_ids.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
+                        provider_request_id = str(result.get("provider_request_id") or "").strip()
+                        client_request_id = str(
+                            result.get(UPLOAD_POST_CLIENT_REQUEST_ID_KEY) or result.get("client_request_id") or ""
+                        ).strip()
+                        if not client_request_id:
+                            client_request_id = upload_post_request_id
+                        request_id = provider_request_id or client_request_id
                         job_id_out = str(result.get("job_id") or "").strip()
+                        request_id_source = str(result.get("request_id_source") or "").strip()
                         logger.info(
                             "[UploadPost] Posting confirmation received (id %s)",
                             request_id or "ok",
                         )
-                        if request_id:
-                            external_ids["upload_post_request_id"] = request_id
+                        if provider_request_id:
+                            external_ids["upload_post_request_id"] = provider_request_id
                         if job_id_out:
                             external_ids["upload_post_job_id"] = job_id_out
                         external_ids["upload_post_last_status"] = "submitted"
                         external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
                         up_results = (result.get("data") or {}).get("results") or {}
+                        youtube_provider_reference = bool(provider_request_id or job_id_out)
+                        youtube_platform_result_id = False
                         for up_platform in upload_post_platforms_to_execute:
                             logical_platform = _logical_upload_post_platform(post, up_platform)
                             plat_data = up_results.get(upload_post_result_keys[up_platform]) or {}
                             external_ids_delta: dict[str, str | bool] = {}
-                            if request_id:
-                                external_ids_delta["upload_post_request_id"] = request_id
+                            if provider_request_id:
+                                external_ids_delta["upload_post_request_id"] = provider_request_id
                             if job_id_out:
                                 external_ids_delta["upload_post_job_id"] = job_id_out
                             if plat_data.get("success"):
@@ -2637,11 +2834,58 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                                 if vid:
                                     external_ids[logical_platform] = str(vid)
                                     external_ids_delta[logical_platform] = str(vid)
+                            if logical_platform in YOUTUBE_PLATFORM_CODES and external_ids_delta.get(logical_platform):
+                                youtube_platform_result_id = True
                             if logical_platform in YOUTUBE_PLATFORM_CODES and (
-                                request_id or external_ids_delta.get(logical_platform)
+                                youtube_provider_reference or external_ids_delta.get(logical_platform)
                             ):
                                 upload_post_youtube_ok = True
                                 external_ids["youtube_via_upload_post"] = True
+                                external_ids_delta["youtube_via_upload_post"] = True
+                        if (
+                            "YOUTUBE" in upload_post_platforms_to_execute
+                            and not youtube_provider_reference
+                            and not youtube_platform_result_id
+                        ):
+                            logger.warning(
+                                "[UploadPost] Success without provider request_id/job_id; "
+                                "holding post for controlled reconciliation (post_id=%s request_id_source=%s)",
+                                post.id,
+                                request_id_source or "unknown",
+                            )
+                            pending_result = _schedule_upload_post_unknown_reconciliation(
+                                post,
+                                brand=brand,
+                                correlation_id=correlation_id,
+                                brand_id=_brand_id,
+                                current_attempt=current_attempt,
+                                _timer=_timer,
+                                upload_fingerprint=upload_fingerprint,
+                                external_ids=external_ids,
+                                upload_post_keys_by_platform=upload_post_keys_by_platform,
+                                provider_request_id=provider_request_id or None,
+                                client_request_id=client_request_id or None,
+                                job_id=job_id_out or None,
+                                last_status="accepted_without_provider_ids",
+                                status_code=None,
+                                detail="Upload Post confirmou o envio sem request_id/job_id rastreável do provedor.",
+                            )
+                            if pending_result is not None:
+                                return pending_result
+                        up_success = True
+                        for up_platform in upload_post_platforms_to_execute:
+                            logical_platform = _logical_upload_post_platform(post, up_platform)
+                            plat_data = up_results.get(upload_post_result_keys[up_platform]) or {}
+                            external_ids_delta: dict[str, str | bool] = {}
+                            if provider_request_id:
+                                external_ids_delta["upload_post_request_id"] = provider_request_id
+                            if job_id_out:
+                                external_ids_delta["upload_post_job_id"] = job_id_out
+                            if external_ids.get(logical_platform):
+                                external_ids_delta[logical_platform] = str(external_ids[logical_platform])
+                            if logical_platform in YOUTUBE_PLATFORM_CODES and (
+                                youtube_provider_reference or external_ids_delta.get(logical_platform)
+                            ):
                                 external_ids_delta["youtube_via_upload_post"] = True
                             mark_idempotency_success(
                                 key=upload_post_keys_by_platform[up_platform],
@@ -2658,127 +2902,33 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 except UploadPostPublishError as e:
                     last_up_error = str(e)
                     if e.kind == UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION:
-                        upload_post_unknown_results_total.inc()
-                        rid = (
-                            e.request_id
-                            or external_ids.get("upload_post_request_id")
-                            or upload_post_request_id
-                        )
-                        jid = e.job_id or external_ids.get("upload_post_job_id")
-                        unknown_delay = _upload_post_end_of_queue_delay_seconds(
+                        provider_request_id = None
+                        client_request_id = None
+                        if e.request_id_source == "provider":
+                            provider_request_id = e.request_id or external_ids.get("upload_post_request_id")
+                        else:
+                            client_request_id = e.request_id or external_ids.get(UPLOAD_POST_CLIENT_REQUEST_ID_KEY)
+                            if not client_request_id:
+                                client_request_id = upload_post_request_id
+                        pending_result = _schedule_upload_post_unknown_reconciliation(
                             post,
-                            brand,
-                            minimum_seconds=UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC,
-                        )
-                        if rid:
-                            external_ids["upload_post_request_id"] = str(rid)
-                        if jid:
-                            external_ids["upload_post_job_id"] = str(jid)
-                        external_ids["upload_post_reconciliation_state"] = "pending"
-                        external_ids["upload_post_last_status"] = f"unknown_http_{e.status_code or 'na'}"
-                        external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
-                        if not rid and not jid:
-                            external_ids["upload_post_no_provider_id_check_count"] = 0
-                        idem_snapshot = {
-                            k: external_ids[k]
-                            for k in (
-                                "upload_post_request_id",
-                                "upload_post_job_id",
-                                "upload_post_reconciliation_state",
-                                "upload_post_last_status",
-                                "upload_post_last_checked_at",
-                                "upload_post_no_provider_id_check_count",
-                                "upload_post_resend_count",
-                            )
-                            if k in external_ids
-                        }
-                        for idempotency_key in upload_post_keys_by_platform.values():
-                            if rid or jid:
-                                mark_idempotency_success(
-                                    key=idempotency_key,
-                                    result_payload={
-                                        "publisher": "upload_post",
-                                        "upload_post_reconciliation_pending": True,
-                                        "external_ids": idem_snapshot,
-                                    },
-                                )
-                            else:
-                                mark_idempotency_failed(
-                                    key=idempotency_key,
-                                    error_message=(
-                                        "Upload Post retornou resultado incerto sem request_id/job_id; "
-                                        "não reutilizar este estado para posts novos"
-                                    ),
-                                    result_payload={
-                                        "publisher": "upload_post",
-                                        "upload_post_reconciliation_pending": True,
-                                        "external_ids": idem_snapshot,
-                                    },
-                                )
-                        log_event(
-                            logger,
-                            event="upload_post_unknown_result",
-                            correlation_id=correlation_id,
-                            scheduled_post_id=post.id,
-                            brand_id=_brand_id,
-                            platform="youtube",
-                            status="unknown",
-                            status_code=e.status_code,
-                            detail=last_up_error[:400],
-                        )
-                        log_event(
-                            logger,
-                            event="upload_post_reconciliation_scheduled",
-                            correlation_id=correlation_id,
-                            scheduled_post_id=post.id,
-                            delay_seconds=unknown_delay,
-                        )
-                        next_check_at = timezone.now() + timedelta(seconds=unknown_delay)
-                        expired_result = _fail_expired_factory_slot(
-                            post,
+                            brand=brand,
                             correlation_id=correlation_id,
                             brand_id=_brand_id,
                             current_attempt=current_attempt,
-                            duration_ms=_timer.elapsed_ms(),
-                            reason="O resultado incerto do Upload Post só seria reavaliado depois do horário do slot.",
-                            check_time=next_check_at,
+                            _timer=_timer,
+                            upload_fingerprint=upload_fingerprint,
+                            external_ids=external_ids,
+                            upload_post_keys_by_platform=upload_post_keys_by_platform,
+                            provider_request_id=provider_request_id,
+                            client_request_id=client_request_id,
+                            job_id=e.job_id or external_ids.get("upload_post_job_id"),
+                            status_code=e.status_code,
+                            last_status=f"unknown_http_{e.status_code or 'na'}",
+                            detail=last_up_error,
                         )
-                        if expired_result is not None:
-                            return expired_result
-                        post.status = "PENDING"
-                        post.scheduled_at = next_check_at
-                        post.error = (
-                            "Upload Post: resultado incerto (timeout/rede/código intermediário). "
-                            "Confirmando status no provedor no fim da fila antes de nova ação."
-                        )
-                        post.upload_fingerprint = upload_fingerprint
-                        post.external_ids = external_ids
-                        post.save(
-                            update_fields=[
-                                "status",
-                                "scheduled_at",
-                                "error",
-                                "upload_fingerprint",
-                                "external_ids",
-                            ]
-                        )
-                        _sync_factory_posting_schedule(post)
-                        log_event(
-                            logger,
-                            event="publish_finished",
-                            correlation_id=correlation_id,
-                            scheduled_post_id=post.id,
-                            brand_id=_brand_id,
-                            platform="youtube",
-                            status="waiting",
-                            duration_ms=_timer.elapsed_ms(),
-                            attempt_number=current_attempt,
-                        )
-                        return {
-                            "status": post.status,
-                            "skipped": "upload_post_unknown_awaiting_reconciliation",
-                            "external_ids": external_ids,
-                        }
+                        if pending_result is not None:
+                            return pending_result
                     if attempt < UPLOAD_POST_RETRY_COUNT and e.retriable:
                         logger.warning(
                             "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
@@ -3028,6 +3178,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         external_ids.pop("youtube_via_upload_post", None)
                         external_ids.pop("upload_post_youtube_terminal_failure", None)
                         external_ids.pop("upload_post_skip_after_unknown_no_id", None)
+                        external_ids.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
                     warning = (result or {}).get("warning")
                     if warning:
                         warnings.append(f"{platform}: {warning}")
@@ -3063,6 +3214,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                                 "youtube_via_upload_post",
                                 "upload_post_youtube_terminal_failure",
                                 "upload_post_skip_after_unknown_no_id",
+                                UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
                             ],
                             "provider_response": result or {},
                         },
@@ -3172,6 +3324,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                     external_ids.pop("youtube_via_upload_post", None)
                     external_ids.pop("upload_post_youtube_terminal_failure", None)
                     external_ids.pop("upload_post_skip_after_unknown_no_id", None)
+                    external_ids.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
             warning = (result or {}).get("warning")
             if warning:
                 warnings.append(f"{platform}: {warning}")
@@ -3190,6 +3343,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                             "youtube_via_upload_post",
                             "upload_post_youtube_terminal_failure",
                             "upload_post_skip_after_unknown_no_id",
+                            UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
                         ]
                         if platform in ("YT", "YTB")
                         else []
@@ -3463,7 +3617,12 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     }
 
 
-@shared_task
+@shared_task(
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=300,
+    time_limit=600,
+)
 def post_to_platforms_task(scheduled_post_id: int):
     """Publish a ScheduledPost to configured platforms."""
     return _run_post_to_platforms(scheduled_post_id)
@@ -3481,7 +3640,7 @@ def _get_referenced_media_paths() -> set:
     Collect all file paths referenced in the database.
     Returns set of paths relative to MEDIA_ROOT, normalized.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
+    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk
     from apps.brands.models import BrandAsset
     from apps.cuts.models import Cut
     from apps.mediahub.models import SourceVideo
@@ -3497,6 +3656,10 @@ def _get_referenced_media_paths() -> set:
             refs.add(_normalize_media_path(corte.file.name))
         if corte.thumbnail and getattr(corte.thumbnail, "name", None):
             refs.add(_normalize_media_path(corte.thumbnail.name))
+    # AutoCutReadyChunk.file
+    for name in AutoCutReadyChunk.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
+        if name:
+            refs.add(_normalize_media_path(name))
     # RenderOutput.file (exports/)
     for name in RenderOutput.objects.exclude(file="").exclude(file__isnull=True).values_list("file", flat=True):
         if name:
@@ -3516,18 +3679,24 @@ def _get_referenced_media_paths() -> set:
     return refs
 
 
-def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
+def _cleanup_orphan_media_files(dry_run: bool = False, min_age_hours: int = 24) -> dict:
     """
     Remove files under storage/media that have no database row.
     Folders: auto_cuts/sources, auto_cuts/cortes, auto_cuts/thumbnails,
             sources, exports, cuts, brands/assets.
+    Files modified in the last `min_age_hours` hours are skipped to avoid
+    racing with in-flight uploads/renders that haven't persisted their DB
+    row yet.
     If dry_run=True, only list orphans without deleting.
     """
+    import time as _time
+
     media_root = Path(settings.MEDIA_ROOT)
     if not media_root.exists():
-        return {"orphans_deleted": 0, "orphans_found": [], "errors": []}
+        return {"orphans_deleted": 0, "orphans_found": [], "skipped_recent": 0, "errors": []}
 
     refs = _get_referenced_media_paths()
+    mtime_cutoff = _time.time() - (min_age_hours * 3600)
     folders = [
         "auto_cuts/sources",
         "auto_cuts/cortes",
@@ -3538,6 +3707,7 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
         "brands/assets",
     ]
     deleted = 0
+    skipped_recent = 0
     orphans_found = []
     errors = []
     for folder in folders:
@@ -3550,17 +3720,26 @@ def _cleanup_orphan_media_files(dry_run: bool = False) -> dict:
                     continue
                 try:
                     rel = str(f.relative_to(media_root)).replace("\\", "/")
-                    if rel not in refs:
-                        orphans_found.append(rel)
-                        if not dry_run:
-                            f.unlink()
-                            deleted += 1
-                            logger.info("[CLEANUP] Orphan removed: %s", rel)
+                    if rel in refs:
+                        continue
+                    if f.stat().st_mtime > mtime_cutoff:
+                        skipped_recent += 1
+                        continue
+                    orphans_found.append(rel)
+                    if not dry_run:
+                        f.unlink()
+                        deleted += 1
+                        logger.info("[CLEANUP] Orphan removed: %s", rel)
                 except Exception as e:
                     errors.append(f"orphan_{f}: {e}")
         except Exception as e:
             errors.append(f"folder_{folder}: {e}")
-    return {"orphans_deleted": deleted, "orphans_found": orphans_found, "errors": errors}
+    return {
+        "orphans_deleted": deleted,
+        "orphans_found": orphans_found,
+        "skipped_recent": skipped_recent,
+        "errors": errors,
+    }
 
 
 @shared_task
@@ -3657,19 +3836,31 @@ def cleanup_posted_media_task():
             summary["errors"].append(f"corte_{corte.id}: {e}")
 
     # 2) Job output (final video): DONE jobs with all posts complete
-    done_jobs = Job.objects.filter(status="DONE").select_related("output")
+    # Requer ≥1 post DONE e nenhum PENDING/POSTING, alinhado à Seção 1 (cuts).
+    # Evita deletar o output de Jobs renderizados mas nunca agendados/publicados.
+    posted_job_ids = set(
+        ScheduledPost.objects.filter(
+            status="DONE",
+            job_id__isnull=False,
+        ).values_list("job_id", flat=True)
+    )
+    active_job_ids = set(
+        ScheduledPost.objects.filter(
+            status__in=["PENDING", "POSTING"],
+            job_id__isnull=False,
+        ).values_list("job_id", flat=True)
+    )
+    eligible_job_ids = posted_job_ids - active_job_ids
+    done_jobs = Job.objects.filter(
+        id__in=eligible_job_ids,
+        status="DONE",
+    ).select_related("output")
     for job in done_jobs:
         try:
             output = job.output
         except Exception:
             output = None
         if not output or not output.file:
-            continue
-        has_pending = ScheduledPost.objects.filter(
-            job_id=job.id,
-            status__in=["PENDING", "POSTING"],
-        ).exists()
-        if has_pending:
             continue
         try:
             fp = Path(output.file.path) if output.file.name else None
@@ -3684,17 +3875,37 @@ def cleanup_posted_media_task():
             logger.warning("[CLEANUP] Failed to delete job output %s: %s", job.id, e)
             summary["errors"].append(f"job_{job.id}: {e}")
 
-    # 3) AutoCutAnalysis: original upload video for finished analyses
+    # 3) AutoCutAnalysis: original upload for finished analyses.
+    # Alinha critérios com a Seção 1 (cuts): exige ≥1 corte efetivamente publicado
+    # (ScheduledPost DONE), sem posts ativos, sem inventário em trânsito
+    # (AVAILABLE/SCHEDULED/POSTING/FAILED). Protege também analyses sem cortes
+    # e analyses cujos cortes nunca chegaram ao VideoInventoryItem (routing sem
+    # factory). Evita perda do fonte em análises concluídas mas não publicadas.
     for analysis in AutoCutAnalysis.objects.filter(status="done"):
         if not analysis.file or not analysis.file.name:
             continue
-        # Only delete if no cuts from this analysis are still available/scheduled
-        cortes_from_analysis = AutoCutCorte.objects.filter(analysis=analysis).values_list("id", flat=True)
-        has_available_or_scheduled = VideoInventoryItem.objects.filter(
-            auto_cut_corte_id__in=cortes_from_analysis,
-            status__in=["AVAILABLE", "SCHEDULED"],
+        corte_ids = list(
+            AutoCutCorte.objects.filter(analysis=analysis).values_list("id", flat=True)
+        )
+        if not corte_ids:
+            continue
+        has_active_inventory = VideoInventoryItem.objects.filter(
+            auto_cut_corte_id__in=corte_ids,
+            status__in=["AVAILABLE", "SCHEDULED", "POSTING", "FAILED"],
         ).exists()
-        if has_available_or_scheduled:
+        if has_active_inventory:
+            continue
+        has_active_posts = ScheduledPost.objects.filter(
+            auto_cut_corte_id__in=corte_ids,
+            status__in=["PENDING", "POSTING"],
+        ).exists()
+        if has_active_posts:
+            continue
+        has_done_post = ScheduledPost.objects.filter(
+            auto_cut_corte_id__in=corte_ids,
+            status="DONE",
+        ).exists()
+        if not has_done_post:
             continue
         try:
             fp = Path(analysis.file.path) if analysis.file.name else None

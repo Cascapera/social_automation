@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "social_automation.settings")
 
@@ -28,9 +29,10 @@ app.conf.beat_schedule = {
         "schedule": 900.0,  # every 15 min
     },
     # Cleanup of media for already-posted videos (cuts, job output, analysis).
-    # DISABLED: was deleting videos/media not yet posted. Review logic before re-enabling.
-    # "cleanup-posted-media": {
-    #     "task": "apps.social.tasks.cleanup_posted_media_task",
-    #     "schedule": crontab(minute=0, hour="*/4"),  # every 4 hours
-    # },
+    # Re-enabled after hardening (Passos A/B/C): gates em DONE posts, AutoCutReadyChunk
+    # em refs, mtime guard 24h e canary tests.
+    "cleanup-posted-media": {
+        "task": "apps.social.tasks.cleanup_posted_media_task",
+        "schedule": crontab(minute=0, hour="*/4"),  # every 4 hours
+    },
 }

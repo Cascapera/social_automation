@@ -135,6 +135,7 @@ class PipelineExecutionAdmin(admin.ModelAdmin):
         "pipeline_type",
         "aggregate_type",
         "aggregate_id",
+        "attempt_number",
         "status",
         "current_stage",
         "correlation_id",
@@ -142,12 +143,13 @@ class PipelineExecutionAdmin(admin.ModelAdmin):
         "completed_at",
         "updated_at",
     )
-    list_filter = ("pipeline_type", "aggregate_type", "status")
+    list_filter = ("pipeline_type", "aggregate_type", "status", "attempt_number")
     search_fields = ("correlation_id", "aggregate_type", "=aggregate_id")
     readonly_fields = (
         "pipeline_type",
         "aggregate_type",
         "aggregate_id",
+        "attempt_number",
         "correlation_id",
         "status",
         "current_stage",

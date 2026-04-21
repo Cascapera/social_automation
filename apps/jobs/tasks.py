@@ -100,7 +100,13 @@ def _fail_stage_and_pipeline(
         )
 
 
-@shared_task(bind=True)
+@shared_task(
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=3600,
+    time_limit=3900,
+)
 def process_job(self, job_id: int) -> None:
     from .models import Job
 
@@ -137,7 +143,13 @@ def process_job(self, job_id: int) -> None:
     )
 
 
-@shared_task(bind=True)
+@shared_task(
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=1800,
+    time_limit=2100,
+)
 def generate_subtitles_task(self, job_id: int) -> None:
     from .models import Job
 
@@ -264,7 +276,13 @@ def generate_subtitles_task(self, job_id: int) -> None:
         raise
 
 
-@shared_task(bind=True)
+@shared_task(
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=3600,
+    time_limit=3900,
+)
 def burn_subtitles_task(self, job_id: int) -> None:
     import shutil
 
@@ -376,9 +394,21 @@ def burn_subtitles_task(self, job_id: int) -> None:
             final_name = f"job_{job.id}_subs.mp4"
             final_path = final_dir / final_name
             shutil.copy2(output_tmp, final_path)
-        out.file.delete(save=False)
-        out.file.name = f"exports/{final_name}"
-        out.save()
+        from django.db import transaction
+
+        old_file_name = out.file.name
+        old_file_storage = out.file.storage
+        with transaction.atomic():
+            out.file.name = f"exports/{final_name}"
+            out.save()
+        if old_file_name and old_file_name != out.file.name:
+            try:
+                old_file_storage.delete(old_file_name)
+            except Exception:
+                logger.warning(
+                    "old_file_deletion_failed",
+                    extra={"old_file_name": old_file_name, "job_id": job.id},
+                )
         job.subtitle_status = "burned"
         job.subtitle_error = ""
         job.save(update_fields=["subtitle_status", "subtitle_error"])

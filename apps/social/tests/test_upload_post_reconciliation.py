@@ -142,7 +142,7 @@ class UploadPostReconciliationTests(TestCase):
         *,
         scheduled_at=None,
         external_ids: dict | None = None,
-        with_daily_plan_item: bool = False,
+        with_daily_plan_item: bool = True,
     ) -> tuple[ScheduledPost, FactoryPostingSchedule]:
         slot_at = scheduled_at or (timezone.now() + timedelta(minutes=40))
         item.status = "SCHEDULED"
@@ -196,6 +196,7 @@ class UploadPostReconciliationTests(TestCase):
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
             request_id="req-abc",
+            request_id_source="provider",
         )
         post = self._post_ytb()
         native = MagicMock()
@@ -219,6 +220,7 @@ class UploadPostReconciliationTests(TestCase):
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
             request_id="rid-1",
+            request_id_source="provider",
             job_id="jid-1",
         )
         post = self._post_ytb()
@@ -246,13 +248,14 @@ class UploadPostReconciliationTests(TestCase):
 
         post.refresh_from_db()
         self.assertEqual(first_result.get("skipped"), "upload_post_unknown_awaiting_reconciliation")
-        self.assertTrue(str(post.external_ids.get("upload_post_request_id") or "").startswith("upreq-"))
-        self.assertNotIn("upload_post_no_provider_id_check_count", post.external_ids)
+        self.assertEqual(post.external_ids.get("upload_post_request_id"), None)
+        self.assertTrue(str(post.external_ids.get("upload_post_client_request_id") or "").startswith("upreq-"))
+        self.assertEqual(post.external_ids.get("upload_post_no_provider_id_check_count"), 0)
         mock_up.assert_called_once()
         mock_native.assert_not_called()
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
-    def test_upload_post_passes_client_request_and_idempotency_keys(self, mock_up: MagicMock):
+    def test_success_without_provider_ids_waits_for_reconciliation(self, mock_up: MagicMock):
         mock_up.return_value = {"success": True, "data": {}}
         post = self._post_ytb(title="Com chaves")
 
@@ -261,10 +264,34 @@ class UploadPostReconciliationTests(TestCase):
 
         post.refresh_from_db()
         call_kwargs = mock_up.call_args.kwargs
-        self.assertEqual(result.get("status"), "DONE")
+        self.assertEqual(result.get("skipped"), "upload_post_unknown_awaiting_reconciliation")
+        self.assertEqual(post.status, "PENDING")
         self.assertTrue(call_kwargs["request_id"].startswith("upreq-"))
         self.assertTrue(call_kwargs["idempotency_key"].startswith("upidem-"))
-        self.assertEqual(post.external_ids.get("upload_post_request_id"), call_kwargs["request_id"])
+        self.assertEqual(post.external_ids.get("upload_post_request_id"), None)
+        self.assertEqual(post.external_ids.get("upload_post_client_request_id"), call_kwargs["request_id"])
+        self.assertEqual(post.external_ids.get("upload_post_reconciliation_state"), "pending")
+        mock_native.assert_not_called()
+
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_success_with_provider_request_id_keeps_youtube_done(self, mock_up: MagicMock):
+        mock_up.return_value = {
+            "success": True,
+            "request_id": "req-provider-1",
+            "provider_request_id": "req-provider-1",
+            "request_id_source": "provider",
+            "data": {},
+        }
+        post = self._post_ytb(title="Com request do provedor")
+
+        with patch("apps.social.publishers.get_publisher") as mock_native:
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(result.get("status"), "DONE")
+        self.assertEqual(post.status, "DONE")
+        self.assertEqual(post.external_ids.get("upload_post_request_id"), "req-provider-1")
+        self.assertEqual(post.external_ids.get("upload_post_client_request_id"), None)
         mock_native.assert_not_called()
 
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
@@ -345,6 +372,8 @@ class UploadPostReconciliationTests(TestCase):
         mock_up.return_value = {
             "success": True,
             "request_id": "retry-request-id",
+            "provider_request_id": "retry-request-id",
+            "request_id_source": "provider",
             "job_id": "retry-job-id",
             "data": {},
         }
@@ -949,6 +978,8 @@ class UploadPostPublisherTitleTests(TestCase):
         self.assertEqual(headers["X-Idempotency-Key"], "idem-client-1")
         self.assertIn(("request_id", "rq-client-1"), data)
         self.assertEqual(result["request_id"], "rq-client-1")
+        self.assertEqual(result["provider_request_id"], None)
+        self.assertEqual(result["request_id_source"], "client_fallback")
 
     @override_settings(UPLOAD_POST_API_KEY="test-key")
     @patch("apps.social.publishers.upload_post.requests.post", side_effect=requests.Timeout("boom"))

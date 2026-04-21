@@ -185,13 +185,28 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # Cache (OAuth state, etc.)
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "OPTIONS": {"MAX_ENTRIES": 100},
+CACHE_TIMEOUT = int(os.getenv("CACHE_TIMEOUT", "300"))
+
+if DEBUG:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "OPTIONS": {"MAX_ENTRIES": 100},
+            "TIMEOUT": CACHE_TIMEOUT,
+        }
     }
-}
-# With Redis: pip install django-redis and use "django_redis.cache.RedisCache"
+else:
+    # Prod: Redis. DB 1 (broker Celery usa DB 0) para não colidir.
+    # Override via CACHE_REDIS_URL se o broker tiver query-string (ex: rediss TLS).
+    _broker_url = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
+    _cache_default_url = _broker_url.rsplit("/", 1)[0] + "/1"
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.getenv("CACHE_REDIS_URL", _cache_default_url),
+            "TIMEOUT": CACHE_TIMEOUT,
+        }
+    }
 
 # Celery
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")

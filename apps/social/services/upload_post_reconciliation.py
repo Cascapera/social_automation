@@ -336,7 +336,8 @@ def reconcile_upload_post_status(
                             next_delay_seconds=120,
                             raw_status_payload=data,
                         )
-                    plat = (pa.get("platforms") or {}).get("youtube") or {}
+                    platforms_block = pa.get("platforms") if isinstance(pa, dict) else None
+                    plat = platforms_block.get("youtube") or {} if isinstance(platforms_block, dict) else {}
                     post_url = str(plat.get("post_url") or "") if isinstance(plat, dict) else ""
                     vid = _parse_youtube_video_id_from_message(post_url)
                     if not vid and isinstance(plat, dict):
@@ -378,7 +379,8 @@ def reconcile_upload_post_status(
             if not vid and rid:
                 pa, _ = fetch_post_analytics(rid, platform="youtube")
                 if isinstance(pa, dict):
-                    plat = (pa.get("platforms") or {}).get("youtube") or {}
+                    platforms_block = pa.get("platforms")
+                    plat = platforms_block.get("youtube") or {} if isinstance(platforms_block, dict) else {}
                     post_url = str(plat.get("post_url") or "") if isinstance(plat, dict) else ""
                     vid = _parse_youtube_video_id_from_message(post_url)
 

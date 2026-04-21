@@ -230,3 +230,36 @@ class PipelineExecutionTests(TestCase):
         self.assertEqual(pipeline_execution.status, PipelineExecution.Status.COMPLETED)
         self.assertEqual(pipeline_execution.current_stage, STAGE_SUBTITLE_BURN)
         self.assertIsNotNone(pipeline_execution.completed_at)
+
+    def test_start_new_pipeline_attempt_creates_row_with_incremented_attempt(self):
+        from apps.jobs.services.pipeline_execution import start_new_job_pipeline_attempt
+
+        job = self._create_job()
+        first, _ = get_or_create_job_pipeline_execution(job)
+        self.assertEqual(first.attempt_number, 1)
+
+        second = start_new_job_pipeline_attempt(job)
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(second.attempt_number, 2)
+        self.assertEqual(second.status, PipelineExecution.Status.PENDING)
+
+        self.assertEqual(
+            PipelineExecution.objects.filter(
+                aggregate_type=JOB_AGGREGATE_TYPE,
+                aggregate_id=job.id,
+            ).count(),
+            2,
+        )
+
+    def test_get_or_create_returns_latest_attempt_after_new_attempt(self):
+        from apps.jobs.services.pipeline_execution import start_new_job_pipeline_attempt
+
+        job = self._create_job()
+        first, _ = get_or_create_job_pipeline_execution(job)
+        second = start_new_job_pipeline_attempt(job)
+
+        latest, created = get_or_create_job_pipeline_execution(job)
+        self.assertFalse(created)
+        self.assertEqual(latest.pk, second.pk)
+        self.assertEqual(latest.attempt_number, 2)
+        self.assertNotEqual(latest.pk, first.pk)

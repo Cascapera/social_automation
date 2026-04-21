@@ -151,6 +151,7 @@ class PipelineExecution(models.Model):
     pipeline_type = models.CharField(max_length=64)
     aggregate_type = models.CharField(max_length=64)
     aggregate_id = models.PositiveBigIntegerField()
+    attempt_number = models.PositiveIntegerField(default=1)
     correlation_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
     status = models.CharField(
         max_length=16,
@@ -168,7 +169,7 @@ class PipelineExecution(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["pipeline_type", "aggregate_type", "aggregate_id"],
+                fields=["pipeline_type", "aggregate_type", "aggregate_id", "attempt_number"],
                 name="jobs_pipe_exec_scope_uniq",
             ),
         ]

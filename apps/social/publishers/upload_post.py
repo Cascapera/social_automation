@@ -73,6 +73,7 @@ class UploadPostPublishError(Exception):
         *,
         kind: str = UploadPostErrorKind.CONFIRMED_FAILURE,
         request_id: str | None = None,
+        request_id_source: str | None = None,
         job_id: str | None = None,
     ):
         super().__init__(message)
@@ -80,6 +81,7 @@ class UploadPostPublishError(Exception):
         self.retriable = retriable
         self.kind = kind
         self.request_id = (request_id or "").strip() or None
+        self.request_id_source = (request_id_source or "").strip() or None
         self.job_id = (job_id or "").strip() or None
 
 
@@ -103,7 +105,7 @@ def publish_to_upload_post(
     request_id: identificador estável do cliente para reconciliação do status.
     idempotency_key: chave estável para o Upload Post reaproveitar o mesmo job
     em retries após timeout/queda de conexão.
-    Retorna {"success": bool, "request_id": str?, "error": str?}
+    Retorna {"success": bool, "request_id": str?, "provider_request_id": str?, "error": str?}
     """
     api_key = os.getenv("UPLOAD_POST_API_KEY") or getattr(settings, "UPLOAD_POST_API_KEY", "")
     if not api_key:
@@ -169,6 +171,7 @@ def publish_to_upload_post(
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
             request_id=client_request_id,
+            request_id_source="client_fallback" if client_request_id else None,
         ) from e
     except (requests.ConnectionError, ConnectionResetError, BrokenPipeError, OSError) as e:
         logger.warning("[UploadPost] Erro de rede/conexão: %s", e)
@@ -177,6 +180,7 @@ def publish_to_upload_post(
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
             request_id=client_request_id,
+            request_id_source="client_fallback" if client_request_id else None,
         ) from e
     except Exception as e:
         logger.exception("[UploadPost] Erro ao enviar: %s", e)
@@ -185,6 +189,7 @@ def publish_to_upload_post(
             retriable=False,
             kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
             request_id=client_request_id,
+            request_id_source="client_fallback" if client_request_id else None,
         ) from e
 
     err_body: dict = {}
@@ -192,7 +197,7 @@ def publish_to_upload_post(
         err_body = resp.json() if resp.content else {}
     except Exception:
         err_body = {}
-    partial_rid = str(err_body.get("request_id") or client_request_id or "").strip() or None
+    partial_rid = str(err_body.get("request_id") or "").strip() or None
     partial_jid = str(err_body.get("job_id") or "").strip() or None
 
     if resp.status_code >= 400:
@@ -205,6 +210,7 @@ def publish_to_upload_post(
                 retriable=False,
                 kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
                 request_id=partial_rid,
+                request_id_source="provider" if partial_rid else ("client_fallback" if client_request_id else None),
                 job_id=partial_jid,
             )
         raise UploadPostPublishError(
@@ -213,6 +219,7 @@ def publish_to_upload_post(
             retriable=resp.status_code in (500, 502, 503),
             kind=UploadPostErrorKind.CONFIRMED_FAILURE,
             request_id=partial_rid,
+            request_id_source="provider" if partial_rid else ("client_fallback" if client_request_id else None),
             job_id=partial_jid,
         )
 
@@ -222,10 +229,15 @@ def publish_to_upload_post(
         result = {}
     if not isinstance(result, dict):
         result = {}
+    provider_request_id = str(result.get("request_id") or partial_rid or "").strip() or None
+    request_id_source = "provider" if provider_request_id else ("client_fallback" if client_request_id else None)
     job_id_out = result.get("job_id") or partial_jid
     return {
         "success": True,
-        "request_id": str(result.get("request_id") or client_request_id or "").strip() or None,
+        "request_id": provider_request_id or client_request_id,
+        "provider_request_id": provider_request_id,
+        "client_request_id": client_request_id,
+        "request_id_source": request_id_source,
         "job_id": str(job_id_out).strip() if job_id_out else None,
         "data": result,
     }

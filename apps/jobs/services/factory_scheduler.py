@@ -296,6 +296,7 @@ def generate_daily_schedule_for_factory(
                 brand=brand,
                 scheduled_at__gte=day_start_utc,
                 scheduled_at__lte=day_end_utc,
+                daily_plan_item__isnull=False,
             ).values_list("video_type", "scheduled_at")
         )
         plans = [
