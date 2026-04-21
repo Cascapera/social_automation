@@ -12,7 +12,6 @@ from django.test import TestCase, override_settings
 
 from apps.social.tasks import _cleanup_orphan_media_files
 
-
 SWEEP_FOLDERS = [
     "auto_cuts/sources",
     "auto_cuts/cortes",
