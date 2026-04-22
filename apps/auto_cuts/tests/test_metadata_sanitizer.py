@@ -38,6 +38,60 @@ class SanitizeClipTests(SimpleTestCase):
         sanitize_clip(clip)
         self.assertNotIn("transou", clip["suggested_title"].lower())
 
+    def test_replaces_cu_e_variacoes(self):
+        for term in ("cu", "cuzinho", "cuzão", "cuzao"):
+            with self.subTest(term=term):
+                clip = {"suggested_title": f"Levou um chute no {term} ao vivo"}
+                sanitize_clip(clip)
+                self.assertNotIn(term, clip["suggested_title"].lower())
+
+    def test_replaces_xoxota_e_xereca(self):
+        for term in ("xoxota", "xereca"):
+            with self.subTest(term=term):
+                clip = {"hook_sentence": f"Ele falou {term} no microfone aberto"}
+                sanitize_clip(clip)
+                self.assertNotIn(term, clip["hook_sentence"].lower())
+
+    def test_replaces_boquete(self):
+        clip = {"suggested_title": "Pediu boquete no trabalho e foi demitido"}
+        sanitize_clip(clip)
+        self.assertNotIn("boquete", clip["suggested_title"].lower())
+
+    def test_replaces_tesao(self):
+        clip = {"suggested_title": "O nível de tesão que isso gerou no estúdio"}
+        sanitize_clip(clip)
+        self.assertNotIn("tesão", clip["suggested_title"].lower())
+
+    def test_replaces_rola_em_titulo(self):
+        clip = {"suggested_title": "Mostrou a rola ao vivo e o chat foi ao caos"}
+        sanitize_clip(clip)
+        self.assertNotIn("rola", clip["suggested_title"].lower())
+
+    def test_rola_nao_substituida_em_hook(self):
+        # "rola" é context=title, não deve substituir em hook_sentence
+        clip = {"hook_sentence": "Mostrou a rola ao vivo"}
+        sanitize_clip(clip)
+        self.assertIn("rola", clip["hook_sentence"].lower())
+
+    def test_replaces_ass_en(self):
+        clip = {"suggested_title": "He got kicked in the ass on live TV"}
+        sanitize_clip(clip)
+        self.assertNotIn(" ass ", clip["suggested_title"].lower())
+
+    def test_replaces_penis_vagina_en(self):
+        for term in ("penis", "vagina"):
+            with self.subTest(term=term):
+                clip = {"suggested_title": f"Showed {term} on stream"}
+                sanitize_clip(clip)
+                self.assertNotIn(term, clip["suggested_title"].lower())
+
+    def test_replaces_boobs_tits_en(self):
+        for term in ("boobs", "tits"):
+            with self.subTest(term=term):
+                clip = {"suggested_title": f"Flashed {term} on live 😱"}
+                sanitize_clip(clip)
+                self.assertNotIn(term, clip["suggested_title"].lower())
+
     def test_replaces_putaria_em_hook(self):
         clip = {"hook_sentence": "Rolou uma putaria no escritório e todo mundo ficou sabendo."}
         sanitize_clip(clip)
