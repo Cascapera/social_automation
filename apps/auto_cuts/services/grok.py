@@ -126,6 +126,42 @@ ANTI_AUTOMATION_RULES_EN = """DESCRIPTION AND TAGS RULES (anti-automation):
   - chapters: 3–8 chapters as [{"timestamp":"MM:SS","title":"..."}]. Timestamps RELATIVE to the clip start (first chapter MUST be "00:00"). Short titles (max 60 chars).
   - suggested_first_comment: 100–220 characters of human/authorial text to pin as the first comment. Open with a question OR personal observation and end with a subtle CTA (invite comment/watch full). No hashtags; at most 2 emojis."""
 
+METADATA_SAFETY_RULES_PT = """
+REGRA DE METADADOS (CRÍTICA — leia antes de gerar qualquer título):
+O vídeo PODE conter palavrões, linguajar adulto ou conteúdo sexual no áudio — isso é irrelevante para a seleção dos cortes. Mas suggested_title, thumbnail_text, hook_sentence, suggested_description, tags e suggested_first_comment são escaneados automaticamente pelo YouTube e impactam diretamente distribuição, monetização e CTR. Nesses campos, NUNCA reproduza linguajar explícito, independente do que está no vídeo. Parafraseie capturando a emoção sem reproduzir o termo.
+
+Exemplos de contraste:
+❌ "Ele transou com a chefe e levou uma voadora"
+✅ "Ele se envolveu com a chefe e tudo saiu do controle 😱"
+❌ "F*da-se, eu largo tudo e vou embora"
+✅ "Ele larga tudo, para tudo e vai embora de uma vez 🔥"
+❌ "O momento em que ela fez uma merda ao vivo"
+✅ "O momento em que tudo desmoronou ao vivo"
+❌ "Esse cara é um arrombado completo"
+✅ "Esse cara passou dos limites e todo mundo ficou chocado"
+
+Termos que NUNCA devem aparecer nos metadados: palavrões (porra, caralho, merda, foda, bosta, filha da puta), termos sexuais (sexo, transar, putaria, pornografia, orgia, prostituta), termos com restrição automática (estupro, terrorismo, extremismo, racismo, ódio, suicídio, execução). Substitua pela emoção: chocante, absurdo, explosivo, sem filtro, inacreditável, polêmico, pesado, tenso, limite.
+
+Títulos sem palavrão tendem a ter CTR igual ou superior porque o algoritmo distribui mais amplamente."""
+
+METADATA_SAFETY_RULES_EN = """
+METADATA RULE (CRITICAL — read before generating any title):
+The video MAY contain profanity, adult language, or sexual content in the audio — that is irrelevant to the clip selection itself. But suggested_title, thumbnail_text, hook_sentence, suggested_description, tags, and suggested_first_comment are automatically scanned by YouTube and directly impact distribution, monetization, and CTR. In these fields, NEVER reproduce explicit language, regardless of what is in the video. Rephrase to capture the emotion without using the term.
+
+Contrast examples:
+❌ "He f*cked the boss and got punched"
+✅ "He crossed the line with his boss and everything exploded 😱"
+❌ "That guy is a complete a**hole"
+✅ "That guy went too far and nobody could believe it"
+❌ "The moment she screwed up live on air"
+✅ "The moment everything fell apart live on air"
+❌ "He just said f*ck it and walked away"
+✅ "He said enough, walked away, and shocked everyone 🔥"
+
+Terms that must NEVER appear in metadata: profanity (fuck, shit, asshole, bitch), sexual terms (porn, sex tape, orgy, explicit sex, cock, pussy, prostitute), restricted terms (rape, terrorism, extremism, racism, hate, suicide, execution). Replace with the emotion: shocking, absurd, explosive, unfiltered, unbelievable, controversial, heavy, intense.
+
+Titles without profanity achieve equal or better CTR because the algorithm distributes them more broadly."""
+
 SYSTEM_PROMPT = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
 
 Sua tarefa é identificar, ranquear e selecionar os melhores momentos para Shorts e para cortes longos.
@@ -163,10 +199,6 @@ REGRAS DE TÍTULO E THUMBNAIL:
 PALAVRAS QUE AUMENTAM CTR (dê preferência em títulos e thumbnail_text):
 segredo, verdade, revelado, ninguém fala, exposto, urgente, agora, aconteceu, entenda, explicado, polêmica, absurdo, insano, surreal, histórico, chocante, erro, alerta, atenção, descubra, estratégia, como funciona, bastidores, prova, análise, detalhe, especialistas, impactante, mudança, viral, imperdível, decisão, confirmado, quase ninguém percebeu, o que mudou, previsão, explicação simples, caso real, debate, discussão, reação, comentário, opinião, momento tenso, climão, flagrante, inesperado, surpresa, revelação, investigação, denúncia, bomba, exclusivo, acaba de sair, história real, grande erro, aprenda, guia, dica, truque, hack, novo, novidade, detalhe escondido, verdade chocante, sem filtro, sem censura, ponto crítico, momento decisivo, mudou tudo, inacreditável, impacto, explicação rápida, explicação completa, análise profunda, por trás, história completa, caso polêmico, debate quente, reação ao vivo, explodiu na internet, tendência, assunto do momento, todos estão falando, o que está acontecendo, explicado em minutos, vale a pena, não ignore, começou assim, terminou assim.
 
-PALAVRAS PROIBIDAS (substitua conforme indicado):
-porra→p@@ra, caralho→c@ralho, merda→m#rda, puta→pta, putaria→ptaria, arrombado→arr0mbado, bosta→b0sta, desgraçado→d3sgraçado, foda→f*da | assassinato→caso chocante, suicídio→história pesada, massacre→ataque brutal, tortura→caso extremo, execução→execuç@o | pornografia→conteúdo adulto, sexo explícito→conteúdo +18, orgia→situação íntima, prostituta→escândalo íntimo | cocaína/drogas/heroína/maconha→substâncias | arma/pistola/fuzil→equipamento ou objeto | guerra/violência→conflito | morte→caso extremo | crime brutal→caso chocante | ataque→incidente.
-NUNCA use: estupro, terrorismo, extremismo, racismo, ódio. Use termos genéricos ou alusivos.
-
 IMPORTANTE:
 - Use APENAS timestamps que aparecem na transcrição.
 - Não invente timestamps.
@@ -174,7 +206,7 @@ IMPORTANTE:
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
 
-""" + ANTI_AUTOMATION_RULES_PT + """
+""" + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
@@ -216,10 +248,6 @@ REGRAS DE TÍTULO E THUMBNAIL:
 PALAVRAS QUE AUMENTAM CTR (dê preferência em títulos e thumbnail_text):
 segredo, verdade, revelado, ninguém fala, exposto, urgente, agora, aconteceu, entenda, explicado, polêmica, absurdo, insano, surreal, histórico, chocante, erro, alerta, atenção, descubra, estratégia, como funciona, bastidores, prova, análise, detalhe, especialistas, impactante, mudança, viral, imperdível, decisão, confirmado, quase ninguém percebeu, o que mudou, previsão, explicação simples, caso real, debate, discussão, reação, comentário, opinião, momento tenso, climão, flagrante, inesperado, surpresa, revelação, investigação, denúncia, bomba, exclusivo, acaba de sair, história real, grande erro, aprenda, guia, dica, truque, hack, novo, novidade, detalhe escondido, verdade chocante, sem filtro, sem censura, ponto crítico, momento decisivo, mudou tudo, inacreditável, impacto, explicação rápida, explicação completa, análise profunda, por trás, história completa, caso polêmico, debate quente, reação ao vivo, explodiu na internet, tendência, assunto do momento, todos estão falando, o que está acontecendo, explicado em minutos, vale a pena, não ignore, começou assim, terminou assim.
 
-PALAVRAS PROIBIDAS (substitua conforme indicado):
-porra→p@@ra, caralho→c@ralho, merda→m#rda, puta→pta, putaria→ptaria, arrombado→arr0mbado, bosta→b0sta, desgraçado→d3sgraçado, foda→f*da | assassinato→caso chocante, suicídio→história pesada, massacre→ataque brutal, tortura→caso extremo, execução→execuç@o | pornografia→conteúdo adulto, sexo explícito→conteúdo +18, orgia→situação íntima, prostituta→escândalo íntimo | cocaína/drogas/heroína/maconha→substâncias | arma/pistola/fuzil→equipamento ou objeto | guerra/violência→conflito | morte→caso extremo | crime brutal→caso chocante | ataque→incidente.
-NUNCA use: estupro, terrorismo, extremismo, racismo, ódio. Use termos genéricos ou alusivos.
-
 IMPORTANTE:
 - Use APENAS timestamps que aparecem na transcrição.
 - Não invente timestamps.
@@ -227,7 +255,7 @@ IMPORTANTE:
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
 
-""" + ANTI_AUTOMATION_RULES_PT + """
+""" + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
@@ -242,7 +270,6 @@ CRITÉRIOS EDUCACIONAIS – SHORTS 2–3 MIN (120–180 seg):
 - Títulos informativos e profissionais: OBRIGATÓRIO incluir 1–3 emojis em todos os títulos (shorts e longs). Emojis aumentam engajamento.
 - Evite polêmica gratuita; foque em valor educativo
 - Dê preferência a palavras que aumentam CTR (segredo, verdade, revelado, estratégia, como funciona, análise, detalhe, aprenda, guia, dica, truque, hack, novo, explicação simples, caso real, etc.).
-- NUNCA use palavras proibidas; use as substituições (ex: assassinato→caso chocante, drogas→substâncias, guerra→conflito). Evite: estupro, terrorismo, extremismo, racismo, ódio.
 
 CRITÉRIOS EDUCACIONAIS – CORTES LONGOS (20–40 min):
 - Blocos narrativos completos com explicações aprofundadas
@@ -268,7 +295,7 @@ IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
 
-""" + ANTI_AUTOMATION_RULES_PT + """
+""" + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro."""
 
@@ -621,9 +648,6 @@ TITLE + THUMBNAIL RULES:
 CTR-BOOSTING WORDS (prefer in titles and thumbnail_text):
 secret, truth, revealed, nobody talks about, exposed, urgent, now, happened, understand, explained, controversial, absurd, insane, surreal, historic, shocking, mistake, alert, attention, discover, strategy, how it works, behind the scenes, proof, analysis, detail, experts, impactful, change, viral, unmissable, decision, confirmed, almost nobody noticed, what changed, prediction, simple explanation, real case, debate, discussion, reaction, comment, opinion, tense moment, climax, caught red-handed, unexpected, surprise, revelation, investigation, scandal, bombshell, exclusive, just out, real story, big mistake, learn, guide, tip, trick, hack, new, novelty, hidden detail, shocking truth, unfiltered, uncensored, critical point, decisive moment, changed everything, unbelievable, impact, quick explanation, full explanation, deep analysis, behind, full story, controversial case, heated debate, live reaction, exploded on the internet, trend, trending topic, everyone is talking about, what's happening, explained in minutes, worth it, don't ignore, started like this, ended like this.
 
-FORBIDDEN WORDS (use substitution): fuck→f*ck, shit→sh*t, asshole→@sshole, bitch→b*tch | murder→shocking case, suicide→heavy story, massacre→brutal attack, torture→extreme case, execution→executi0n | pornography→adult content, explicit sex→+18 content, orgy→intimate situation, prostitute→intimate scandal | cocaine/drugs/heroin/marijuana→substances | weapon/gun/rifle→equipment or object | war/violence→conflict | death→extreme case | brutal crime→shocking case | attack→incident.
-NEVER use: rape, terrorism, extremism, racism, hate. Use generic or allusive terms.
-
 IMPORTANT:
 - Use ONLY timestamps present in the transcript.
 - Do not invent timestamps.
@@ -631,7 +655,7 @@ IMPORTANT:
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
 
-""" + ANTI_AUTOMATION_RULES_EN + """
+""" + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
 LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
@@ -793,9 +817,6 @@ TITLE + THUMBNAIL RULES:
 CTR-BOOSTING WORDS (prefer in titles and thumbnail_text):
 secret, truth, revealed, nobody talks about, exposed, urgent, now, happened, understand, explained, controversial, absurd, insane, surreal, historic, shocking, mistake, alert, attention, discover, strategy, how it works, behind the scenes, proof, analysis, detail, experts, impactful, change, viral, unmissable, decision, confirmed, almost nobody noticed, what changed, prediction, simple explanation, real case, debate, discussion, reaction, comment, opinion, tense moment, climax, caught red-handed, unexpected, surprise, revelation, investigation, scandal, bombshell, exclusive, just out, real story, big mistake, learn, guide, tip, trick, hack, new, novelty, hidden detail, shocking truth, unfiltered, uncensored, critical point, decisive moment, changed everything, unbelievable, impact, quick explanation, full explanation, deep analysis, behind, full story, controversial case, heated debate, live reaction, exploded on the internet, trend, trending topic, everyone is talking about, what's happening, explained in minutes, worth it, don't ignore, started like this, ended like this.
 
-FORBIDDEN WORDS (use substitution): fuck→f*ck, shit→sh*t, asshole→@sshole, bitch→b*tch | murder→shocking case, suicide→heavy story, massacre→brutal attack, torture→extreme case, execution→executi0n | pornography→adult content, explicit sex→+18 content, orgy→intimate situation, prostitute→intimate scandal | cocaine/drugs/heroin/marijuana→substances | weapon/gun/rifle→equipment or object | war/violence→conflict | death→extreme case | brutal crime→shocking case | attack→incident.
-NEVER use: rape, terrorism, extremism, racism, hate. Use generic or allusive terms.
-
 IMPORTANT:
 - Use ONLY timestamps present in the transcript.
 - Do not invent timestamps.
@@ -803,7 +824,7 @@ IMPORTANT:
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
 
-""" + ANTI_AUTOMATION_RULES_EN + """
+""" + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
 LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
@@ -1078,7 +1099,6 @@ EDUCATIONAL CRITERIA – SHORTS 2–3 MIN (120–180 sec):
 - Informative, professional titles: REQUIRED to include 1–3 relevant emojis in all titles (shorts and longs). Emojis boost engagement.
 - Avoid gratuitous controversy; focus on educational value
 - Prefer CTR-boosting words (secret, truth, strategy, how it works, analysis, detail, learn, guide, tip, trick, hack, new, simple explanation, real case, etc.).
-- NEVER use forbidden words; use substitutions (e.g. murder→shocking case, drugs→substances, war→conflict). Avoid: rape, terrorism, extremism, racism, hate.
 
 EDUCATIONAL LONG CUTS (20–40 min):
 - Complete narrative blocks with in-depth explanations
@@ -1104,7 +1124,7 @@ IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent o
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
 
-""" + ANTI_AUTOMATION_RULES_EN + """
+""" + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
 LANGUAGE REQUIRED: All output text (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
@@ -1691,6 +1711,8 @@ def analyze_chunks_in_one_request(
         allowed_theme_categories=allowed_theme_categories,
         brand_only=brand_only,
     )
+    from apps.auto_cuts.services.metadata_sanitizer import sanitize_payload
+    sanitize_payload(parsed)
     _save_grok_response_json(parsed, analysis_id=analysis_id)
     return parsed
 
@@ -1702,6 +1724,8 @@ Sua tarefa: retornar APENAS metadados para publicação:
 - title: título chamativo para YouTube/Shorts (45-100 caracteres). OBRIGATÓRIO incluir 1-3 emojis - aumenta engajamento.
 - thumbnail_moment_timestamp: timestamp no formato MM:SS do melhor momento para capa (ex: "00:15")
 - thumbnail_text: 2-4 palavras curtas para a capa (ex: "SEGREDO REVELADO")
+
+REGRA DE METADADOS: title e thumbnail_text são escaneados pelo YouTube. NUNCA use palavrões, termos sexuais ou linguajar explícito nesses campos, mesmo que o vídeo contenha. Parafraseie a emoção: use chocante, absurdo, polêmico, inacreditável, explosivo no lugar.
 
 Responda SOMENTE com JSON válido, sem markdown:
 {"virality_score": 8, "title": "Título com emoji 🎯", "thumbnail_moment_timestamp": "00:12", "thumbnail_text": "MOMENTO CHAVE"}"""
@@ -1807,6 +1831,8 @@ Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnai
             "thumbnail_moment_timestamp": "00:00",
             "thumbnail_text": "Vídeo",
         }
+    from apps.auto_cuts.services.metadata_sanitizer import sanitize_clip
+    sanitize_clip(parsed, clip_ref="ready_cut")
     return {
         "virality_score": max(1, min(10, int(parsed.get("virality_score") or 5))),
         "title": (parsed.get("title") or "Vídeo")[:200],
@@ -1845,10 +1871,13 @@ def analyze_ready_cuts_batch_titles_from_transcripts(
     titles = parsed.get("titles")
     if not isinstance(titles, dict):
         return {}
+    from apps.auto_cuts.services.metadata_sanitizer import sanitize_clip
     out: dict[str, str] = {}
     for k, v in titles.items():
         if v and str(v).strip():
-            out[str(k)] = str(v).strip()[:200]
+            tmp = {"title": str(v).strip()}
+            sanitize_clip(tmp, clip_ref=f"batch_title[{k}]")
+            out[str(k)] = tmp["title"][:200]
     return out
 
 
@@ -1876,7 +1905,13 @@ def analyze_ready_cuts_batch_titles_from_job_name(
     titles = parsed.get("titles")
     if not isinstance(titles, list):
         return [f"{name} #{i+1}" for i in range(n)]
-    cleaned = [str(t).strip()[:200] for t in titles if t and str(t).strip()]
+    from apps.auto_cuts.services.metadata_sanitizer import sanitize_clip
+    cleaned = []
+    for i, t in enumerate(titles):
+        if t and str(t).strip():
+            tmp = {"title": str(t).strip()}
+            sanitize_clip(tmp, clip_ref=f"batch_jobname[{i}]")
+            cleaned.append(tmp["title"][:200])
     while len(cleaned) < n:
         cleaned.append(f"{name} #{len(cleaned)+1}")
     return cleaned[:n]
