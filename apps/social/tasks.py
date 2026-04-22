@@ -3742,6 +3742,72 @@ def _cleanup_orphan_media_files(dry_run: bool = False, min_age_hours: int = 24) 
     }
 
 
+@shared_task(
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=120,
+    time_limit=180,
+    max_retries=2,
+)
+def post_youtube_first_comment_task(self, scheduled_post_id: int, video_id: str):
+    """
+    Posta o primeiro comentário (fixado por padrão para o dono do canal)
+    em um vídeo já publicado, após um delay. Rodada via Celery com countdown
+    para parecer mais natural.
+
+    Idempotente: se external_ids['first_comment_posted'] já está True, sai.
+    """
+    from googleapiclient.discovery import build
+
+    from apps.social.publishers.youtube import YouTubePublisher
+    from apps.social.services.youtube_credentials import get_credentials
+
+    if not scheduled_post_id or not video_id:
+        return {"skipped": "missing_args"}
+
+    post = (
+        ScheduledPost.objects.select_related("social_account", "auto_cut_corte")
+        .filter(id=scheduled_post_id)
+        .first()
+    )
+    if not post:
+        return {"skipped": "post_not_found", "post_id": scheduled_post_id}
+
+    existing_flag = (post.external_ids or {}).get("first_comment_posted")
+    if existing_flag:
+        return {"skipped": "already_posted", "post_id": scheduled_post_id}
+
+    account = post.social_account
+    if not account:
+        return {"skipped": "no_social_account", "post_id": scheduled_post_id}
+
+    yt_cred = None
+    cred_id = (post.external_ids or {}).get("youtube_credential_id")
+    if cred_id:
+        yt_cred = BrandYouTubeCredential.objects.filter(id=cred_id).first()
+
+    try:
+        creds = get_credentials(account, youtube_credential=yt_cred)
+        youtube = build("youtube", "v3", credentials=creds)
+    except Exception as e:
+        logger.warning(
+            "[YT-COMMENT] Falha ao criar client para post=%s video=%s: %s",
+            scheduled_post_id,
+            video_id,
+            e,
+        )
+        return {"skipped": "credentials_failed", "post_id": scheduled_post_id}
+
+    publisher = YouTubePublisher()
+    publisher._post_pinned_first_comment(youtube, video_id, post)
+
+    post.external_ids = dict(post.external_ids or {})
+    post.external_ids["first_comment_posted"] = True
+    post.save(update_fields=["external_ids", "updated_at"])
+    return {"ok": True, "post_id": scheduled_post_id, "video_id": video_id}
+
+
 @shared_task
 @instrument_celery_task
 def cleanup_posted_media_task():

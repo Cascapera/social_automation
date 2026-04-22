@@ -366,12 +366,14 @@ def _sync_inventory_item_from_corte(corte):
 
     cut_type = (getattr(suggestion, "cut_type", "") or "").strip().lower()
     video_type = "SHORT" if cut_type == "short" else "LONG"
+    raw_data = getattr(suggestion, "raw_data", None) or {}
+    suggested_description = str(raw_data.get("suggested_description") or "").strip()[:5000]
     defaults = {
         "factory_id": target_brand.factory_id,
         "brand_id": target_brand.id,
         "video_type": video_type,
         "title": (getattr(suggestion, "title", "") or "")[:220],
-        "description": "",
+        "description": suggested_description,
         "virality_score": getattr(suggestion, "virality_score", None),
         "source_asset_id": getattr(suggestion, "source_asset_id", "") or "",
         "source_metadata": {

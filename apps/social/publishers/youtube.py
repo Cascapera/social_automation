@@ -25,6 +25,14 @@ RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
 MAX_RETRIES = 10
 YOUTUBE_TITLE_MAX_LENGTH = 100
 
+# Probabilidade (0..1) de publicar longo direto como public, sem publishAt.
+# Reduz o padrao "todo upload usa publishAt".
+LONG_DIRECT_PUBLIC_PROBABILITY = 0.30
+
+# Delay aleatorio (segundos) antes de postar o primeiro comentario.
+FIRST_COMMENT_DELAY_MIN_SECONDS = 30
+FIRST_COMMENT_DELAY_MAX_SECONDS = 180
+
 
 def _sanitize_youtube_title(title: str, fallback: str = "Vídeo") -> str:
     """
@@ -94,7 +102,9 @@ class YouTubePublisher(BasePublisher):
         if privacy not in ("public", "private", "unlisted"):
             privacy = "private"
         made_for_kids = bool(getattr(account.brand, "youtube_made_for_kids", False))
-        publish_at = self._get_publish_at(post)
+        publish_at, privacy_override = self._resolve_publish_mode(post, account)
+        if privacy_override:
+            privacy = privacy_override
         # Slots fixos já espaçam as postagens; não verificamos mais intervalo mínimo.
         # Padrão para agendamento futuro no YouTube: privado + publishAt.
         if publish_at:
@@ -133,10 +143,93 @@ class YouTubePublisher(BasePublisher):
             ) from e
         video_id = response.get("id")
         # Thumbnail longos: enviada em lote após postagem (upload_thumbnails_after_batch_task). Shorts: não enviamos.
+        if video_id and account.platform == "YTB":
+            self._schedule_pinned_first_comment(video_id, post)
         result = {"video_id": video_id, "platform": account.platform}
         if youtube_credential is not None:
             result["youtube_credential_id"] = youtube_credential.id
         return result
+
+    def _schedule_pinned_first_comment(
+        self, video_id: str, post: ScheduledPost | None
+    ) -> None:
+        """Enfileira Celery task para postar primeiro comentário com delay aleatório.
+
+        O delay evita o padrão "comentário sempre segue upload no mesmo segundo".
+        """
+        if not post or not getattr(post, "id", None):
+            return
+        suggestion = getattr(getattr(post, "auto_cut_corte", None), "suggestion", None)
+        raw = getattr(suggestion, "raw_data", None) or {}
+        if not str(raw.get("suggested_first_comment") or "").strip():
+            return
+        countdown = random.randint(
+            FIRST_COMMENT_DELAY_MIN_SECONDS,
+            FIRST_COMMENT_DELAY_MAX_SECONDS,
+        )
+        try:
+            from apps.social.tasks import post_youtube_first_comment_task
+
+            post_youtube_first_comment_task.apply_async(
+                args=[post.id, video_id],
+                countdown=countdown,
+            )
+            logger.info(
+                "[YT] Primeiro comentário agendado em %ss (video_id=%s post=%s)",
+                countdown,
+                video_id,
+                post.id,
+            )
+        except Exception as e:
+            logger.warning(
+                "[YT] Falha ao enfileirar primeiro comentário (video_id=%s post=%s): %s",
+                video_id,
+                post.id,
+                e,
+            )
+
+    def _post_pinned_first_comment(
+        self, youtube, video_id: str, post: ScheduledPost | None
+    ) -> None:
+        """
+        Posta um primeiro comentário no vídeo logo após o upload (apenas longos).
+        Comentário do dono do canal é automaticamente destacado no topo pelo YouTube.
+        Em caso de erro não interrompe o fluxo do upload — apenas loga warning.
+        """
+        if not post or not getattr(post, "auto_cut_corte_id", None):
+            return
+        corte = getattr(post, "auto_cut_corte", None)
+        suggestion = getattr(corte, "suggestion", None) if corte else None
+        raw = getattr(suggestion, "raw_data", None) or {}
+        text = str(raw.get("suggested_first_comment") or "").strip()
+        if not text:
+            return
+        text = text[:9500]
+        try:
+            youtube.commentThreads().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "videoId": video_id,
+                        "topLevelComment": {
+                            "snippet": {"textOriginal": text},
+                        },
+                    },
+                },
+            ).execute()
+            logger.info("[YT] Primeiro comentário postado (video_id=%s)", video_id)
+        except HttpError as e:
+            logger.warning(
+                "[YT] Falha ao postar primeiro comentário (video_id=%s): %s",
+                video_id,
+                e,
+            )
+        except Exception as e:
+            logger.warning(
+                "[YT] Erro inesperado ao postar primeiro comentário (video_id=%s): %s",
+                video_id,
+                e,
+            )
 
     def _build_description(self, post: ScheduledPost | None) -> str:
         """Monta descrição final para YouTube (mesmo formato do download de mídias)."""
@@ -249,6 +342,26 @@ class YouTubePublisher(BasePublisher):
         if scheduled_at <= timezone.now() + timedelta(seconds=30):
             return None
         return scheduled_at.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _resolve_publish_mode(
+        self, post: ScheduledPost | None, account: BrandSocialAccount
+    ) -> tuple[str | None, str | None]:
+        """
+        Define publish_at e privacy override.
+
+        Para longos (YTB), com probabilidade LONG_DIRECT_PUBLIC_PROBABILITY,
+        publica direto como public (sem publishAt). Reduz o padrao de todo
+        upload usar agendamento nativo.
+        Retorna (publish_at, privacy_override). privacy_override=None preserva o valor atual.
+        """
+        publish_at = self._get_publish_at(post)
+        if (
+            publish_at
+            and account.platform == "YTB"
+            and random.random() < LONG_DIRECT_PUBLIC_PROBABILITY
+        ):
+            return None, "public"
+        return publish_at, None
 
     def _http_error_to_publish_error(self, e: HttpError) -> YouTubePublishError:
         status_code = getattr(getattr(e, "resp", None), "status", None)

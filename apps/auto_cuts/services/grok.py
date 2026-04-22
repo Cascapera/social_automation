@@ -108,6 +108,24 @@ ALL_THEME_CATEGORIES = [
     "COMEDY_HUMOR",
 ]
 
+# Regras anti-automação: descrição dinâmica + tags + capítulos + primeiro comentário.
+# Concatenadas aos SYSTEM_PROMPT* para reduzir padrões repetitivos que disparam detecção
+# de automação do YouTube. Shorts recebem só description+tags; longs ganham chapters e
+# primeiro comentário pinado.
+ANTI_AUTOMATION_RULES_PT = """REGRAS DE DESCRIÇÃO E TAGS (anti-automação):
+- suggested_description: 250–600 caracteres únicos por clip, em português brasileiro. Varie o estilo de abertura entre clips da mesma resposta: (1) pergunta aberta; (2) afirmação forte; (3) lista curta de pontos abordados. Não copie o título. Não use hashtags.
+- tags: 10–15 palavras-chave em lowercase, específicas ao conteúdo do clip (sem # e sem ponto final). Misture termos curtos (1 palavra) e long-tail (2–4 palavras).
+- Para cortes em final_long_cuts (longos), inclua também:
+  - chapters: 3–8 capítulos como [{"timestamp":"MM:SS","title":"..."}]. Timestamps RELATIVOS ao início do clip (o primeiro capítulo DEVE ser "00:00"). Títulos curtos (máx 60 chars).
+  - suggested_first_comment: 100–220 caracteres de texto humano/autoral para pinar como primeiro comentário. Comece com pergunta OU observação pessoal e termine com um CTA sutil (convidar a comentar/assistir completo). Sem hashtags; no máximo 2 emojis."""
+
+ANTI_AUTOMATION_RULES_EN = """DESCRIPTION AND TAGS RULES (anti-automation):
+- suggested_description: 250–600 unique characters per clip, in English. Vary the opening style across clips: (1) open question; (2) strong statement; (3) short list of points covered. Never reuse formulas between clips. Never copy the title. Never use hashtags.
+- tags: 10–15 lowercase keywords specific to the clip content (no # and no trailing dot). Mix short (1 word) and long-tail (2–4 words) terms.
+- For clips in final_long_cuts (long cuts), also include:
+  - chapters: 3–8 chapters as [{"timestamp":"MM:SS","title":"..."}]. Timestamps RELATIVE to the clip start (first chapter MUST be "00:00"). Short titles (max 60 chars).
+  - suggested_first_comment: 100–220 characters of human/authorial text to pin as the first comment. Open with a question OR personal observation and end with a subtle CTA (invite comment/watch full). No hashtags; at most 2 emojis."""
+
 SYSTEM_PROMPT = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
 
 Sua tarefa é identificar, ranquear e selecionar os melhores momentos para Shorts e para cortes longos.
@@ -156,7 +174,9 @@ IMPORTANTE:
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
 
-IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
+""" + ANTI_AUTOMATION_RULES_PT + """
+
+IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
 # Viral longo: mesmas características do viral clássico, porém shorts mais longos (90–160s) para narrativas mais completas
 SYSTEM_PROMPT_VIRAL_LONG = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
@@ -207,7 +227,9 @@ IMPORTANTE:
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
 
-IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
+""" + ANTI_AUTOMATION_RULES_PT + """
+
+IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
 SYSTEM_PROMPT_EDUCATIONAL = """Você é um editor especialista em conteúdo educacional e financeiro para Reels, TikTok, Shorts e YouTube. Analise transcrições com timestamps e identifique trechos com alto valor didático e explicativo. Priorize blocos completos que ensinam um conceito do início ao fim.
 
@@ -246,7 +268,9 @@ IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
 
-IDIOMA OBRIGATÓRIO: Todo o texto de saída (title, title_suggestion, thumbnail_text, hook, reason, etc.) deve ser SEMPRE em português brasileiro."""
+""" + ANTI_AUTOMATION_RULES_PT + """
+
+IDIOMA OBRIGATÓRIO: Todo o texto de saída (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro."""
 
 CHUNKS_PROMPT_TEMPLATE = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
 
@@ -279,6 +303,12 @@ Para cada clipe (short ou longo), inclua:
 - hook_sentence
 - thumbnail_moment_timestamp
 - thumbnail_text (2–4 palavras fortes)
+- suggested_description (250–600 chars, varie o estilo de abertura entre clips)
+- tags (lista de 10–15 palavras-chave lowercase)
+
+Somente em final_long_cuts (cortes longos), inclua também:
+- chapters (3–8 itens com timestamps RELATIVOS ao início do clip; primeiro DEVE ser "00:00")
+- suggested_first_comment (100–220 chars, comentário humano para pinar com CTA sutil)
 
 Regras adicionais:
 - suggested_title e title_suggestion: OBRIGATÓRIO 1–3 emojis em TODOS os títulos (shorts e longs). Nunca retorne título sem emoji.
@@ -300,7 +330,9 @@ Responda SOMENTE com JSON válido:
       "hook_sentence": "frase mais impactante",
       "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "PALAVRA FORTE"
+      "thumbnail_text": "PALAVRA FORTE",
+      "suggested_description": "Você já passou por um climão desses no trabalho? Nesse corte o convidado conta em detalhes como descobriu que estava sendo demitido no meio da reunião — e a reação que virou piada interna da empresa. Se quiser entender o contexto completo, o episódio inteiro está linkado abaixo.",
+      "tags": ["podcast", "história real", "trabalho", "demissão", "constrangimento", "corte viral", "bastidores", "reação", "história de trabalho", "situação inesperada"]
     }}
   ],
   "ranked_shorts": [
@@ -316,7 +348,9 @@ Responda SOMENTE com JSON válido:
       "hook_sentence": "frase mais impactante",
       "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "PALAVRA FORTE"
+      "thumbnail_text": "PALAVRA FORTE",
+      "suggested_description": "Três detalhes que ninguém percebeu nesse momento: (1) a pausa antes da resposta, (2) o olhar pro relógio, (3) o pedido de água logo depois. Esse trecho do episódio mostra como uma pergunta simples pode mudar o tom da conversa inteira.",
+      "tags": ["podcast", "entrevista", "reação", "momento tenso", "análise", "bastidores", "detalhe escondido", "corte viral", "climão", "história real"]
     }}
   ],
   "final_long_cuts": [
@@ -337,7 +371,17 @@ Responda SOMENTE com JSON válido:
       "end": "MM:SS",
       "duration_min": 12,
       "title_suggestion": "Título forte 🎯",
-      "reason": "por que viraliza"
+      "reason": "por que viraliza",
+      "suggested_description": "Neste bloco completo o convidado destrincha a estratégia que usou para escalar o negócio em 18 meses. Pontos abordados: (1) decisão inicial contra-intuitiva, (2) como validou a hipótese com pouco capital, (3) o erro que quase colocou tudo a perder, (4) o ponto de virada. Recomendo assistir até o fim — a conclusão muda a forma como você olha para crescimento.",
+      "tags": ["empreendedorismo", "estratégia de crescimento", "negócios", "startup", "caso real", "decisão", "erro", "virada", "escalabilidade", "análise", "bastidores", "história empresarial"],
+      "chapters": [
+        {{"timestamp": "00:00", "title": "O ponto de partida"}},
+        {{"timestamp": "01:42", "title": "A decisão contra-intuitiva"}},
+        {{"timestamp": "04:15", "title": "Como validou com pouco capital"}},
+        {{"timestamp": "07:30", "title": "O erro que quase derrubou tudo"}},
+        {{"timestamp": "10:05", "title": "O ponto de virada"}}
+      ],
+      "suggested_first_comment": "Qual parte desse trecho você discorda? Eu achei a decisão do minuto 4 bem ousada. Se quiser ver o episódio completo, deixei linkado na descrição 👇"
     }}
   ]
 }}
@@ -346,7 +390,7 @@ Regras finais:
 - candidate_shorts deve ter entre 30 e 50 itens.
 - final_long_cuts deve ter exatamente 10 itens.
 - ranked_shorts pode vir vazio ([]).
-- Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) em português brasileiro."""
+- Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) em português brasileiro."""
 
 CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
 
@@ -381,6 +425,12 @@ Para cada clipe (short ou longo), inclua:
 - hook_sentence
 - thumbnail_moment_timestamp
 - thumbnail_text (2–4 palavras fortes)
+- suggested_description (250–600 chars, varie o estilo de abertura entre clips)
+- tags (lista de 10–15 palavras-chave lowercase)
+
+Somente em final_long_cuts (cortes longos), inclua também:
+- chapters (3–8 itens com timestamps RELATIVOS ao início do clip; primeiro DEVE ser "00:00")
+- suggested_first_comment (100–220 chars, comentário humano para pinar com CTA sutil)
 
 Regras adicionais:
 - suggested_title e title_suggestion: OBRIGATÓRIO 1–3 emojis em TODOS os títulos (shorts e longs). Nunca retorne título sem emoji.
@@ -403,7 +453,9 @@ Responda SOMENTE com JSON válido:
       "hook_sentence": "frase mais impactante",
       "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "PALAVRA FORTE"
+      "thumbnail_text": "PALAVRA FORTE",
+      "suggested_description": "Você já passou por um climão desses no trabalho? Nesse corte o convidado conta em detalhes como descobriu que estava sendo demitido no meio da reunião — e a reação que virou piada interna da empresa. Se quiser entender o contexto completo, o episódio inteiro está linkado abaixo.",
+      "tags": ["podcast", "história real", "trabalho", "demissão", "constrangimento", "corte viral", "bastidores", "reação", "história de trabalho", "situação inesperada"]
     }}
   ],
   "ranked_shorts": [
@@ -419,7 +471,9 @@ Responda SOMENTE com JSON válido:
       "hook_sentence": "frase mais impactante",
       "suggested_title": "Título forte 🎯",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "PALAVRA FORTE"
+      "thumbnail_text": "PALAVRA FORTE",
+      "suggested_description": "Três detalhes que ninguém percebeu nesse momento: (1) a pausa antes da resposta, (2) o olhar pro relógio, (3) o pedido de água logo depois. Esse trecho do episódio mostra como uma pergunta simples pode mudar o tom da conversa inteira.",
+      "tags": ["podcast", "entrevista", "reação", "momento tenso", "análise", "bastidores", "detalhe escondido", "corte viral", "climão", "história real"]
     }}
   ],
   "final_long_cuts": [
@@ -440,7 +494,17 @@ Responda SOMENTE com JSON válido:
       "end": "MM:SS",
       "duration_min": 12,
       "title_suggestion": "Título forte 🎯",
-      "reason": "por que viraliza"
+      "reason": "por que viraliza",
+      "suggested_description": "Neste bloco completo o convidado destrincha a estratégia que usou para escalar o negócio em 18 meses. Pontos abordados: (1) decisão inicial contra-intuitiva, (2) como validou a hipótese com pouco capital, (3) o erro que quase colocou tudo a perder, (4) o ponto de virada. Recomendo assistir até o fim — a conclusão muda a forma como você olha para crescimento.",
+      "tags": ["empreendedorismo", "estratégia de crescimento", "negócios", "startup", "caso real", "decisão", "erro", "virada", "escalabilidade", "análise", "bastidores", "história empresarial"],
+      "chapters": [
+        {{"timestamp": "00:00", "title": "O ponto de partida"}},
+        {{"timestamp": "01:42", "title": "A decisão contra-intuitiva"}},
+        {{"timestamp": "04:15", "title": "Como validou com pouco capital"}},
+        {{"timestamp": "07:30", "title": "O erro que quase derrubou tudo"}},
+        {{"timestamp": "10:05", "title": "O ponto de virada"}}
+      ],
+      "suggested_first_comment": "Qual parte desse trecho você discorda? Eu achei a decisão do minuto 4 bem ousada. Se quiser ver o episódio completo, deixei linkado na descrição 👇"
     }}
   ]
 }}
@@ -449,7 +513,7 @@ Regras finais:
 - candidate_shorts deve ter entre 30 e 50 itens.
 - final_long_cuts deve ter exatamente 10 itens.
 - ranked_shorts pode vir vazio ([]).
-- Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) em português brasileiro."""
+- Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) em português brasileiro."""
 
 CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
 
@@ -467,6 +531,12 @@ Títulos: informativos e profissionais. OBRIGATÓRIO incluir 1–3 emojis em tod
 Inclua obrigatoriamente para cada corte:
 - thumbnail_moment_timestamp (timestamp real dentro do próprio corte)
 - thumbnail_text (2–4 palavras curtas para a capa)
+- suggested_description (250–600 chars, varie o estilo de abertura entre clips)
+- tags (10–15 palavras-chave lowercase)
+
+Somente em final_long_cuts, inclua também:
+- chapters (3–8 itens; primeiro timestamp "00:00", relativos ao início do clip)
+- suggested_first_comment (100–220 chars, comentário humano para pinar com CTA sutil)
 
 Responda SOMENTE com JSON válido:
 {{
@@ -482,7 +552,9 @@ Responda SOMENTE com JSON válido:
       "virality_score": 9,
       "theme_category": "BUSINESS_MONEY",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "IDEIA CENTRAL"
+      "thumbnail_text": "IDEIA CENTRAL",
+      "suggested_description": "Como você decide quando vale a pena arriscar no investimento? Este trecho apresenta um método simples em três passos para avaliar o risco antes de mover o dinheiro. Exemplos reais e aplicação prática ao final.",
+      "tags": ["finanças", "investimento", "educação financeira", "estratégia", "risco", "decisão financeira", "guia prático", "caso real", "análise", "didático"]
     }}
   ],
   "final_long_cuts": [
@@ -494,7 +566,17 @@ Responda SOMENTE com JSON válido:
       "reason": "valor didático",
       "theme_category": "STORIES_CURIOSITIES",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "RESUMO FORTE"
+      "thumbnail_text": "RESUMO FORTE",
+      "suggested_description": "Aula completa sobre alocação de patrimônio em três cenários distintos. Pontos abordados: (1) base defensiva, (2) diversificação internacional, (3) proteção cambial, (4) rebalanceamento anual. Material feito para quem está começando e quer uma visão estruturada.",
+      "tags": ["educação financeira", "alocação de ativos", "investimento", "patrimônio", "diversificação", "renda fixa", "renda variável", "planejamento", "estratégia", "guia completo", "aula", "didático"],
+      "chapters": [
+        {{"timestamp": "00:00", "title": "Introdução e contexto"}},
+        {{"timestamp": "02:40", "title": "Base defensiva"}},
+        {{"timestamp": "07:10", "title": "Diversificação internacional"}},
+        {{"timestamp": "12:25", "title": "Proteção cambial"}},
+        {{"timestamp": "15:40", "title": "Rebalanceamento anual"}}
+      ],
+      "suggested_first_comment": "Qual desses pontos você aplica hoje na sua carteira? Curioso pra ouvir quem faz diferente. O material completo com os números exatos está no episódio inteiro linkado aqui."
     }}
   ]
 }}
@@ -549,7 +631,9 @@ IMPORTANT:
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
 
-LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
+""" + ANTI_AUTOMATION_RULES_EN + """
+
+LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
 CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -582,12 +666,18 @@ For each clip (short or long), include:
 - hook_sentence
 - thumbnail_moment_timestamp
 - thumbnail_text (2–4 powerful words)
+- suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list)
+- tags (10–15 lowercase keywords, mix generic and specific)
+
+For clips in final_long_cuts, ALSO include:
+- chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00"
+- suggested_first_comment (100–220 chars, as if written by the channel owner, natural tone with soft CTA)
 
 Additional rules:
 - suggested_title and title_suggestion: REQUIRED 1–3 emojis in ALL titles (shorts and longs). Never return a title without emojis.
 - suggested_title: 45–100 characters with 1–3 relevant emojis.
 - thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
-- All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) MUST be in English.
+- All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, suggested_description, tags, chapters, suggested_first_comment, etc.) MUST be in English.
 
 Respond ONLY with valid JSON:
 {{
@@ -604,7 +694,9 @@ Respond ONLY with valid JSON:
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
       "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
-      "thumbnail_text": "FIRED LIVE"
+      "thumbnail_text": "FIRED LIVE",
+      "suggested_description": "Ever wondered what it feels like to be fired live on stage? In this clip he shares the exact moment he realized the cameras were rolling and his career had just changed forever. A raw, funny, and slightly painful story about how public embarrassment can be a turning point.",
+      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","viral clip","real story","work moment","stage fail","shorts","funny","life lesson"]
     }}
   ],
   "ranked_shorts": [
@@ -620,7 +712,9 @@ Respond ONLY with valid JSON:
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
       "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
-      "thumbnail_text": "FIRED LIVE"
+      "thumbnail_text": "FIRED LIVE",
+      "suggested_description": "A short version of one of the most uncomfortable moments of his career, told with humor and honesty. Watch and tell me in the comments: would you handle it the same way?",
+      "tags": ["fired live","embarrassing moment","career","work story","viral","shorts","funny clip","real story","stage","turning point","life"]
     }}
   ],
   "final_long_cuts": [
@@ -641,7 +735,17 @@ Respond ONLY with valid JSON:
       "end": "MM:SS",
       "duration_min": 11.5,
       "title_suggestion": "The Decision That Changed His Career 🎯",
-      "reason": "why it goes viral"
+      "reason": "why it goes viral",
+      "suggested_description": "In this chapter he walks through the exact decision that flipped his career upside down. We cover the context before the choice, the fears that almost stopped him, the mindset shift that made it possible, and the outcome that followed. If you are stuck at a crossroads, this one is for you.",
+      "tags": ["career decision","life change","turning point","mindset shift","courage","real story","long form","interview","professional growth","personal development","motivation","career advice","inspiration","lessons"],
+      "chapters": [
+        {{"timestamp":"00:00","title":"Intro: the night before the decision"}},
+        {{"timestamp":"02:15","title":"The fear that almost stopped him"}},
+        {{"timestamp":"05:40","title":"The mindset shift"}},
+        {{"timestamp":"08:10","title":"What happened next"}},
+        {{"timestamp":"10:30","title":"Lessons and takeaways"}}
+      ],
+      "suggested_first_comment": "What would you have done in his place? Leave your answer in the comments — I read every single one and I'm already picking a few to discuss on the next video."
     }}
   ]
 }}
@@ -699,7 +803,9 @@ IMPORTANT:
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
 
-LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
+""" + ANTI_AUTOMATION_RULES_EN + """
+
+LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
 CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -734,13 +840,19 @@ For each clip (short or long), include:
 - hook_sentence
 - thumbnail_moment_timestamp
 - thumbnail_text (2–4 powerful words)
+- suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list)
+- tags (10–15 lowercase keywords, mix generic and specific)
+
+For clips in final_long_cuts, ALSO include:
+- chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00"
+- suggested_first_comment (100–220 chars, as if written by the channel owner, natural tone with soft CTA)
 
 Additional rules:
 - suggested_title and title_suggestion: REQUIRED 1–3 emojis in ALL titles (shorts and longs). Never return a title without emojis.
 - suggested_title: 45–100 characters with 1–3 relevant emojis.
 - thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
 - Shorts: target duration 90–160 seconds (do NOT use 30–60s clips in this mode).
-- All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, etc.) MUST be in English.
+- All text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, suggested_description, tags, chapters, suggested_first_comment, etc.) MUST be in English.
 
 Respond ONLY with valid JSON:
 {{
@@ -757,7 +869,9 @@ Respond ONLY with valid JSON:
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
       "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
-      "thumbnail_text": "FIRED LIVE"
+      "thumbnail_text": "FIRED LIVE",
+      "suggested_description": "Two full minutes of one of the most awkward career stories ever told. He explains the warning signs he ignored, the moment he realized it was over, and the reaction that followed. Perfect watch if you like raw real-life stories that feel like a mini documentary.",
+      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","long short","real story","work moment","stage fail","viral clip","funny","life lesson","interview"]
     }}
   ],
   "ranked_shorts": [
@@ -773,7 +887,9 @@ Respond ONLY with valid JSON:
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
       "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
-      "thumbnail_text": "FIRED LIVE"
+      "thumbnail_text": "FIRED LIVE",
+      "suggested_description": "A slightly longer version of the fired-live story, with the full lead-up and the reaction he had the next day. Watch till the end — tell me what you would have done differently in the comments.",
+      "tags": ["fired live","embarrassing moment","career","work story","viral","long short","funny clip","real story","stage","turning point","life","interview"]
     }}
   ],
   "final_long_cuts": [
@@ -794,7 +910,17 @@ Respond ONLY with valid JSON:
       "end": "MM:SS",
       "duration_min": 11.5,
       "title_suggestion": "The Decision That Changed His Career 🎯",
-      "reason": "why it goes viral"
+      "reason": "why it goes viral",
+      "suggested_description": "A full chapter about the decision that flipped his career upside down: what led up to it, the fears he had to fight, the mindset shift that unlocked the move, and the aftermath. If you are facing a crossroads, save this one.",
+      "tags": ["career decision","life change","turning point","mindset shift","courage","real story","long form","interview","professional growth","personal development","motivation","career advice","inspiration","lessons"],
+      "chapters": [
+        {{"timestamp":"00:00","title":"Intro: the night before the decision"}},
+        {{"timestamp":"02:15","title":"The fear that almost stopped him"}},
+        {{"timestamp":"05:40","title":"The mindset shift"}},
+        {{"timestamp":"08:10","title":"What happened next"}},
+        {{"timestamp":"10:30","title":"Lessons and takeaways"}}
+      ],
+      "suggested_first_comment": "What would you have done in his place? Leave your answer in the comments — I read every single one and I'm already picking a few to discuss on the next video."
     }}
   ]
 }}
@@ -847,12 +973,19 @@ For each clip (short or long), include:
 - hook_sentence
 - thumbnail_moment_timestamp
 - thumbnail_text (2–4 powerful words)
+- suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list) — written in English (will describe the clip for the English audience)
+- tags (10–15 lowercase keywords, mix generic and specific) — in English
 - subtitle_segments_pt (REQUIRED): array of {{"start": float, "end": float, "text": "PT translation"}}
+
+For clips in final_long_cuts, ALSO include:
+- chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00" — titles in English
+- suggested_first_comment (100–220 chars, as if written by the channel owner, natural tone with soft CTA) — in English
 
 Additional rules:
 - suggested_title and title_suggestion: REQUIRED 1–3 emojis in ALL titles (shorts and longs). Never return a title without emojis.
 - suggested_title: 45–100 characters with 1–3 relevant emojis.
 - thumbnail_text: 2–4 words (max 28 chars), preferably uppercase.
+- suggested_description, tags, chapters, suggested_first_comment are ALL in English (same as suggested_title). Only subtitle_segments_pt contains Brazilian Portuguese.
 
 Respond ONLY with valid JSON:
 {{
@@ -870,6 +1003,8 @@ Respond ONLY with valid JSON:
       "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE",
+      "suggested_description": "Ever wondered what it feels like to be fired live on stage? In this clip he shares the exact moment he realized the cameras were rolling and his career had just changed forever. A raw, funny, and slightly painful story about how public embarrassment can be a turning point.",
+      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","viral clip","real story","work moment","stage fail","shorts","funny","life lesson"],
       "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
     }}
   ],
@@ -887,6 +1022,8 @@ Respond ONLY with valid JSON:
       "suggested_title": "He Got Fired In The Most Embarrassing Way 😱",
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE",
+      "suggested_description": "A short version of one of the most uncomfortable moments of his career, told with humor and honesty. Watch and tell me in the comments: would you handle it the same way?",
+      "tags": ["fired live","embarrassing moment","career","work story","viral","shorts","funny clip","real story","stage","turning point","life"],
       "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
     }}
   ],
@@ -909,6 +1046,16 @@ Respond ONLY with valid JSON:
       "duration_min": 11.5,
       "title_suggestion": "The Decision That Changed His Career 🎯",
       "reason": "why it goes viral",
+      "suggested_description": "In this chapter he walks through the exact decision that flipped his career upside down. We cover the context before the choice, the fears that almost stopped him, the mindset shift that made it possible, and the outcome that followed. If you are stuck at a crossroads, this one is for you.",
+      "tags": ["career decision","life change","turning point","mindset shift","courage","real story","long form","interview","professional growth","personal development","motivation","career advice","inspiration","lessons"],
+      "chapters": [
+        {{"timestamp":"00:00","title":"Intro: the night before the decision"}},
+        {{"timestamp":"02:15","title":"The fear that almost stopped him"}},
+        {{"timestamp":"05:40","title":"The mindset shift"}},
+        {{"timestamp":"08:10","title":"What happened next"}},
+        {{"timestamp":"10:30","title":"Lessons and takeaways"}}
+      ],
+      "suggested_first_comment": "What would you have done in his place? Leave your answer in the comments — I read every single one and I'm already picking a few to discuss on the next video.",
       "subtitle_segments_pt": [{{"start": 2530.0, "end": 2535.2, "text": "Uma decisão mudou tudo na minha carreira"}}]
     }}
   ]
@@ -957,7 +1104,9 @@ IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent o
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
 
-LANGUAGE REQUIRED: All output text (title, title_suggestion, thumbnail_text, hook, reason, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
+""" + ANTI_AUTOMATION_RULES_EN + """
+
+LANGUAGE REQUIRED: All output text (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
 CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -972,10 +1121,16 @@ Tasks (respond in ONE JSON response):
 2. FINAL_LONG_CUTS: Assemble 1–3 long cuts (20–40 min) combining narrative blocks with natural flow. Suggest informative title for each.
 
 Titles: informative and professional. REQUIRED to include 1–3 emojis in all (title and title_suggestion). Avoid sensationalism.
-All text (title, title_suggestion, thumbnail_text, hook, reason, etc.) MUST be in English.
+All text (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, tags, chapters, suggested_first_comment, etc.) MUST be in English.
 For every cut, include:
 - thumbnail_moment_timestamp (real timestamp inside the cut)
 - thumbnail_text (2–4 short words for cover text)
+- suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list)
+- tags (10–15 lowercase keywords, mix generic and specific)
+
+For clips in final_long_cuts, ALSO include:
+- chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00"
+- suggested_first_comment (100–220 chars, as if written by the channel owner, natural tone with soft CTA)
 
 Respond ONLY with valid JSON:
 {{
@@ -991,7 +1146,9 @@ Respond ONLY with valid JSON:
       "virality_score": 9,
       "theme_category": "BUSINESS_MONEY",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "CORE IDEA"
+      "thumbnail_text": "CORE IDEA",
+      "suggested_description": "In this short cut we walk through the core idea of portfolio allocation in under three minutes. I explain why diversification matters, where most investors get it wrong, and a simple rule you can apply to your own setup today. Save it if you want to come back later.",
+      "tags": ["portfolio allocation","diversification","investing basics","personal finance","wealth building","long term investing","investor mistakes","finance tips","strategy","money","asset allocation","financial education"]
     }}
   ],
   "final_long_cuts": [
@@ -1003,7 +1160,17 @@ Respond ONLY with valid JSON:
       "reason": "didactic value",
       "theme_category": "STORIES_CURIOSITIES",
       "thumbnail_moment_timestamp": "MM:SS",
-      "thumbnail_text": "KEY LESSON"
+      "thumbnail_text": "KEY LESSON",
+      "suggested_description": "Full chapter on how to structure your investment portfolio for long-term growth. We cover the basics of asset allocation, the role of risk tolerance, a practical example with real numbers, and the mistakes that cost most investors 10+ years of compounding. Practical and friendly.",
+      "tags": ["investment strategy","asset allocation","long term investing","personal finance","wealth","financial education","investor mistakes","compounding","risk tolerance","portfolio","finance class","money management","passive income","financial planning"],
+      "chapters": [
+        {{"timestamp":"00:00","title":"Intro and context"}},
+        {{"timestamp":"02:30","title":"Basics of asset allocation"}},
+        {{"timestamp":"06:10","title":"Risk tolerance in practice"}},
+        {{"timestamp":"10:45","title":"Practical example"}},
+        {{"timestamp":"14:20","title":"Common mistakes to avoid"}}
+      ],
+      "suggested_first_comment": "Which of these points surprised you the most? Drop it in the comments — I'm collecting questions for a Q&A video in a couple of weeks."
     }}
   ]
 }}

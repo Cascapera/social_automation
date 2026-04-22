@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -19,6 +20,16 @@ from apps.jobs.models import (
     VideoInventoryItem,
 )
 from apps.jobs.services.daily_posting_plan_service import DailyPostingPlanService
+from apps.social.services.title_humanizer import humanize_title
+
+# Jitter aplicado ao slot para nao postar sempre no mesmo minuto exato.
+SLOT_JITTER_MIN_SECONDS = -180  # -3 min
+SLOT_JITTER_MAX_SECONDS = 420  # +7 min
+
+
+def _compute_slot_jitter_seconds() -> int:
+    """Retorna jitter aleatorio em segundos. Extraido para permitir mock em testes."""
+    return random.randint(SLOT_JITTER_MIN_SECONDS, SLOT_JITTER_MAX_SECONDS)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +125,30 @@ def pick_inventory_item_for_slot(
     return ordered[0] if ordered else None
 
 
+def _extract_tags_from_inventory(item: VideoInventoryItem) -> list[str]:
+    """
+    Le tags geradas pelo LLM em AutoCutSuggestion.raw_data['tags'].
+    Retorna lista lowercase, deduplicada, max 15 itens, cada tag <=100 chars.
+    """
+    corte = getattr(item, "auto_cut_corte", None)
+    suggestion = getattr(corte, "suggestion", None) if corte else None
+    raw = getattr(suggestion, "raw_data", None) or {}
+    tags = raw.get("tags")
+    if not isinstance(tags, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for t in tags:
+        s = str(t or "").strip().lower()
+        if not s or len(s) > 100 or s in seen:
+            continue
+        seen.add(s)
+        cleaned.append(s)
+        if len(cleaned) >= 15:
+            break
+    return cleaned
+
+
 def allocate_inventory_item_to_slot(
     *,
     factory: Factory,
@@ -129,17 +164,28 @@ def allocate_inventory_item_to_slot(
     platform = "YT" if video_type == "SHORT" else "YTB"
     account = _first_social_account_for_video_type(brand, video_type)
     slot_at_utc = scheduled_at.astimezone(UTC)
+    jitter_seconds = _compute_slot_jitter_seconds()
+    jittered_at = slot_at_utc + timedelta(seconds=jitter_seconds)
+    min_floor = timezone.now().astimezone(UTC) + timedelta(seconds=60)
+    if jittered_at < min_floor:
+        jittered_at = min_floor
+    slot_at_utc = jittered_at
+    tags = _extract_tags_from_inventory(item)
+    merged_external_ids = dict(external_ids or {})
+    merged_external_ids["slot_jitter_seconds"] = jitter_seconds
+    humanized_title = humanize_title(item.title or "")[:200]
     scheduled_post = ScheduledPost.objects.create(
         job=None,
         auto_cut_corte=item.auto_cut_corte,
         platforms=[platform],
         social_account=account,
         scheduled_at=slot_at_utc,
-        title=(item.title or "")[:200],
+        title=humanized_title,
         description=item.description or "",
+        tags=tags,
         privacy_status="private",
         status="PENDING",
-        external_ids=external_ids or {},
+        external_ids=merged_external_ids,
         correlation_id=correlation_id or "",
     )
 
