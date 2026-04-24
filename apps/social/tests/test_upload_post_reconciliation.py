@@ -551,12 +551,14 @@ class UploadPostReconciliationTests(TestCase):
         self.assertIn("próxima tentativa automática", post.error.lower())
         native.publish.assert_called_once()
 
+    @patch("apps.jobs.services.factory_scheduler._compute_slot_jitter_seconds", return_value=0)
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
     def test_short_provider_not_found_after_resend_replaces_slot_with_new_short(
         self,
         mock_up: MagicMock,
         mock_status: MagicMock,
+        _mock_jitter: MagicMock,
     ):
         current_item = self._create_short_inventory_item("primary")
         replacement_item = self._create_short_inventory_item("replacement")
