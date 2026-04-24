@@ -24,6 +24,7 @@ from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
 from apps.brands.models import (
     Brand,
     BrandAsset,
+    BrandCategory,
     BrandSocialAccount,
     BrandYouTubeCredential,
     Factory,
@@ -50,6 +51,7 @@ from .serializers import (
     AutoCutAnalysisSerializer,
     AutoCutCorteSerializer,
     BrandAssetSerializer,
+    BrandCategorySerializer,
     BrandSerializer,
     BrandSocialAccountSerializer,
     BrandYouTubeCredentialSerializer,
@@ -321,6 +323,61 @@ def _resolve_search_channel(channel: SearchChannel) -> None:
             channel.channel_title = (info.get("title") or "")[:200]
         channel.last_checked_at = timezone.now()
         channel.save(update_fields=["youtube_channel_id", "channel_title", "last_checked_at", "updated_at"])
+
+
+class BrandCategoryViewSet(viewsets.ModelViewSet):
+    """
+    CRUD de categorias temáticas por factory.
+    - DELETE é soft-delete (is_active=False). Bloqueia se alguma Brand ainda usar o code.
+    - Por padrão lista só categorias ativas. Use ?include_inactive=1 para listar todas.
+    - code é imutável; label é editável.
+    """
+    queryset = BrandCategory.objects.all()
+    serializer_class = BrandCategorySerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        include_inactive = (self.request.query_params.get("include_inactive") or "").strip() in ("1", "true", "True")
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs.order_by("factory_id", "label")
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        brands_using = Brand.objects.filter(
+            factory_id=instance.factory_id,
+            theme_category=instance.code,
+        ).values_list("id", "name")
+        brands_list = list(brands_using)
+        if brands_list:
+            names = ", ".join(name for _, name in brands_list)
+            return Response(
+                {
+                    "error": (
+                        "Não é possível excluir: a categoria está em uso por "
+                        f"{len(brands_list)} brand(s): {names}. "
+                        "Troque a categoria dessas brands antes de excluir."
+                    ),
+                    "in_use_by_brand_ids": [bid for bid, _ in brands_list],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        instance = self.get_object()
+        if instance.is_active:
+            return Response(self.get_serializer(instance).data)
+        instance.is_active = True
+        instance.save(update_fields=["is_active", "updated_at"])
+        return Response(self.get_serializer(instance).data)
 
 
 class BrandViewSet(viewsets.ModelViewSet):

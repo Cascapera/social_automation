@@ -7,6 +7,7 @@ from .views import (
     AutoCutCorteViewSet,
     AutoCutSuggestionViewSet,
     BrandAssetViewSet,
+    BrandCategoryViewSet,
     BrandSocialAccountViewSet,
     BrandViewSet,
     BrandYouTubeCredentialViewSet,
@@ -29,6 +30,7 @@ router = DefaultRouter()
 router.register("factories", FactoryViewSet, basename="factory")
 router.register("search-channels", SearchChannelViewSet, basename="search-channel")
 router.register("brands", BrandViewSet, basename="brand")
+router.register("brand-categories", BrandCategoryViewSet, basename="brand-category")
 router.register("brand-assets", BrandAssetViewSet, basename="brand-asset")
 router.register("social-accounts", BrandSocialAccountViewSet, basename="social-account")
 router.register("brand-youtube-credentials", BrandYouTubeCredentialViewSet, basename="brand-youtube-credential")

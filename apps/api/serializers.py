@@ -13,6 +13,7 @@ from apps.auto_cuts.models import (
 from apps.brands.models import (
     Brand,
     BrandAsset,
+    BrandCategory,
     BrandSocialAccount,
     BrandYouTubeCredential,
     Factory,
@@ -97,6 +98,75 @@ class SearchChannelSerializer(serializers.ModelSerializer):
         if getattr(obj, "distribute_by_brands", False):
             return "Distribuir pelas Brands"
         return getattr(obj.target_brand, "name", None) if obj.target_brand else "Por tema"
+
+
+class BrandCategorySerializer(serializers.ModelSerializer):
+    in_use_by_brand_ids = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = BrandCategory
+        fields = [
+            "id",
+            "factory",
+            "code",
+            "label",
+            "is_active",
+            "in_use_by_brand_ids",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["code", "is_active", "created_at", "updated_at"]
+
+    def get_in_use_by_brand_ids(self, obj):
+        return list(
+            Brand.objects.filter(factory_id=obj.factory_id, theme_category=obj.code)
+            .values_list("id", flat=True)
+        )
+
+    def _generate_code(self, factory, label: str) -> str:
+        base = slugify(label or "").replace("-", "_").upper()
+        if not base:
+            raise serializers.ValidationError({"label": "Rótulo inválido para gerar código."})
+        candidate = base[:40]
+        i = 2
+        while BrandCategory.objects.filter(factory=factory, code=candidate).exists():
+            suffix = f"_{i}"
+            candidate = (base[: 40 - len(suffix)] + suffix)
+            i += 1
+        return candidate
+
+    def validate(self, attrs):
+        factory = attrs.get("factory") or getattr(self.instance, "factory", None)
+        label = (attrs.get("label") or "").strip()
+        if self.instance is None:
+            if not factory:
+                raise serializers.ValidationError({"factory": "Factory é obrigatória."})
+            if not label:
+                raise serializers.ValidationError({"label": "Rótulo é obrigatório."})
+        if label and factory:
+            qs = BrandCategory.objects.filter(factory=factory, label=label)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"label": "Já existe uma categoria com esse nome nesta factory."})
+        return attrs
+
+    def create(self, validated_data):
+        factory = validated_data["factory"]
+        label = validated_data["label"].strip()
+        code = self._generate_code(factory, label)
+        validated_data["label"] = label
+        validated_data["code"] = code
+        validated_data["is_active"] = True
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # code e is_active não são editáveis aqui; is_active muda via action dedicada.
+        validated_data.pop("code", None)
+        validated_data.pop("is_active", None)
+        if "label" in validated_data:
+            validated_data["label"] = validated_data["label"].strip()
+        return super().update(instance, validated_data)
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -205,6 +275,18 @@ class BrandSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"min_gap_minutes": "Não pode ser maior que max_gap_minutes."}
             )
+
+        # theme_category: code precisa existir e estar ativo na factory da brand.
+        code = (attrs.get("theme_category") or "").strip()
+        factory = attrs.get("factory") or getattr(self.instance, "factory", None)
+        if code and factory:
+            exists_active = BrandCategory.objects.filter(
+                factory=factory, code=code, is_active=True
+            ).exists()
+            if not exists_active:
+                raise serializers.ValidationError(
+                    {"theme_category": "Categoria inválida ou inativa para esta factory."}
+                )
         return attrs
 
 

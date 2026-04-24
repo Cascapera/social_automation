@@ -155,6 +155,38 @@ export async function getFactories() {
   return apiRequest('/factories/')
 }
 
+export async function getBrandCategories(factoryId, { includeInactive = false } = {}) {
+  const params = new URLSearchParams()
+  if (factoryId) params.append('factory', String(factoryId))
+  if (includeInactive) params.append('include_inactive', '1')
+  params.append('page_size', '200')
+  const qs = params.toString()
+  const data = await apiRequest(qs ? `/brand-categories/?${qs}` : '/brand-categories/')
+  return Array.isArray(data) ? data : (data?.results || [])
+}
+
+export async function createBrandCategory(factoryId, label) {
+  return apiRequest('/brand-categories/', {
+    method: 'POST',
+    body: JSON.stringify({ factory: Number(factoryId), label }),
+  })
+}
+
+export async function updateBrandCategory(id, payload) {
+  return apiRequest(`/brand-categories/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload || {}),
+  })
+}
+
+export async function deleteBrandCategory(id) {
+  return apiRequest(`/brand-categories/${id}/`, { method: 'DELETE' })
+}
+
+export async function reactivateBrandCategory(id) {
+  return apiRequest(`/brand-categories/${id}/reactivate/`, { method: 'POST' })
+}
+
 /**
  * Métricas reais do dashboard (AutoCut). Escopo: brand OU factory.
  * Com ambos, a API valida que a brand pertence à factory.

@@ -204,7 +204,7 @@ IMPORTANTE:
 - Não invente timestamps.
 - Não retorne texto fora do JSON.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
 """ + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
@@ -253,7 +253,7 @@ IMPORTANTE:
 - Não invente timestamps.
 - Não retorne texto fora do JSON.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
 """ + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
@@ -285,15 +285,15 @@ Para shorts (2–3 min):
 - title: título informativo (máx 60 chars)
 - reason: por que é educativo
 - virality_score: 1–10 (10 = máximo valor didático)
-- theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: OBRIGATÓRIO (use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 
 Para cortes longos:
 - start, end, duration_min, title_suggestion, reason
-- theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: OBRIGATÓRIO (use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 
 IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
 """ + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
@@ -323,7 +323,7 @@ Para cada clipe (short ou longo), inclua:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (OBRIGATÓRIO: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE ou COMEDY_HUMOR)
+- theme_category (OBRIGATÓRIO: use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 - emotion_type (funny/shocking/inspiring/controversial/story)
 - main_topic
 - suggested_title
@@ -351,7 +351,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -369,7 +369,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -387,7 +387,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 720,
       "virality_score": 88,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "estratégia de crescimento",
       "hook_sentence": "frase mais impactante",
@@ -445,7 +445,7 @@ Para cada clipe (short ou longo), inclua:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (OBRIGATÓRIO: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE ou COMEDY_HUMOR)
+- theme_category (OBRIGATÓRIO: use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 - emotion_type (funny/shocking/inspiring/controversial/story)
 - main_topic
 - suggested_title
@@ -474,7 +474,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -492,7 +492,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -510,7 +510,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 720,
       "virality_score": 88,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "estratégia de crescimento",
       "hook_sentence": "frase mais impactante",
@@ -577,7 +577,7 @@ Responda SOMENTE com JSON válido:
       "title": "Título informativo 📚",
       "reason": "valor didático",
       "virality_score": 9,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "IDEIA CENTRAL",
       "suggested_description": "Como você decide quando vale a pena arriscar no investimento? Este trecho apresenta um método simples em três passos para avaliar o risco antes de mover o dinheiro. Exemplos reais e aplicação prática ao final.",
@@ -591,7 +591,7 @@ Responda SOMENTE com JSON válido:
       "duration_min": 18,
       "title_suggestion": "Título informativo 📚",
       "reason": "valor didático",
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "RESUMO FORTE",
       "suggested_description": "Aula completa sobre alocação de patrimônio em três cenários distintos. Pontos abordados: (1) base defensiva, (2) diversificação internacional, (3) proteção cambial, (4) rebalanceamento anual. Material feito para quem está começando e quer uma visão estruturada.",
@@ -653,7 +653,7 @@ IMPORTANT:
 - Do not invent timestamps.
 - Return valid JSON only.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
 """ + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
@@ -683,7 +683,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- theme_category (REQUIRED: use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -712,7 +712,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -730,7 +730,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -748,7 +748,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -822,7 +822,7 @@ IMPORTANT:
 - Do not invent timestamps.
 - Return valid JSON only.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
 """ + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
@@ -854,7 +854,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- theme_category (REQUIRED: use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -884,7 +884,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:17:22",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -902,7 +902,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:17:22",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -920,7 +920,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -987,7 +987,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- theme_category (REQUIRED: use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -1017,7 +1017,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -1036,7 +1036,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -1055,7 +1055,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -1114,15 +1114,15 @@ For shorts (2–3 min):
 - title: informative title (max 60 chars)
 - reason: why it's educational
 - virality_score: 1–10 (10 = max didactic value)
-- theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: REQUIRED (use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 
 For long cuts:
 - start, end, duration_min, title_suggestion, reason
-- theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: REQUIRED (use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 
 IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
 """ + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
@@ -1164,7 +1164,7 @@ Respond ONLY with valid JSON:
       "title": "Informative title 📚",
       "reason": "didactic value",
       "virality_score": 9,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "CORE IDEA",
       "suggested_description": "In this short cut we walk through the core idea of portfolio allocation in under three minutes. I explain why diversification matters, where most investors get it wrong, and a simple rule you can apply to your own setup today. Save it if you want to come back later.",
@@ -1178,7 +1178,7 @@ Respond ONLY with valid JSON:
       "duration_min": 18,
       "title_suggestion": "Informative title 📚",
       "reason": "didactic value",
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "KEY LESSON",
       "suggested_description": "Full chapter on how to structure your investment portfolio for long-term growth. We cover the basics of asset allocation, the role of risk tolerance, a practical example with real numbers, and the mistakes that cost most investors 10+ years of compounding. Practical and friendly.",

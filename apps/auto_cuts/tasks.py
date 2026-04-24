@@ -413,12 +413,17 @@ def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[di
     if not factory_id:
         return list(items or []), 0, 0
 
-    from apps.brands.models import Brand
+    from apps.brands.models import Brand, BrandCategory
 
-    category_set = {
+    active_codes = set(
+        BrandCategory.objects.filter(factory_id=factory_id, is_active=True)
+        .values_list("code", flat=True)
+    )
+    brand_codes = {
         b.theme_category
         for b in Brand.objects.filter(factory_id=factory_id).exclude(theme_category="")
     }
+    category_set = brand_codes & active_codes
     missing_category = 0
     unmapped_count = 0
     valid_items: list[dict] = []
@@ -440,22 +445,25 @@ def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[di
 
 def _allowed_theme_categories_for_analysis(analysis) -> list[str]:
     """
-    In factory context, return only categories mapped on factory brands.
-    Outside factory, return the full default set.
+    In factory context, return only codes que estão vinculados a uma brand da factory
+    E que pertencem a uma BrandCategory ativa. Fora de factory, retorna o fallback default.
     """
     base_brand = getattr(analysis, "brand", None)
     factory_id = getattr(base_brand, "factory_id", None) if base_brand else None
     if not factory_id:
         return list(ALL_THEME_CATEGORIES)
-    from apps.brands.models import Brand
+    from apps.brands.models import Brand, BrandCategory
 
-    mapped = sorted(
-        {
-            str(b.theme_category or "").strip()
-            for b in Brand.objects.filter(factory_id=factory_id).exclude(theme_category="")
-            if str(b.theme_category or "").strip()
-        }
+    active_codes = set(
+        BrandCategory.objects.filter(factory_id=factory_id, is_active=True)
+        .values_list("code", flat=True)
     )
+    brand_codes = {
+        str(b.theme_category or "").strip()
+        for b in Brand.objects.filter(factory_id=factory_id).exclude(theme_category="")
+        if str(b.theme_category or "").strip()
+    }
+    mapped = sorted(brand_codes & active_codes)
     return mapped or list(ALL_THEME_CATEGORIES)
 
 
