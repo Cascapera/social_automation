@@ -618,12 +618,12 @@ class UploadPostReconciliationTests(TestCase):
         mock_up: MagicMock,
         _mock_jitter: MagicMock,
     ):
-        for status_code in (499, 504):
+        for index, status_code in enumerate((499, 504), start=1):
             with self.subTest(status_code=status_code):
                 mock_up.reset_mock()
                 current_item = self._create_short_inventory_item(f"provider-busy-primary-{status_code}")
                 replacement_item = self._create_short_inventory_item(f"provider-busy-replacement-{status_code}")
-                slot_at = timezone.now() + timedelta(minutes=35)
+                slot_at = timezone.now() + timedelta(days=index, minutes=35)
                 post, schedule = self._factory_short_post(current_item, scheduled_at=slot_at)
                 mock_up.side_effect = [
                     UploadPostPublishError(
