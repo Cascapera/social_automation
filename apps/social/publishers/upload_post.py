@@ -18,6 +18,8 @@ class UploadPostErrorKind:
     CONFIRMED_FAILURE = "confirmed_failure"
     UNKNOWN_PENDING_CONFIRMATION = "unknown_pending_confirmation"
 
+
+UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES = {499, 504}
 UPLOAD_POST_API_URL = "https://api.upload-post.com/api/upload"
 PLATFORM_MAP = {
     "TIKTOK": "tiktok",
@@ -203,15 +205,12 @@ def publish_to_upload_post(
     if resp.status_code >= 400:
         err_msg = resp.text or f"HTTP {resp.status_code}"
         logger.warning("[UploadPost] Falha %s: %s", resp.status_code, err_msg[:500])
-        if resp.status_code in (499, 504):
+        if resp.status_code in UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES:
             raise UploadPostPublishError(
-                err_msg[:500],
+                f"Upload Post temporariamente indisponível (HTTP {resp.status_code}): {err_msg[:400]}",
                 status_code=resp.status_code,
-                retriable=False,
-                kind=UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION,
-                request_id=partial_rid,
-                request_id_source="provider" if partial_rid else ("client_fallback" if client_request_id else None),
-                job_id=partial_jid,
+                retriable=True,
+                kind=UploadPostErrorKind.CONFIRMED_FAILURE,
             )
         raise UploadPostPublishError(
             err_msg[:500],
