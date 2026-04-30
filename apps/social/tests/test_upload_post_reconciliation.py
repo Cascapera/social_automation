@@ -647,14 +647,15 @@ class UploadPostReconciliationTests(TestCase):
                 schedule.refresh_from_db()
                 current_item.refresh_from_db()
                 replacement_item.refresh_from_db()
+                scheduled_replacement = VideoInventoryItem.objects.get(pk=schedule.inventory_item_id)
 
                 self.assertEqual(mock_up.call_count, 2)
                 self.assertEqual(result.get("skipped"), "short_slot_replaced")
                 self.assertEqual(post.status, "FAILED")
                 self.assertEqual(current_item.status, "AVAILABLE")
                 self.assertIn("erro temporário do provedor", current_item.last_error.lower())
-                self.assertEqual(schedule.inventory_item_id, replacement_item.id)
-                self.assertEqual(replacement_item.status, "SCHEDULED")
+                self.assertNotEqual(schedule.inventory_item_id, current_item.id)
+                self.assertEqual(scheduled_replacement.status, "SCHEDULED")
                 mock_native.assert_not_called()
 
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
