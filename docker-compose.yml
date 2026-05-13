@@ -56,6 +56,23 @@ services:
     # Reset shared multiprocess root once, then create per-service subdirs to avoid PID file collisions across containers.
     command: sh -c "mkdir -p /tmp/prometheus_multiproc && rm -rf /tmp/prometheus_multiproc/* && mkdir -p /tmp/prometheus_multiproc/web /tmp/prometheus_multiproc/celery /tmp/prometheus_multiproc/celery_render /tmp/prometheus_multiproc/celery_publish /tmp/prometheus_multiproc/beat && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
 
+  frontend:
+    image: node:20-alpine
+    working_dir: /app/frontend
+    environment:
+      VITE_PROXY_TARGET: http://web:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/frontend/node_modules
+    depends_on:
+      web:
+        condition: service_started
+    networks:
+      - app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
   # Transcription + analysis (CPU). Runs the next job while celery_render encodes on GPU.
   celery:
     build: .
@@ -204,6 +221,7 @@ networks:
 
 volumes:
   postgres_data:
+  frontend_node_modules:
   prometheus_multiproc:
   prometheus_data:
   grafana_data:

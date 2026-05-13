@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.utils.text import slugify
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -1389,11 +1390,14 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 {"error": "Nenhuma mídia disponível para download."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        brand = getattr(inventory, "brand", None)
+        brand_slug = slugify(getattr(brand, "slug", "") or getattr(brand, "name", "")) or "brand"
+        file_base_name = f"{brand_slug}-{inventory.id}"
         safe_title = "".join(c for c in (inventory.title or f"video_{inventory.id}") if c not in r'\/:*?"<>|').strip() or f"video_{inventory.id}"
         # Descrição igual à usada na postagem (referência do vídeo original + texto extra da brand)
         full_description = build_youtube_description(
             corte=corte,
-            brand=getattr(inventory, "brand", None),
+            brand=brand,
             title=inventory.title,
             description_override=inventory.description,
         )
@@ -1426,7 +1430,7 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 except Exception:
                     pass
         zip_buffer.seek(0)
-        filename = f"{safe_title}_midias.zip"
+        filename = f"{file_base_name}.zip"
         response = FileResponse(zip_buffer, as_attachment=True, filename=filename)
         response["Content-Type"] = "application/zip"
         return response

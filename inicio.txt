@@ -5,3 +5,4 @@ python -m celery -A config beat -l INFO
 cd front end
 inicia o front end
 npm run dev   
+npm run dev -- --host 0.0.0.0

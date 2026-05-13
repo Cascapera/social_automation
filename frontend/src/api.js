@@ -371,7 +371,7 @@ export async function downloadInventoryMedia(id, title = '') {
   const blob = await res.blob()
   const disposition = res.headers.get('Content-Disposition')
   let filename = (title || `video_${id}`).replace(/[/\\:*?"<>|]/g, '').trim() || `video_${id}`
-  if (!filename.toLowerCase().endsWith('.zip')) filename = `${filename}_midias.zip`
+  if (!filename.toLowerCase().endsWith('.zip')) filename = `${filename}.zip`
   if (disposition) {
     const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i) || disposition.match(/filename=["']?([^"';]+)["']?/i)
     if (match) filename = match[1].trim()

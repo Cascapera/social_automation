@@ -62,6 +62,15 @@ function toDatetimeLocal(value) {
   return `${y}-${m}-${day}T${h}:${min}`
 }
 
+function slugifyDownloadName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 export default function BancoVideos() {
   const { viewMode, factoryId, brandId, brands } = useBrand()
   const [items, setItems] = useState([])
@@ -192,7 +201,8 @@ export default function BancoVideos() {
     setError('')
     setDownloadingId(item.id)
     try {
-      await downloadInventoryMedia(item.id, item.title || `video_${item.id}`)
+      const brandSlug = slugifyDownloadName(brandNameById[String(item.brand)] || `brand-${item.brand}`)
+      await downloadInventoryMedia(item.id, `${brandSlug || 'brand'}-${item.id}`)
     } catch (e) {
       setError(e.message || 'Erro ao baixar mídias.')
     } finally {
