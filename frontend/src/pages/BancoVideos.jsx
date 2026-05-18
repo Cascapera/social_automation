@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useBrand } from '../context/BrandContext'
 import { getVideoInventory, removeAwaitingInventoryItem, retryAwaitingInventoryItem, downloadInventoryMedia, markInventoryPosted } from '../api'
 import PaginationControls from '../components/PaginationControls'
@@ -61,9 +62,15 @@ function slugifyDownloadName(value) {
     .replace(/^-+|-+$/g, '')
 }
 
+function parsePage(raw) {
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
+
 export default function BancoVideos() {
   const { viewMode, factoryId, brandId, brands } = useBrand()
-  const [videoType, setVideoType] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [videoType, setVideoType] = useState(() => searchParams.get('video_type') || '')
   const [error, setError] = useState('')
   const [removingId, setRemovingId] = useState(null)
   const [retryingId, setRetryingId] = useState(null)
@@ -75,12 +82,12 @@ export default function BancoVideos() {
   const [markPostedAt, setMarkPostedAt] = useState('')
 
   const [awaitingItems, setAwaitingItems] = useState([])
-  const [awaitingPage, setAwaitingPage] = useState(1)
+  const [awaitingPage, setAwaitingPage] = useState(() => parsePage(searchParams.get('pending_page')))
   const [awaitingTotal, setAwaitingTotal] = useState(0)
   const [awaitingLoading, setAwaitingLoading] = useState(false)
 
   const [postedItems, setPostedItems] = useState([])
-  const [postedPage, setPostedPage] = useState(1)
+  const [postedPage, setPostedPage] = useState(() => parsePage(searchParams.get('posted_page')))
   const [postedTotal, setPostedTotal] = useState(0)
   const [postedLoading, setPostedLoading] = useState(false)
 
@@ -91,6 +98,21 @@ export default function BancoVideos() {
     setAwaitingPage(1)
     setPostedPage(1)
   }, [viewMode, factoryId, brandId, videoType])
+
+  // Sincroniza estado <- -> URL. Sem param quando page=1 / videoType vazio
+  // para nao poluir a URL. replace:true evita acumular history.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (awaitingPage > 1) next.set('pending_page', String(awaitingPage))
+    else next.delete('pending_page')
+    if (postedPage > 1) next.set('posted_page', String(postedPage))
+    else next.delete('posted_page')
+    if (videoType) next.set('video_type', videoType)
+    else next.delete('video_type')
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [awaitingPage, postedPage, videoType, searchParams, setSearchParams])
 
   const effectiveFactoryId = viewMode === 'factory' ? factoryId : null
   const effectiveBrandId = brandId || null
