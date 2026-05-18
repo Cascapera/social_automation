@@ -16,6 +16,10 @@ from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
 )
+from apps.multiple_creator.models import (
+    MultipleCreatorBrandExecution,
+    MultipleCreatorJob,
+)
 
 User = get_user_model()
 
@@ -246,3 +250,109 @@ class VideoInventoryBucketFilterTests(TestCase):
         posted = self.client.get("/api/video-inventory/", {"bucket": "posted"}).data["count"]
         total = self.client.get("/api/video-inventory/").data["count"]
         self.assertEqual(awaiting + posted, total)
+
+
+class MultipleCreatorCreateTests(TestCase):
+    """Fase 4: POST /api/multiple-creator/ cria job + N BrandExecution PENDING."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="mc-user", password="securepass1")
+        self.client.force_authenticate(user=self.user)
+        self.factory = Factory.objects.create(name="MC Factory")
+        self.brand_a = Brand.objects.create(name="Brand A", slug="brand-a", factory=self.factory)
+        self.brand_b = Brand.objects.create(name="Brand B", slug="brand-b", factory=self.factory)
+        self.brand_c = Brand.objects.create(name="Brand C", slug="brand-c", factory=self.factory)
+
+    def _base_payload(self, **overrides):
+        payload = {
+            "youtube_url": "https://www.youtube.com/watch?v=abc",
+            "brand_ids": [self.brand_a.id, self.brand_b.id],
+            "name": "Live X",
+            "assunto": "tema",
+            "prompt_version": "viral",
+            "shorts_target": 8,
+            "longs_target": 2,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_create_with_youtube_url_and_multiple_brands(self):
+        res = self.client.post("/api/multiple-creator/", self._base_payload(), format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        self.assertEqual(res.data["source_kind"], "YOUTUBE")
+        self.assertEqual(res.data["status"], "PENDING_TRANSCRIPTION")
+        self.assertEqual(len(res.data["brand_executions"]), 2)
+        brand_ids = {e["brand"] for e in res.data["brand_executions"]}
+        self.assertEqual(brand_ids, {self.brand_a.id, self.brand_b.id})
+        self.assertTrue(
+            all(e["status"] == "PENDING" for e in res.data["brand_executions"])
+        )
+        # Persistido no banco
+        job = MultipleCreatorJob.objects.get(pk=res.data["id"])
+        self.assertEqual(job.user_id, self.user.id)
+        self.assertEqual(job.brand_executions.count(), 2)
+
+    def test_create_without_origin_returns_400(self):
+        payload = self._base_payload()
+        payload["youtube_url"] = ""
+        res = self.client.post("/api/multiple-creator/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_with_two_origins_returns_400(self):
+        payload = self._base_payload(source=999)  # source nao precisa existir aqui
+        # Mas precisa existir; vamos forjar um SourceVideo? Mais facil: usar 2 origens validas.
+        # Reutilizando o caminho de validacao: youtube_url + source_id.
+        from apps.brands.models import Brand as _Brand  # noqa: F401
+        from apps.mediahub.models import SourceVideo
+
+        src = SourceVideo.objects.create(brand=self.brand_a)
+        payload["source"] = src.id
+        res = self.client.post("/api/multiple-creator/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_without_brands_returns_400(self):
+        payload = self._base_payload(brand_ids=[])
+        res = self.client.post("/api/multiple-creator/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_with_inexistent_brand_returns_400(self):
+        payload = self._base_payload(brand_ids=[self.brand_a.id, 9999])
+        res = self.client.post("/api/multiple-creator/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_dedupes_brand_ids(self):
+        payload = self._base_payload(
+            brand_ids=[self.brand_a.id, self.brand_a.id, self.brand_b.id]
+        )
+        res = self.client.post("/api/multiple-creator/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(res.data["brand_executions"]), 2)
+        self.assertEqual(
+            MultipleCreatorBrandExecution.objects.filter(job_id=res.data["id"]).count(),
+            2,
+        )
+
+    def test_create_requires_auth(self):
+        self.client.force_authenticate(user=None)
+        res = self.client.post("/api/multiple-creator/", self._base_payload(), format="json")
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_retrieve_returns_job_with_executions(self):
+        create_res = self.client.post("/api/multiple-creator/", self._base_payload(), format="json")
+        job_id = create_res.data["id"]
+        res = self.client.get(f"/api/multiple-creator/{job_id}/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["id"], job_id)
+        self.assertEqual(len(res.data["brand_executions"]), 2)
+
+    def test_create_with_source_sets_source_kind(self):
+        from apps.mediahub.models import SourceVideo
+
+        src = SourceVideo.objects.create(brand=self.brand_a)
+        payload = self._base_payload()
+        payload["youtube_url"] = ""
+        payload["source"] = src.id
+        res = self.client.post("/api/multiple-creator/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        self.assertEqual(res.data["source_kind"], "SOURCE")

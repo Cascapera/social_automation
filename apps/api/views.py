@@ -45,6 +45,7 @@ from apps.jobs.services.job_actions import delete_job as do_delete_job
 from apps.jobs.services.subtitles import align_edited_to_original_words
 from apps.jobs.tasks import burn_subtitles_task, generate_subtitles_task, process_job
 from apps.mediahub.models import SourceVideo
+from apps.multiple_creator.models import MultipleCreatorJob
 from apps.social.services.youtube_description import build_youtube_description
 
 from .pagination import StandardResultsSetPagination
@@ -61,6 +62,7 @@ from .serializers import (
     FactoryPostingScheduleSerializer,
     FactorySerializer,
     JobSerializer,
+    MultipleCreatorJobSerializer,
     PostedVideoLogSerializer,
     ScheduledPostSerializer,
     SearchChannelSerializer,
@@ -2393,22 +2395,33 @@ class FactoryYoutubeVideosView(APIView):
         )
 
 
-class MultipleCreatorStubView(APIView):
-    """Stub da Fase 3 do Multiple-Creator: aceita o POST, retorna 501.
+class MultipleCreatorViewSet(viewsets.GenericViewSet):
+    """Multiple-Creator (Fase 4): cria job + N BrandExecution PENDING.
 
-    A implementação real (orquestração de transcrição única + fanout por brand)
-    chega nas fases 4-6. Mantém o contrato estável para a UI ser validada antes.
+    A orquestração real (transcrição única + fanout por brand + render) chega
+    nas Fases 5-6. Este endpoint apenas persiste o submit; nenhuma task é
+    enfileirada ainda.
     """
 
+    queryset = MultipleCreatorJob.objects.all().prefetch_related("brand_executions")
+    serializer_class = MultipleCreatorJobSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    pagination_class = StandardResultsSetPagination
 
-    def post(self, request):
-        return Response(
-            {
-                "detail": (
-                    "Multiple-Creator ainda não implementado. "
-                    "A UI está pronta, mas o backend de orquestração será entregue nas próximas fases."
-                ),
-            },
-            status=status.HTTP_501_NOT_IMPLEMENTED,
-        )
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        job = serializer.save()
+        out = self.get_serializer(job)
+        return Response(out.data, status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request, *args, **kwargs):
+        job = self.get_object()
+        return Response(self.get_serializer(job).data)
+
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)

@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "apps.jobs",
     "apps.api",
     "apps.auto_cuts",
+    "apps.multiple_creator",
     "apps.social",
 ]
 

@@ -18,7 +18,7 @@ from .views import (
     FactoryYoutubeDashboardView,
     FactoryYoutubeVideosView,
     JobViewSet,
-    MultipleCreatorStubView,
+    MultipleCreatorViewSet,
     PostedVideoLogViewSet,
     RegisterViewSet,
     ScheduledPostViewSet,
@@ -46,6 +46,7 @@ router.register("auto-cut-cortes", AutoCutCorteViewSet, basename="auto-cut-corte
 router.register("video-inventory", VideoInventoryItemViewSet, basename="video-inventory")
 router.register("factory-schedules", FactoryPostingScheduleViewSet, basename="factory-schedule")
 router.register("posted-videos", PostedVideoLogViewSet, basename="posted-videos")
+router.register("multiple-creator", MultipleCreatorViewSet, basename="multiple-creator")
 
 urlpatterns = [
     path("dashboard-metrics/", DashboardMetricsView.as_view(), name="dashboard-metrics"),
@@ -61,7 +62,6 @@ urlpatterns = [
     ),
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("multiple-creator/", MultipleCreatorStubView.as_view(), name="multiple-creator-stub"),
     path("youtube/", include("apps.social.urls")),
     path("", include(router.urls)),
 ]

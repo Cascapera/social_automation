@@ -140,7 +140,7 @@ export default function MultipleCreator() {
 
     setSubmitting(true)
     try {
-      await createMultipleCreator({
+      const job = await createMultipleCreator({
         file: file || undefined,
         sourceId: sourceId || undefined,
         youtubeUrl: youtubeUrl.trim() || undefined,
@@ -157,17 +157,13 @@ export default function MultipleCreator() {
         thumbnailTextColor,
         thumbnailStrokeColor,
       })
-      setInfo('Submissão aceita.')
+      const n = (job?.brand_executions || []).length
+      setInfo(
+        `Job #${job.id} criado com ${n} execução(ões) pendente(s). ` +
+        'A orquestração (transcrição única + fanout por brand) será disparada quando as próximas fases ficarem prontas.',
+      )
     } catch (err) {
-      const msg = err?.message || 'Erro ao enviar.'
-      if (/501|não implementado/i.test(msg)) {
-        setInfo(
-          'UI validada — o backend de orquestração ainda não está disponível (Fase 3 entrega só a interface). ' +
-          'A submissão real entra nas próximas fases.',
-        )
-      } else {
-        setError(msg)
-      }
+      setError(err?.message || 'Erro ao enviar.')
     } finally {
       setSubmitting(false)
     }
