@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from celery import shared_task
@@ -387,3 +388,71 @@ def multiple_creator_fanout_task(self, job_id: int) -> None:
         spawned_count=spawned,
         failure_count=failures,
     )
+
+
+_TERMINAL_JOB_STATES = ("DONE", "PARTIAL", "ERROR")
+
+
+@shared_task(bind=True)
+def cleanup_terminal_job_files_task(self) -> dict:
+    """Apaga MultipleCreatorJob.file de jobs terminados ha mais de N horas.
+
+    Retencao padrao: 24h apos a primeira transicao para terminal (governada por
+    `updated_at`, que e tocada no fechamento do agregado). Retry granular reabre
+    o job (status -> RUNNING_BRANDS) e refaz o updated_at; nesses casos o arquivo
+    fica preservado naturalmente.
+
+    Config:
+    - MULTIPLE_CREATOR_FILE_RETAIN_HOURS (default 24).
+
+    Retorna estatistica usada nos logs e nos testes.
+    """
+    from .models import MultipleCreatorJob
+
+    retain_hours = int(getattr(settings, "MULTIPLE_CREATOR_FILE_RETAIN_HOURS", 24))
+    cutoff = timezone.now() - timedelta(hours=retain_hours)
+
+    qs = MultipleCreatorJob.objects.filter(
+        status__in=_TERMINAL_JOB_STATES,
+        updated_at__lt=cutoff,
+    ).exclude(file="").exclude(file__isnull=True)
+
+    removed = 0
+    skipped_missing = 0
+    errors = 0
+    for job in qs.iterator(chunk_size=50):
+        if not job.file:
+            continue
+        try:
+            file_name = job.file.name
+            # delete(save=False) remove o arquivo no storage e limpa o atributo;
+            # depois persistimos a coluna como vazio.
+            job.file.delete(save=False)
+            job.file = None
+            job.save(update_fields=["file", "updated_at"])
+            removed += 1
+            logger.info(
+                "[MC cleanup] job=%s file=%s removido (terminal ha >= %sh).",
+                job.id,
+                file_name,
+                retain_hours,
+            )
+        except FileNotFoundError:
+            # Storage ja nao tem o arquivo — apenas limpar a referencia.
+            job.file = None
+            job.save(update_fields=["file", "updated_at"])
+            skipped_missing += 1
+        except Exception:
+            logger.exception("[MC cleanup] falha ao remover file do job %s", job.id)
+            errors += 1
+
+    log_event(
+        logger,
+        event="multiple_creator_cleanup_finished",
+        status="success" if errors == 0 else "partial",
+        retain_hours=retain_hours,
+        removed=removed,
+        skipped_missing=skipped_missing,
+        errors=errors,
+    )
+    return {"removed": removed, "skipped_missing": skipped_missing, "errors": errors}

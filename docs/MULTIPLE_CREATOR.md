@@ -101,4 +101,9 @@ Todos carregam `multi_creator_job_id` para correlacionar timeline ponta a ponta.
 
 ## Limpeza de arquivos
 
-Política decidida: reter `MultipleCreatorJob.file` por **24h** após o job ir para terminal, para permitir retry granular reaproveitando o arquivo. Limpeza será via Celery beat diário (a implementar; ver `apps/jobs/services/cleanup_*` para padrões existentes).
+Política decidida: reter `MultipleCreatorJob.file` por **24h** após o job ir para terminal, para permitir retry granular reaproveitando o arquivo. Implementado via Celery beat diário (`cleanup_terminal_job_files_task`, agendado em `config/celery.py` para 03:15 UTC, fila `processing`).
+
+- Janela controlada por `MULTIPLE_CREATOR_FILE_RETAIN_HOURS` (default 24).
+- Critério: `status IN (DONE, PARTIAL, ERROR) AND updated_at < now - retain_hours`.
+- Retry granular reabre o job (status → `RUNNING_BRANDS`) e refaz o `updated_at`, então preserva o arquivo automaticamente.
+- Log do resultado: evento `multiple_creator_cleanup_finished` com `removed`, `skipped_missing`, `errors`.

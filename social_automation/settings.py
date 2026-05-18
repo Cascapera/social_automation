@@ -238,6 +238,7 @@ CELERY_TASK_ROUTES = {
     "apps.jobs.tasks.generate_subtitles_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
     "apps.multiple_creator.tasks.multiple_creator_transcribe_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
     "apps.multiple_creator.tasks.multiple_creator_fanout_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    "apps.multiple_creator.tasks.cleanup_terminal_job_files_task": {"queue": "processing"},
     # FFmpeg / NVENC final output (GPU when available)
     "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": CELERY_QUEUE_RENDER},
     "apps.jobs.tasks.process_job": {"queue": CELERY_QUEUE_RENDER},
@@ -245,6 +246,10 @@ CELERY_TASK_ROUTES = {
 }
 # Whisper: always CPU so GPU is free for NVENC (set WHISPER_FORCE_CPU=0 to allow .env / CUDA)
 WHISPER_FORCE_CPU = os.getenv("WHISPER_FORCE_CPU", "1").lower() in ("1", "true", "yes")
+
+# Multiple-Creator: retencao do video original apos job terminal (DONE/PARTIAL/ERROR).
+# Apos esse periodo, cleanup_terminal_job_files_task remove o file (mantem a row).
+MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))
 
 
 # FFmpeg
