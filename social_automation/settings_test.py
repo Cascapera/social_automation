@@ -27,3 +27,9 @@ CACHES = {
         "OPTIONS": {"MAX_ENTRIES": 100},
     }
 }
+
+# Broker in-memory: tasks .delay() chamadas em views nao tentam Redis em CI.
+# Tasks NAO sao executadas (ALWAYS_EAGER=False); quem quiser execucao sincrona
+# patcheia/override_settings no proprio teste.
+CELERY_BROKER_URL = "memory://"
+CELERY_RESULT_BACKEND = "cache+memory://"
