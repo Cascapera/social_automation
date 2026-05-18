@@ -38,6 +38,7 @@ export default function Layout() {
     { to: '/banco-videos', label: 'Banco de Vídeos' },
     { to: '/midias-marca', label: 'Mídias da marca' },
     { to: '/cortes-automaticos', label: 'Cortes Automáticos' },
+    { to: '/multiple-creator', label: 'Multiple-Creator' },
     { to: '/contas', label: 'Contas' },
   ]
 
@@ -47,6 +48,7 @@ export default function Layout() {
     { to: '/agendamento', label: 'Agendamento (Factory)' },
     { to: '/canais-busca', label: 'Canais de Busca' },
     { to: '/cortes-automaticos', label: 'Criação de Cortes' },
+    { to: '/multiple-creator', label: 'Multiple-Creator' },
     { to: '/banco-videos', label: 'Banco de Vídeos' },
     { to: '/midias-marca', label: 'Brands da Factory' },
     { to: '/contas', label: 'Contas dos Canais' },

@@ -561,13 +561,24 @@ Pronto.
 
 ---
 
-## Pontos a confirmar (consolidação)
+## Decisões fechadas
 
-1. **Opção A vs. B** da Etapa 2 do Banco de Vídeos — adicionar `?bucket=` no endpoint atual (recomendado) ou criar dois endpoints detalhados?
-2. **Sincronização da paginação na URL da rota** do Banco de Vídeos — adotar `pending_page` / `posted_page` na rota agora, ou manter estado em React?
-3. **Setup de testes de frontend** — existe Jest/Vitest configurado em `frontend/`? Sem isso, testes de UI ficam fora do escopo da Fase 7.
-4. **App novo `apps/multiple_creator/` vs. subseção em `apps/auto_cuts/`** — preferência arquitetural do time.
-5. **Fechamento da `BrandExecution` quando a filha finaliza** — signal `post_save` em `AutoCutAnalysis` (recomendado) ou Celery chord/callback?
-6. **`getBrandsAllPages()`** — existe helper para puxar todas as brands no frontend, ou só `getBrands()` com paginação? Pode ser necessário criar.
-7. **Política de limpeza do arquivo compartilhado** após `multiple_creator_completed` — quando deletar o `file` do `MultipleCreatorJob` para liberar disco? (Provável: ao status `DONE` ou `PARTIAL`, com janela de retenção curta para retry.)
-8. **Custo Grok** — definir limite/alerta aceitável de custo médio por `MultipleCreatorJob` antes de liberar em produção.
+Histórico das 8 pendências consolidadas nas etapas de planejamento.
+
+### Banco de Vídeos (Fase 2 — entregue)
+
+1. **Opção A — `?bucket=awaiting|posted`** no `VideoInventoryItemViewSet`. Implementado em `apps/api/views.py` com retrocompatibilidade preservada quando o parâmetro está ausente ou desconhecido (cobertura em `VideoInventoryBucketFilterTests`).
+2. **Sincronização de paginação na URL — adiada.** Estado segue só em React. Reavaliar se surgir demanda de deep-linking.
+3. **Bloco "Postados" sem coluna de ações.** Decisão de produto: bloco fica read-only.
+
+### Multiple-Creator (Fases 3-7 — a implementar)
+
+4. **App novo `apps/multiple_creator/`.** Boundary clara entre orquestração multi-brand e o fluxo unitário de `AutoCutAnalysis`. Custo: 1 entry em `INSTALLED_APPS` + 1 migration inicial.
+5. **Fechamento de `BrandExecution` via signal `post_save` em `AutoCutAnalysis`.** Quando o status da filha muda para `done`/`error`, o signal atualiza a `BrandExecution` vinculada. Sem chord/callback Celery extra.
+6. **Limpeza do arquivo compartilhado: retain 24h.** Após o job ir para `DONE`/`PARTIAL`/`ERROR`, manter o arquivo por 24h para permitir retry granular reaproveitando-o. Limpeza por Celery beat diário.
+7. **Custo Grok: só telemetria, sem hard limit.** Métrica `grok_cost_usd_total` ganha label `multi_creator_job_id`; alerta no Grafana quando custo médio por submit ultrapassar limiar (a calibrar com dados reais). Sem cap rígido de brands no `POST`.
+8. **Sem framework de UI no frontend.** Não há Vitest/Jest configurado (`package.json` só roda `node --test` em utilitários puros). Validação do Multiple-Creator na UI será manual; lógica isolável pode ganhar testes via `node --test`.
+
+### Lookup confirmado
+
+- **`getBrandsAllPages()` não existe** em `frontend/src/api.js` — `getBrands(factoryId)` chama `/brands/` direto. Criar helper seguindo o padrão de `getSourcesAllPages` (usa `fetchAllListPages` já existente).

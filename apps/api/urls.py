@@ -18,6 +18,7 @@ from .views import (
     FactoryYoutubeDashboardView,
     FactoryYoutubeVideosView,
     JobViewSet,
+    MultipleCreatorStubView,
     PostedVideoLogViewSet,
     RegisterViewSet,
     ScheduledPostViewSet,
@@ -60,6 +61,7 @@ urlpatterns = [
     ),
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("multiple-creator/", MultipleCreatorStubView.as_view(), name="multiple-creator-stub"),
     path("youtube/", include("apps.social.urls")),
     path("", include(router.urls)),
 ]

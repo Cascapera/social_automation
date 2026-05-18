@@ -151,6 +151,16 @@ export async function getBrands(factoryId = null) {
   return apiRequest(qs ? `/brands/?${qs}` : '/brands/')
 }
 
+export async function getBrandsAllPages(factoryId = null) {
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (factoryId) params.append('factory', factoryId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/brands/?${params.toString()}`
+  })
+}
+
 export async function getFactories() {
   return apiRequest('/factories/')
 }
@@ -963,6 +973,48 @@ export async function createAutoCutAnalysis({
   }
   const token = getToken()
   const res = await fetch(`${API_BASE}/auto-cuts/`, {
+    method: 'POST',
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    body: formData,
+  })
+  return jsonFromMultipartFetch(res)
+}
+
+export async function createMultipleCreator({
+  file,
+  sourceId,
+  youtubeUrl,
+  brandIds,
+  name,
+  assunto,
+  convidados,
+  promptVersion,
+  thumbnailFont,
+  thumbnailBandColor,
+  thumbnailTextColor,
+  thumbnailStrokeColor,
+  shortsTarget,
+  longsTarget,
+  verticalMode = 'zoom_crop',
+}) {
+  const formData = new FormData()
+  if (file) formData.append('file', file)
+  if (sourceId) formData.append('source', sourceId)
+  if (youtubeUrl) formData.append('youtube_url', youtubeUrl)
+  ;(brandIds || []).forEach((id) => formData.append('brand_ids', String(id)))
+  formData.append('vertical_mode', verticalMode || 'zoom_crop')
+  if (name) formData.append('name', name)
+  if (assunto) formData.append('assunto', assunto)
+  if (convidados) formData.append('convidados', convidados)
+  if (promptVersion) formData.append('prompt_version', promptVersion)
+  if (thumbnailFont) formData.append('thumbnail_font', thumbnailFont)
+  if (thumbnailBandColor) formData.append('thumbnail_band_color', thumbnailBandColor)
+  if (thumbnailTextColor) formData.append('thumbnail_text_color', thumbnailTextColor)
+  if (thumbnailStrokeColor) formData.append('thumbnail_stroke_color', thumbnailStrokeColor)
+  if (shortsTarget != null) formData.append('shorts_target', String(shortsTarget))
+  if (longsTarget != null) formData.append('longs_target', String(longsTarget))
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/multiple-creator/`, {
     method: 'POST',
     headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     body: formData,

@@ -2391,3 +2391,24 @@ class FactoryYoutubeVideosView(APIView):
                 "scope": payload.get("scope") or {},
             }
         )
+
+
+class MultipleCreatorStubView(APIView):
+    """Stub da Fase 3 do Multiple-Creator: aceita o POST, retorna 501.
+
+    A implementação real (orquestração de transcrição única + fanout por brand)
+    chega nas fases 4-6. Mantém o contrato estável para a UI ser validada antes.
+    """
+
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        return Response(
+            {
+                "detail": (
+                    "Multiple-Creator ainda não implementado. "
+                    "A UI está pronta, mas o backend de orquestração será entregue nas próximas fases."
+                ),
+            },
+            status=status.HTTP_501_NOT_IMPLEMENTED,
+        )
