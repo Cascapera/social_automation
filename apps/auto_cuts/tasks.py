@@ -864,6 +864,24 @@ def _is_brand_only(analysis) -> bool:
     return getattr(brand, "factory_id", None) is None
 
 
+def _was_transcript_prepopulated_by_multi_creator(analysis) -> bool:
+    """True quando a analysis foi criada pelo Multiple-Creator e ja recebeu
+    transcript_segments pre-populados do MultipleCreatorJob pai.
+
+    Quando True, analyze_auto_cuts_task pula download do YouTube + transcricao
+    e cai direto na fase de analise LLM.
+    """
+    if not getattr(analysis, "transcript_segments", None):
+        return False
+    try:
+        from apps.multiple_creator.models import MultipleCreatorBrandExecution
+    except ImportError:
+        return False
+    return MultipleCreatorBrandExecution.objects.filter(
+        auto_cut_analysis_id=analysis.id
+    ).exists()
+
+
 @shared_task(bind=True)
 def analyze_auto_cuts_task(self, analysis_id: int) -> None:
     """Transcribe, analyze in chunks, and aggregate viral cut suggestions."""
@@ -919,17 +937,20 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
                 )
             return
 
+    multi_creator_skip = _was_transcript_prepopulated_by_multi_creator(analysis)
+
     youtube_url = (analysis.youtube_url or "").strip()
     pv = (analysis.prompt_version or "viral").strip().lower()
     transcript_lang = "en" if pv in ("viral_en", "viral_long_en", "educational_en", "viral_translate") else "pt"
-    analysis.status = "transcribing"
-    analysis.progress_message = "Baixando vídeo do YouTube..." if youtube_url else "Transcrevendo vídeo..."
-    analysis.progress = 2 if youtube_url else 5
-    analysis.error = ""
-    analysis.save(update_fields=["status", "progress_message", "progress", "error"])
+    if not multi_creator_skip:
+        analysis.status = "transcribing"
+        analysis.progress_message = "Baixando vídeo do YouTube..." if youtube_url else "Transcrevendo vídeo..."
+        analysis.progress = 2 if youtube_url else 5
+        analysis.error = ""
+        analysis.save(update_fields=["status", "progress_message", "progress", "error"])
 
-    # If YouTube URL, download first
-    if youtube_url:
+    # If YouTube URL, download first (skip quando o job pai Multi-Creator ja baixou)
+    if youtube_url and not multi_creator_skip:
         analysis.progress_message = "Baixando vídeo do YouTube..."
         analysis.progress = 2
         if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
@@ -978,23 +999,39 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
     _t_queue = settings.CELERY_QUEUE_TRANSCRIPTION
     _t_workload = "cpu" if getattr(settings, "WHISPER_FORCE_CPU", True) else "gpu"
     _t_task_id = self.request.id or ""
-    log_event(
-        logger,
-        event="transcription_started",
-        queue_name=_t_queue,
-        workload_type=_t_workload,
-        task_id=_t_task_id,
-        status="started",
-        source_video_id=analysis_id,
-    )
-    transcription_jobs_total.labels(workload_type=_t_workload).inc()
+    if not multi_creator_skip:
+        log_event(
+            logger,
+            event="transcription_started",
+            queue_name=_t_queue,
+            workload_type=_t_workload,
+            task_id=_t_task_id,
+            status="started",
+            source_video_id=analysis_id,
+        )
+        transcription_jobs_total.labels(workload_type=_t_workload).inc()
     _t_timer = Timer()
 
     try:
-        duration_sec = ffprobe_duration(video_path)
-        use_chunked = duration_sec > CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
+        if multi_creator_skip:
+            log_event(
+                logger,
+                event="multiple_creator_transcription_skipped",
+                queue_name=_t_queue,
+                workload_type=_t_workload,
+                task_id=_t_task_id,
+                status="skipped",
+                source_video_id=analysis_id,
+            )
+            duration_sec = ffprobe_duration(video_path)
+            use_chunked = False
+        else:
+            duration_sec = ffprobe_duration(video_path)
+            use_chunked = duration_sec > CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
 
-        if use_chunked:
+        if multi_creator_skip:
+            pass  # transcript_segments ja vieram populados do MultipleCreatorJob pai
+        elif use_chunked:
             # Flow: extract chunks → save under cortes_processo → transcribe one by one → delete chunk
             # Each chunk = 18 min (small files on disk, no huge temp in memory)
             try:
@@ -1064,18 +1101,19 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
             transcription_failures_total.labels(workload_type=_t_workload).inc()
             return
 
-        transcription_duration_ms.labels(workload_type=_t_workload).observe(_t_timer.elapsed_ms())
-        log_event(
-            logger,
-            event="transcription_finished",
-            queue_name=_t_queue,
-            workload_type=_t_workload,
-            task_id=_t_task_id,
-            duration_ms=_t_timer.elapsed_ms(),
-            status="success",
-            source_video_id=analysis_id,
-            segments_count=len(segments),
-        )
+        if not multi_creator_skip:
+            transcription_duration_ms.labels(workload_type=_t_workload).observe(_t_timer.elapsed_ms())
+            log_event(
+                logger,
+                event="transcription_finished",
+                queue_name=_t_queue,
+                workload_type=_t_workload,
+                task_id=_t_task_id,
+                duration_ms=_t_timer.elapsed_ms(),
+                status="success",
+                source_video_id=analysis_id,
+                segments_count=len(segments),
+            )
 
         # "Ready cuts" flow: video already edited, only needs metadata (title, thumbnail)
         if getattr(analysis, "is_ready_cuts", False):

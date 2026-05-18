@@ -2409,9 +2409,12 @@ class MultipleCreatorViewSet(viewsets.GenericViewSet):
     pagination_class = StandardResultsSetPagination
 
     def create(self, request, *args, **kwargs):
+        from apps.multiple_creator.tasks import multiple_creator_transcribe_task
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = serializer.save()
+        multiple_creator_transcribe_task.delay(job.id)
         out = self.get_serializer(job)
         return Response(out.data, status=status.HTTP_201_CREATED)
 
