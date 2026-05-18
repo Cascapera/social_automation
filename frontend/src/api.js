@@ -1022,6 +1022,20 @@ export async function createMultipleCreator({
   return jsonFromMultipartFetch(res)
 }
 
+export async function listMultipleCreatorJobs({ page = 1, pageSize = 10 } = {}) {
+  const params = new URLSearchParams()
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/multiple-creator/?${params.toString()}`)
+  return normalizeListResponse(data)
+}
+
+export async function retryMultipleCreatorBrand(jobId, brandId) {
+  return apiRequest(`/multiple-creator/${jobId}/retry/?brand_id=${brandId}`, {
+    method: 'POST',
+  })
+}
+
 export async function deleteAutoCutSuggestion(id) {
   const res = await fetch(`${API_BASE}/auto-cut-suggestions/${id}/`, {
     method: 'DELETE',

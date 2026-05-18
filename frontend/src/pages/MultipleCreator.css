@@ -161,3 +161,99 @@
   background: #2563eb;
   border-color: #2563eb;
 }
+
+.mc-jobs {
+  margin-top: 2rem;
+}
+
+.mc-jobs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.mc-jobs-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.mc-jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.mc-job {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.mc-job-DONE {
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.mc-job-PARTIAL {
+  border-color: rgba(234, 179, 8, 0.45);
+}
+
+.mc-job-ERROR {
+  border-color: rgba(220, 38, 38, 0.45);
+}
+
+.mc-job-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.mc-job-meta {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.mc-job-status {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.mc-job-progress {
+  color: var(--accent, #3b82f6);
+}
+
+.mc-job-msg {
+  margin: 0.4rem 0 0.55rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.mc-exec-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.mc-exec-table th,
+.mc-exec-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.mc-exec-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.mc-error-cell {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fca5a5;
+}
