@@ -1161,12 +1161,15 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
     )
     serializer_class = VideoInventoryItemSerializer
 
+    AWAITING_STATUSES = ("AVAILABLE", "SCHEDULED", "POSTING", "FAILED")
+
     def get_queryset(self):
         qs = super().get_queryset()
         factory = self.request.query_params.get("factory")
         brand = self.request.query_params.get("brand")
         status_filter = self.request.query_params.get("status")
         video_type = self.request.query_params.get("video_type")
+        bucket = (self.request.query_params.get("bucket") or "").strip().lower()
         if factory:
             qs = qs.filter(factory_id=factory)
         if brand:
@@ -1175,6 +1178,10 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(status=status_filter)
         if video_type in ("SHORT", "LONG"):
             qs = qs.filter(video_type=video_type)
+        if bucket == "awaiting":
+            qs = qs.filter(status__in=self.AWAITING_STATUSES)
+        elif bucket == "posted":
+            qs = qs.filter(status="POSTED")
         return qs.order_by("-created_at")
 
     @action(detail=True, methods=["post"], url_path="remove-awaiting")

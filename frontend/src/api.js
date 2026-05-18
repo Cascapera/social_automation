@@ -330,6 +330,7 @@ export async function getVideoInventory({
   brandId = null,
   status = null,
   videoType = null,
+  bucket = null,
   page = 1,
   pageSize = 25,
 } = {}) {
@@ -338,10 +339,10 @@ export async function getVideoInventory({
   if (brandId) params.append('brand', brandId)
   if (status) params.append('status', status)
   if (videoType) params.append('video_type', videoType)
+  if (bucket) params.append('bucket', bucket)
   params.append('page', String(page))
   params.append('page_size', String(pageSize))
-  const qs = params.toString()
-  const data = await apiRequest(qs ? `/video-inventory/?${qs}` : `/video-inventory/?${params.toString()}`)
+  const data = await apiRequest(`/video-inventory/?${params.toString()}`)
   return normalizeListResponse(data)
 }
 

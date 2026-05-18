@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBrand } from '../context/BrandContext'
 import { getVideoInventory, removeAwaitingInventoryItem, retryAwaitingInventoryItem, downloadInventoryMedia, markInventoryPosted } from '../api'
-import PaginationControls, { DEFAULT_PAGE_SIZE } from '../components/PaginationControls'
+import PaginationControls from '../components/PaginationControls'
 import './BancoVideos.css'
+
+const AWAITING_PAGE_SIZE = 20
+const POSTED_PAGE_SIZE = 10
 
 const STATUS_LABEL = {
   AVAILABLE: 'Disponível',
@@ -22,19 +25,6 @@ function formatDate(value) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return '-'
   return d.toLocaleString('pt-BR')
-}
-
-/** Formata data curta dd/MM/yyyy HH:mm para exibição de agendamento. */
-function formatScheduledShort(value) {
-  if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ''
-  const day = String(d.getDate()).padStart(2, '0')
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const year = d.getFullYear()
-  const h = String(d.getHours()).padStart(2, '0')
-  const min = String(d.getMinutes()).padStart(2, '0')
-  return `${day}/${month}/${year} ${h}:${min}`
 }
 
 function statusDisplay(item) {
@@ -65,7 +55,7 @@ function toDatetimeLocal(value) {
 function slugifyDownloadName(value) {
   return String(value || '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
@@ -73,9 +63,7 @@ function slugifyDownloadName(value) {
 
 export default function BancoVideos() {
   const { viewMode, factoryId, brandId, brands } = useBrand()
-  const [items, setItems] = useState([])
   const [videoType, setVideoType] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [removingId, setRemovingId] = useState(null)
   const [retryingId, setRetryingId] = useState(null)
@@ -85,76 +73,112 @@ export default function BancoVideos() {
   const [retryScheduledAt, setRetryScheduledAt] = useState('')
   const [markPostedModalItem, setMarkPostedModalItem] = useState(null)
   const [markPostedAt, setMarkPostedAt] = useState('')
-  const [inventoryPage, setInventoryPage] = useState(1)
-  const [inventoryTotal, setInventoryTotal] = useState(0)
+
+  const [awaitingItems, setAwaitingItems] = useState([])
+  const [awaitingPage, setAwaitingPage] = useState(1)
+  const [awaitingTotal, setAwaitingTotal] = useState(0)
+  const [awaitingLoading, setAwaitingLoading] = useState(false)
+
+  const [postedItems, setPostedItems] = useState([])
+  const [postedPage, setPostedPage] = useState(1)
+  const [postedTotal, setPostedTotal] = useState(0)
+  const [postedLoading, setPostedLoading] = useState(false)
+
+  const awaitingReqIdRef = useRef(0)
+  const postedReqIdRef = useRef(0)
 
   useEffect(() => {
-    setInventoryPage(1)
+    setAwaitingPage(1)
+    setPostedPage(1)
   }, [viewMode, factoryId, brandId, videoType])
 
+  const effectiveFactoryId = viewMode === 'factory' ? factoryId : null
+  const effectiveBrandId = brandId || null
+  const hasContext = Boolean(effectiveFactoryId || effectiveBrandId)
+
+  const loadAwaiting = useCallback(async () => {
+    if (!hasContext) {
+      awaitingReqIdRef.current += 1
+      setAwaitingItems([])
+      setAwaitingTotal(0)
+      return
+    }
+    const reqId = ++awaitingReqIdRef.current
+    setAwaitingLoading(true)
+    try {
+      const paged = await getVideoInventory({
+        factoryId: effectiveFactoryId,
+        brandId: effectiveBrandId,
+        videoType: videoType || null,
+        bucket: 'awaiting',
+        page: awaitingPage,
+        pageSize: AWAITING_PAGE_SIZE,
+      })
+      if (reqId !== awaitingReqIdRef.current) return
+      setAwaitingItems(paged.items)
+      setAwaitingTotal(paged.count)
+    } catch (e) {
+      if (reqId !== awaitingReqIdRef.current) return
+      setAwaitingItems([])
+      setAwaitingTotal(0)
+      setError(e.message || 'Erro ao carregar vídeos aguardando postagem.')
+    } finally {
+      if (reqId === awaitingReqIdRef.current) setAwaitingLoading(false)
+    }
+  }, [hasContext, effectiveFactoryId, effectiveBrandId, videoType, awaitingPage])
+
+  const loadPosted = useCallback(async () => {
+    if (!hasContext) {
+      postedReqIdRef.current += 1
+      setPostedItems([])
+      setPostedTotal(0)
+      return
+    }
+    const reqId = ++postedReqIdRef.current
+    setPostedLoading(true)
+    try {
+      const paged = await getVideoInventory({
+        factoryId: effectiveFactoryId,
+        brandId: effectiveBrandId,
+        videoType: videoType || null,
+        bucket: 'posted',
+        page: postedPage,
+        pageSize: POSTED_PAGE_SIZE,
+      })
+      if (reqId !== postedReqIdRef.current) return
+      setPostedItems(paged.items)
+      setPostedTotal(paged.count)
+    } catch (e) {
+      if (reqId !== postedReqIdRef.current) return
+      setPostedItems([])
+      setPostedTotal(0)
+      setError(e.message || 'Erro ao carregar vídeos postados.')
+    } finally {
+      if (reqId === postedReqIdRef.current) setPostedLoading(false)
+    }
+  }, [hasContext, effectiveFactoryId, effectiveBrandId, videoType, postedPage])
+
   useEffect(() => {
-    let cancelled = false
+    setError('')
+    loadAwaiting()
+  }, [loadAwaiting])
 
-    async function load() {
-      const effectiveFactoryId = viewMode === 'factory' ? factoryId : null
-      const effectiveBrandId = brandId || null
-
-      if (!effectiveFactoryId && !effectiveBrandId) {
-        setItems([])
-        return
-      }
-
-      setLoading(true)
-      setError('')
-      try {
-        const paged = await getVideoInventory({
-          factoryId: effectiveFactoryId,
-          brandId: effectiveBrandId,
-          videoType: videoType || null,
-          page: inventoryPage,
-          pageSize: DEFAULT_PAGE_SIZE,
-        })
-        if (!cancelled) {
-          setItems(paged.items)
-          setInventoryTotal(paged.count)
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setItems([])
-          setError(e.message || 'Erro ao carregar banco de vídeos.')
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [viewMode, factoryId, brandId, videoType, inventoryPage])
+  useEffect(() => {
+    loadPosted()
+  }, [loadPosted])
 
   const brandNameById = useMemo(
     () => Object.fromEntries((brands || []).map((b) => [String(b.id), b.name])),
     [brands],
   )
 
-  const summary = useMemo(() => {
-    const acc = { total: inventoryTotal, AVAILABLE: 0, SCHEDULED: 0, POSTING: 0, POSTED: 0, FAILED: 0 }
-    items.forEach((item) => {
+  const pageSummary = useMemo(() => {
+    const acc = { AVAILABLE: 0, SCHEDULED: 0, POSTING: 0, FAILED: 0 }
+    awaitingItems.forEach((item) => {
       if (acc[item.status] != null) acc[item.status] += 1
     })
     return acc
-  }, [items, inventoryTotal])
-
-  const awaitingItems = useMemo(
-    () => items.filter((item) => item.status !== 'POSTED'),
-    [items],
-  )
-  const postedItems = useMemo(
-    () => items.filter((item) => item.status === 'POSTED'),
-    [items],
-  )
+  }, [awaitingItems])
 
   const needsContext =
     (viewMode === 'factory' && !factoryId) || (viewMode === 'brand' && !brandId)
@@ -166,7 +190,11 @@ export default function BancoVideos() {
     setRemovingId(item.id)
     try {
       await removeAwaitingInventoryItem(item.id)
-      setItems((prev) => prev.filter((x) => x.id !== item.id))
+      if (awaitingItems.length === 1 && awaitingPage > 1) {
+        setAwaitingPage((p) => p - 1)
+      } else {
+        await loadAwaiting()
+      }
     } catch (e) {
       setError(e.message || 'Erro ao excluir vídeo do banco.')
     } finally {
@@ -225,21 +253,15 @@ export default function BancoVideos() {
     setMarkingPostedId(item.id)
     try {
       const payload = { posted_at: postedAtDate.toISOString() }
-      const result = await markInventoryPosted(item.id, payload)
-      setItems((prev) =>
-        prev.map((x) =>
-          x.id === item.id
-            ? {
-                ...x,
-                status: 'POSTED',
-                posted_at: result?.posted_at || payload.posted_at,
-                last_error: '',
-              }
-            : x,
-        ),
-      )
+      await markInventoryPosted(item.id, payload)
       setMarkPostedModalItem(null)
       setMarkPostedAt('')
+      if (awaitingItems.length === 1 && awaitingPage > 1) {
+        setAwaitingPage((p) => p - 1)
+        await loadPosted()
+      } else {
+        await Promise.all([loadAwaiting(), loadPosted()])
+      }
     } catch (e) {
       setError(e.message || 'Erro ao marcar como postado.')
     } finally {
@@ -257,7 +279,7 @@ export default function BancoVideos() {
         ? { scheduled_at: new Date(scheduledAtValue).toISOString() }
         : {}
       const result = await retryAwaitingInventoryItem(item.id, payload)
-      setItems((prev) =>
+      setAwaitingItems((prev) =>
         prev.map((x) =>
           x.id === item.id
             ? {
@@ -374,12 +396,11 @@ export default function BancoVideos() {
 
       <section className="section banco-filters">
         <div className="banco-summary">
-          <span>Total (registros): {summary.total}</span>
-          <span>Aguardando (página): {awaitingItems.length}</span>
-          <span>Postados (página): {postedItems.length}</span>
-          <span>Disponíveis (página): {summary.AVAILABLE}</span>
-          <span>Postando (página): {(summary.SCHEDULED || 0) + (summary.POSTING || 0)}</span>
-          <span>Erros (página): {summary.FAILED}</span>
+          <span>Aguardando (total): {awaitingTotal}</span>
+          <span>Postados (total): {postedTotal}</span>
+          <span>Disponíveis (página): {pageSummary.AVAILABLE}</span>
+          <span>Postando (página): {(pageSummary.SCHEDULED || 0) + (pageSummary.POSTING || 0)}</span>
+          <span>Erros (página): {pageSummary.FAILED}</span>
         </div>
         <div className="banco-filter-row">
           <label>
@@ -393,152 +414,156 @@ export default function BancoVideos() {
         </div>
       </section>
 
-      <section className="section">
-        {loading ? (
-          <p className="empty-msg">Carregando inventário...</p>
-        ) : items.length === 0 ? (
-          <p className="empty-msg">Nenhum vídeo encontrado para os filtros selecionados.</p>
+      <section className="section banco-block">
+        <h2>Aguardando Postagem</h2>
+        {awaitingLoading ? (
+          <p className="empty-msg">Carregando vídeos aguardando postagem...</p>
+        ) : awaitingItems.length === 0 ? (
+          <p className="empty-msg">Não há vídeos aguardando postagem.</p>
         ) : (
-          <div className="banco-sections">
-            <div className="banco-block">
-              <h2>Aguardando Postagem</h2>
-              {awaitingItems.length === 0 ? (
-                <p className="empty-msg">Não há vídeos aguardando postagem.</p>
-              ) : (
-                <div className="banco-table-wrap">
-                  <table className="banco-table">
-                    <thead>
-                      <tr>
-                        <th>Nº</th>
-                        {viewMode === 'factory' && <th>Brand</th>}
-                        <th>Tipo</th>
-                        <th className="banco-titulo">Título</th>
-                        <th>Score</th>
-                        <th className="banco-fonte">Nome da fonte</th>
-                        <th>Status</th>
-                        <th>Erro</th>
-                        <th>Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {awaitingItems.map((item) => (
-                        <tr key={item.id}>
-                          <td title={item.scheduled_post_id ? `Vídeo #${item.id} • Post #${item.scheduled_post_id}` : `Vídeo #${item.id}`}>
-                            {item.scheduled_post_id ? `Post #${item.scheduled_post_id}` : `Vídeo #${item.id}`}
-                          </td>
-                          {viewMode === 'factory' && (
-                            <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
-                          )}
-                          <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
-                          <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
-                          <td>{item.virality_score ?? '-'}</td>
-                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>
-                            {item.source_display_name || item.source_asset_id
-                              ? `(${item.source_display_name || item.source_asset_id})`
-                              : '-'}
-                          </td>
-                          <td>{statusDisplay(item)}</td>
-                          <td className="banco-error">{item.last_error || '-'}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn-action"
-                              onClick={() => openRetryModal(item)}
-                              disabled={retryingId === item.id || item.status === 'POSTING'}
-                              title={item.status === 'AVAILABLE' ? 'Agendar data e horário para postar este vídeo' : 'Tentar novamente e opcionalmente reagendar o horário'}
-                              style={{ marginRight: 8 }}
-                            >
-                              {retryingId === item.id
-                                ? (item.status === 'AVAILABLE' ? 'Agendando...' : 'Tentando...')
-                                : item.status === 'AVAILABLE'
-                                  ? 'Agendar'
-                                  : 'Tentar novamente'}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-action btn-download"
-                              onClick={() => handleDownloadMedia(item)}
-                              disabled={downloadingId === item.id}
-                              title="Baixar vídeo e thumbnail em um ZIP para postagem manual"
-                              style={{ marginRight: 8 }}
-                            >
-                              {downloadingId === item.id ? 'Baixando...' : 'Download'}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-action btn-posted"
-                              onClick={() => openMarkPostedModal(item)}
-                              disabled={markingPostedId === item.id}
-                              title="Informar data e hora e marcar como postado manualmente"
-                              style={{ marginRight: 8 }}
-                            >
-                              {markingPostedId === item.id ? 'Marcando...' : 'Postado'}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-action btn-cancel"
-                              onClick={() => handleRemoveAwaiting(item)}
-                              disabled={removingId === item.id}
-                              title="Remove este vídeo do banco e dos agendamentos vinculados"
-                            >
-                              {removingId === item.id ? 'Excluindo...' : 'Excluir'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="banco-block">
-              <h2>Vídeos Postados</h2>
-              {postedItems.length === 0 ? (
-                <p className="empty-msg">Nenhum vídeo postado ainda.</p>
-              ) : (
-                <div className="banco-table-wrap">
-                  <table className="banco-table">
-                    <thead>
-                      <tr>
-                        {viewMode === 'factory' && <th>Brand</th>}
-                        <th>Tipo</th>
-                        <th className="banco-titulo">Título</th>
-                        <th>Score</th>
-                        <th className="banco-fonte">Nome da fonte</th>
-                        <th>Postado em</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {postedItems.map((item) => (
-                        <tr key={item.id}>
-                          {viewMode === 'factory' && (
-                            <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
-                          )}
-                          <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
-                          <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
-                          <td>{item.virality_score ?? '-'}</td>
-                          <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>
-                            {item.source_display_name || item.source_asset_id
-                              ? `(${item.source_display_name || item.source_asset_id})`
-                              : '-'}
-                          </td>
-                          <td>{formatDate(item.posted_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+          <div className="banco-table-wrap">
+            <table className="banco-table">
+              <thead>
+                <tr>
+                  <th>Nº</th>
+                  {viewMode === 'factory' && <th>Brand</th>}
+                  <th>Tipo</th>
+                  <th className="banco-titulo">Título</th>
+                  <th>Score</th>
+                  <th className="banco-fonte">Nome da fonte</th>
+                  <th>Status</th>
+                  <th>Erro</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {awaitingItems.map((item) => (
+                  <tr key={item.id}>
+                    <td title={item.scheduled_post_id ? `Vídeo #${item.id} • Post #${item.scheduled_post_id}` : `Vídeo #${item.id}`}>
+                      {item.scheduled_post_id ? `Post #${item.scheduled_post_id}` : `Vídeo #${item.id}`}
+                    </td>
+                    {viewMode === 'factory' && (
+                      <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
+                    )}
+                    <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
+                    <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
+                    <td>{item.virality_score ?? '-'}</td>
+                    <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>
+                      {item.source_display_name || item.source_asset_id
+                        ? `(${item.source_display_name || item.source_asset_id})`
+                        : '-'}
+                    </td>
+                    <td>{statusDisplay(item)}</td>
+                    <td className="banco-error">{item.last_error || '-'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-action"
+                        onClick={() => openRetryModal(item)}
+                        disabled={retryingId === item.id || item.status === 'POSTING'}
+                        title={item.status === 'AVAILABLE' ? 'Agendar data e horário para postar este vídeo' : 'Tentar novamente e opcionalmente reagendar o horário'}
+                        style={{ marginRight: 8 }}
+                      >
+                        {retryingId === item.id
+                          ? (item.status === 'AVAILABLE' ? 'Agendando...' : 'Tentando...')
+                          : item.status === 'AVAILABLE'
+                            ? 'Agendar'
+                            : 'Tentar novamente'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-action btn-download"
+                        onClick={() => handleDownloadMedia(item)}
+                        disabled={downloadingId === item.id}
+                        title="Baixar vídeo e thumbnail em um ZIP para postagem manual"
+                        style={{ marginRight: 8 }}
+                      >
+                        {downloadingId === item.id ? 'Baixando...' : 'Download'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-action btn-posted"
+                        onClick={() => openMarkPostedModal(item)}
+                        disabled={markingPostedId === item.id}
+                        title="Informar data e hora e marcar como postado manualmente"
+                        style={{ marginRight: 8 }}
+                      >
+                        {markingPostedId === item.id ? 'Marcando...' : 'Postado'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-action btn-cancel"
+                        onClick={() => handleRemoveAwaiting(item)}
+                        disabled={removingId === item.id}
+                        title="Remove este vídeo do banco e dos agendamentos vinculados"
+                      >
+                        {removingId === item.id ? 'Excluindo...' : 'Excluir'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-        {!loading && items.length > 0 && (
+        {!awaitingLoading && awaitingTotal > 0 && (
           <PaginationControls
-            page={inventoryPage}
-            totalCount={inventoryTotal}
-            onPageChange={setInventoryPage}
-            disabled={loading}
+            page={awaitingPage}
+            pageSize={AWAITING_PAGE_SIZE}
+            totalCount={awaitingTotal}
+            onPageChange={setAwaitingPage}
+            disabled={awaitingLoading}
+          />
+        )}
+      </section>
+
+      <section className="section banco-block">
+        <h2>Vídeos Postados</h2>
+        {postedLoading ? (
+          <p className="empty-msg">Carregando vídeos postados...</p>
+        ) : postedItems.length === 0 ? (
+          <p className="empty-msg">Nenhum vídeo postado ainda.</p>
+        ) : (
+          <div className="banco-table-wrap">
+            <table className="banco-table">
+              <thead>
+                <tr>
+                  {viewMode === 'factory' && <th>Brand</th>}
+                  <th>Tipo</th>
+                  <th className="banco-titulo">Título</th>
+                  <th>Score</th>
+                  <th className="banco-fonte">Nome da fonte</th>
+                  <th>Postado em</th>
+                </tr>
+              </thead>
+              <tbody>
+                {postedItems.map((item) => (
+                  <tr key={item.id}>
+                    {viewMode === 'factory' && (
+                      <td>{brandNameById[String(item.brand)] || `Brand #${item.brand}`}</td>
+                    )}
+                    <td>{TYPE_LABEL[item.video_type] || item.video_type || '-'}</td>
+                    <td className="banco-titulo" title={item.title || '-'}>{item.title || '-'}</td>
+                    <td>{item.virality_score ?? '-'}</td>
+                    <td className="banco-fonte" title={item.source_display_name || item.source_asset_id || '-'}>
+                      {item.source_display_name || item.source_asset_id
+                        ? `(${item.source_display_name || item.source_asset_id})`
+                        : '-'}
+                    </td>
+                    <td>{formatDate(item.posted_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!postedLoading && postedTotal > 0 && (
+          <PaginationControls
+            page={postedPage}
+            pageSize={POSTED_PAGE_SIZE}
+            totalCount={postedTotal}
+            onPageChange={setPostedPage}
+            disabled={postedLoading}
           />
         )}
       </section>

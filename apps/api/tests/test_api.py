@@ -136,3 +136,113 @@ class VideoInventoryMarkPostedTests(TestCase):
         self.assertEqual(log.posted_at, custom_posted_at)
         self.assertTrue(log.metadata_snapshot["manual_post"])
         self.assertEqual(log.metadata_snapshot["manual_posted_at"], custom_posted_at.isoformat())
+
+
+class VideoInventoryBucketFilterTests(TestCase):
+    """Paginação independente por bucket (awaiting / posted) no /api/video-inventory/."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="bucket-user", password="securepass1")
+        self.client.force_authenticate(user=self.user)
+        self.factory = Factory.objects.create(name="Factory Bucket")
+        self.brand = Brand.objects.create(
+            name="Brand Bucket",
+            slug="brand-bucket",
+            factory=self.factory,
+        )
+
+        def make(status, video_type="SHORT", title=""):
+            return VideoInventoryItem.objects.create(
+                factory=self.factory,
+                brand=self.brand,
+                video_type=video_type,
+                title=title or f"{status}-{video_type}",
+                status=status,
+            )
+
+        # 3 awaiting (status variados) + 2 posted, com tipos misturados.
+        self.awaiting_available = make("AVAILABLE")
+        self.awaiting_scheduled = make("SCHEDULED")
+        self.awaiting_failed = make("FAILED", video_type="LONG")
+        self.posted_a = make("POSTED")
+        self.posted_b = make("POSTED", video_type="LONG")
+
+    def test_bucket_awaiting_excludes_posted(self):
+        res = self.client.get("/api/video-inventory/", {"bucket": "awaiting"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        statuses = {row["status"] for row in res.data["results"]}
+        self.assertEqual(res.data["count"], 3)
+        self.assertEqual(statuses, {"AVAILABLE", "SCHEDULED", "FAILED"})
+
+    def test_bucket_posted_only_posted(self):
+        res = self.client.get("/api/video-inventory/", {"bucket": "posted"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        statuses = {row["status"] for row in res.data["results"]}
+        self.assertEqual(res.data["count"], 2)
+        self.assertEqual(statuses, {"POSTED"})
+
+    def test_no_bucket_keeps_legacy_behavior(self):
+        """Sem bucket: comportamento antigo (todos juntos), garantindo retrocompatibilidade."""
+        res = self.client.get("/api/video-inventory/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 5)
+
+    def test_unknown_bucket_keeps_legacy_behavior(self):
+        res = self.client.get("/api/video-inventory/", {"bucket": "wat"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 5)
+
+    def test_bucket_awaiting_respects_page_size(self):
+        # page_size=2 sobre 3 itens awaiting → 2 páginas
+        res = self.client.get(
+            "/api/video-inventory/",
+            {"bucket": "awaiting", "page_size": 2, "page": 1},
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 3)
+        self.assertEqual(len(res.data["results"]), 2)
+
+        res2 = self.client.get(
+            "/api/video-inventory/",
+            {"bucket": "awaiting", "page_size": 2, "page": 2},
+        )
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res2.data["results"]), 1)
+
+    def test_bucket_combined_with_video_type_filter(self):
+        res = self.client.get(
+            "/api/video-inventory/",
+            {"bucket": "awaiting", "video_type": "LONG"},
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(res.data["results"][0]["id"], self.awaiting_failed.id)
+
+    def test_bucket_combined_with_factory_filter(self):
+        other_factory = Factory.objects.create(name="Factory Bucket Other")
+        other_brand = Brand.objects.create(
+            name="Brand Bucket Other",
+            slug="brand-bucket-other",
+            factory=other_factory,
+        )
+        VideoInventoryItem.objects.create(
+            factory=other_factory,
+            brand=other_brand,
+            video_type="SHORT",
+            title="other",
+            status="POSTED",
+        )
+
+        res = self.client.get(
+            "/api/video-inventory/",
+            {"bucket": "posted", "factory": self.factory.id},
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 2)
+
+    def test_buckets_are_disjoint_and_sum_to_total(self):
+        awaiting = self.client.get("/api/video-inventory/", {"bucket": "awaiting"}).data["count"]
+        posted = self.client.get("/api/video-inventory/", {"bucket": "posted"}).data["count"]
+        total = self.client.get("/api/video-inventory/").data["count"]
+        self.assertEqual(awaiting + posted, total)
