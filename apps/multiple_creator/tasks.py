@@ -14,7 +14,6 @@ from celery import shared_task
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files import File
-from django.utils import timezone
 
 from apps.auto_cuts.services.transcript import segments_to_transcript_with_timestamps
 from apps.auto_cuts.services.video_chunks import (
