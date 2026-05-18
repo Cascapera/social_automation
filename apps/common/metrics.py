@@ -185,3 +185,25 @@ grok_request_duration_ms = Histogram(
     ("model",),
     buckets=_DURATION_MS_BUCKETS,
 )
+
+# --- Multiple-Creator (Fase 7) ---
+multiple_creator_jobs_total = Counter(
+    "multiple_creator_jobs_total",
+    "MultipleCreatorJob terminados (DONE/PARTIAL/ERROR)",
+    ("result",),
+)
+multiple_creator_brand_executions_total = Counter(
+    "multiple_creator_brand_executions_total",
+    "MultipleCreatorBrandExecution terminadas (DONE/ERROR)",
+    ("result",),
+)
+multiple_creator_duration_ms = Histogram(
+    "multiple_creator_duration_ms",
+    "Duracao total do MultipleCreatorJob (criacao -> status terminal)",
+    buckets=_DURATION_MS_BUCKETS,
+)
+multiple_creator_transcription_savings_ms = Histogram(
+    "multiple_creator_transcription_savings_ms",
+    "Tempo economizado pela transcricao unica vs. abordagem antiga: duration * (n_brands - 1)",
+    buckets=_DURATION_MS_BUCKETS,
+)

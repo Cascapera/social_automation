@@ -11,6 +11,10 @@ from rest_framework.test import APIClient
 
 from apps.auto_cuts.models import AutoCutAnalysis
 from apps.brands.models import Brand, Factory
+from apps.common.metrics import (
+    multiple_creator_brand_executions_total,
+    multiple_creator_jobs_total,
+)
 from apps.mediahub.models import SourceVideo
 from apps.multiple_creator.models import (
     MultipleCreatorBrandExecution,
@@ -175,6 +179,71 @@ class MultipleCreatorSignalTests(_BaseMcCase):
         analysis.save(update_fields=["progress_message"])
         execution.refresh_from_db()
         self.assertEqual(execution.status, "ANALYZING")
+
+
+def _counter_value(counter, **labels):
+    """Le o valor atual de um Counter Prometheus com labels (None se NoOp)."""
+    child = counter.labels(**labels)
+    sample = getattr(child, "_value", None)
+    if sample is None:
+        return None  # NoOp metric (prometheus_client ausente)
+    return sample.get()
+
+
+class MultipleCreatorMetricsTests(_BaseMcCase):
+    """Fase 7: contadores incrementam no fluxo correto."""
+
+    def _link_done(self, execution, *, status="done"):
+        analysis = AutoCutAnalysis.objects.create(
+            user=self.user,
+            brand=execution.brand,
+            target_brand=execution.brand,
+            prompt_version="viral",
+            transcript_segments=_fake_segments(2),
+        )
+        execution.auto_cut_analysis = analysis
+        execution.status = "ANALYZING"
+        execution.save(update_fields=["auto_cut_analysis", "status"])
+        analysis.status = status
+        analysis.save(update_fields=["status"])
+
+    def test_signal_increments_jobs_and_brand_counters(self):
+        before_done = _counter_value(multiple_creator_jobs_total, result="DONE")
+        before_exec_done = _counter_value(multiple_creator_brand_executions_total, result="DONE")
+        if before_done is None:
+            self.skipTest("prometheus_client not installed (no-op metrics)")
+
+        source = SourceVideo.objects.create(brand=self.brand_a)
+        job = self._make_job(source=source, brands=[self.brand_a, self.brand_b])
+        for ex in job.brand_executions.all():
+            self._link_done(ex)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "DONE")
+        self.assertEqual(
+            _counter_value(multiple_creator_jobs_total, result="DONE"),
+            before_done + 1,
+        )
+        self.assertEqual(
+            _counter_value(multiple_creator_brand_executions_total, result="DONE"),
+            before_exec_done + 2,
+        )
+
+    def test_partial_result_counted_once(self):
+        before_partial = _counter_value(multiple_creator_jobs_total, result="PARTIAL")
+        if before_partial is None:
+            self.skipTest("prometheus_client not installed (no-op metrics)")
+
+        source = SourceVideo.objects.create(brand=self.brand_a)
+        job = self._make_job(source=source, brands=[self.brand_a, self.brand_b])
+        execs = list(job.brand_executions.order_by("id"))
+        self._link_done(execs[0], status="done")
+        self._link_done(execs[1], status="error")
+        job.refresh_from_db()
+        self.assertEqual(job.status, "PARTIAL")
+        self.assertEqual(
+            _counter_value(multiple_creator_jobs_total, result="PARTIAL"),
+            before_partial + 1,
+        )
 
 
 class MultipleCreatorRetryEndpointTests(_BaseMcCase):

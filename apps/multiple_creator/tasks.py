@@ -25,6 +25,7 @@ from apps.auto_cuts.services.video_chunks import (
 )
 from apps.auto_cuts.tasks import CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
 from apps.common.metrics import (
+    multiple_creator_transcription_savings_ms,
     transcription_duration_ms,
     transcription_failures_total,
     transcription_jobs_total,
@@ -196,17 +197,24 @@ def multiple_creator_transcribe_task(self, job_id: int) -> None:
             ]
         )
 
-        transcription_duration_ms.labels(workload_type=workload).observe(timer.elapsed_ms())
+        elapsed_ms = timer.elapsed_ms()
+        transcription_duration_ms.labels(workload_type=workload).observe(elapsed_ms)
+        # Savings = quanto economizamos por transcrever 1x vez em vez de N (uma por brand).
+        n_brands = job.brand_executions.count()
+        if n_brands > 1:
+            multiple_creator_transcription_savings_ms.observe(elapsed_ms * (n_brands - 1))
         log_event(
             logger,
             event="multiple_creator_transcription_finished",
             queue_name=queue,
             workload_type=workload,
             task_id=task_id,
-            duration_ms=timer.elapsed_ms(),
+            duration_ms=elapsed_ms,
             status="success",
             multi_creator_job_id=job_id,
             segments_count=len(segments),
+            brand_count=n_brands,
+            transcription_savings_ms=elapsed_ms * max(0, n_brands - 1),
         )
         # Fan-out por brand uma vez que a transcricao terminou.
         multiple_creator_fanout_task.delay(job_id)
