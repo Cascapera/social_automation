@@ -14,6 +14,8 @@ from celery import shared_task
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files import File
+from django.db import transaction
+from django.utils import timezone
 
 from apps.auto_cuts.services.transcript import segments_to_transcript_with_timestamps
 from apps.auto_cuts.services.video_chunks import (
@@ -206,6 +208,8 @@ def multiple_creator_transcribe_task(self, job_id: int) -> None:
             multi_creator_job_id=job_id,
             segments_count=len(segments),
         )
+        # Fan-out por brand uma vez que a transcricao terminou.
+        multiple_creator_fanout_task.delay(job_id)
     except Exception as exc:
         logger.exception("[MC] transcribe falhou para job %s", job_id)
         transcription_failures_total.labels(workload_type=workload).inc()
@@ -224,3 +228,154 @@ def multiple_creator_transcribe_task(self, job_id: int) -> None:
         job.error = f"Falha na transcrição: {exc}"
         job.progress_message = "Erro na transcrição."
         job.save(update_fields=["status", "error", "progress_message", "updated_at"])
+
+
+def _build_autocut_for_execution(job, execution):
+    """Cria uma AutoCutAnalysis filha vinculada a esta BrandExecution.
+
+    Reaproveita transcript_segments, file/source e metadados do job.
+    target_brand=execution.brand forca o roteamento de 100% dos cortes para a
+    brand daquela execucao (ignora theme_category da IA).
+    """
+    from apps.auto_cuts.models import AutoCutAnalysis
+
+    analysis = AutoCutAnalysis(
+        user=job.user,
+        brand=execution.brand,
+        target_brand=execution.brand,
+        distribution_mode="theme",
+        source=job.source,
+        youtube_url="",
+        name=job.name or "",
+        assunto=job.assunto or "",
+        convidados=job.convidados or "",
+        prompt_version=(job.prompt_version or "viral").strip().lower(),
+        thumbnail_font=(job.thumbnail_font or "impact"),
+        thumbnail_band_color=(job.thumbnail_band_color or "#E12E20"),
+        thumbnail_text_color=(job.thumbnail_text_color or "#0A0A0A"),
+        thumbnail_stroke_color=(job.thumbnail_stroke_color or "#FFEBDC"),
+        shorts_target=job.shorts_target or 12,
+        longs_target=job.longs_target or 3,
+        vertical_mode=(job.vertical_mode or "zoom_crop"),
+        transcript=job.transcript or "",
+        transcript_segments=job.transcript_segments or [],
+        status="pending",
+        progress=0,
+    )
+    if job.file:
+        # FileField.name guarda o path relativo; nao copia o arquivo no disco.
+        analysis.file.name = job.file.name
+    analysis.save()
+    return analysis
+
+
+def _dispatch_brand_execution(job, execution):
+    """Cria a AutoCutAnalysis filha, linka a execution e enfileira a analise.
+
+    A criacao da analysis + linkagem da execution roda em uma unica transacao
+    para garantir que o curto-circuito em analyze_auto_cuts_task ja consiga
+    detectar a origem multi-creator quando a task comecar.
+    """
+    from apps.auto_cuts.tasks import analyze_auto_cuts_task
+
+    with transaction.atomic():
+        analysis = _build_autocut_for_execution(job, execution)
+        execution.auto_cut_analysis = analysis
+        execution.status = "ANALYZING"
+        execution.started_at = timezone.now()
+        execution.error = ""
+        execution.finished_at = None
+        execution.save(
+            update_fields=[
+                "auto_cut_analysis",
+                "status",
+                "started_at",
+                "error",
+                "finished_at",
+                "updated_at",
+            ]
+        )
+    analyze_auto_cuts_task.delay(analysis.id)
+    return analysis
+
+
+@shared_task(bind=True)
+def multiple_creator_fanout_task(self, job_id: int) -> None:
+    """Fanout do Multiple-Creator (Fase 6): cria N AutoCutAnalysis filhas.
+
+    Roda apenas quando job.status == READY (idempotente). Cada BrandExecution
+    PENDING ganha uma AutoCutAnalysis com target_brand fixo, transcript ja
+    populado e enfileira analyze_auto_cuts_task. Move o job para RUNNING_BRANDS.
+    """
+    from .models import MultipleCreatorJob
+
+    try:
+        job = MultipleCreatorJob.objects.get(pk=job_id)
+    except ObjectDoesNotExist:
+        return
+
+    if job.status != "READY":
+        logger.info(
+            "[MC] fanout: job %s no status %s (esperado READY); pulando.",
+            job_id,
+            job.status,
+        )
+        return
+
+    pending = list(job.brand_executions.filter(status="PENDING").select_related("brand"))
+    log_event(
+        logger,
+        event="multiple_creator_fanout_started",
+        status="started",
+        multi_creator_job_id=job_id,
+        brand_count=len(pending),
+        task_id=self.request.id or "",
+    )
+
+    if not pending:
+        job.status = "DONE"
+        job.progress = 100
+        job.progress_message = "Nenhuma execucao pendente."
+        job.save(update_fields=["status", "progress", "progress_message", "updated_at"])
+        log_event(
+            logger,
+            event="multiple_creator_fanout_finished",
+            status="success",
+            multi_creator_job_id=job_id,
+            spawned_count=0,
+        )
+        return
+
+    spawned = 0
+    failures = 0
+    for execution in pending:
+        try:
+            _dispatch_brand_execution(job, execution)
+            spawned += 1
+        except Exception as exc:
+            failures += 1
+            logger.exception(
+                "[MC] fanout: falha ao criar filha para job=%s brand=%s",
+                job_id,
+                execution.brand_id,
+            )
+            execution.status = "ERROR"
+            execution.error = f"Falha no fanout: {exc}"
+            execution.finished_at = timezone.now()
+            execution.save(
+                update_fields=["status", "error", "finished_at", "updated_at"]
+            )
+
+    job.status = "RUNNING_BRANDS"
+    job.progress = 30
+    job.progress_message = f"Fanout iniciado: {spawned} brand(s)."
+    job.save(update_fields=["status", "progress", "progress_message", "updated_at"])
+
+    log_event(
+        logger,
+        event="multiple_creator_fanout_finished",
+        status="success" if failures == 0 else "partial",
+        multi_creator_job_id=job_id,
+        spawned_count=spawned,
+        failure_count=failures,
+    )

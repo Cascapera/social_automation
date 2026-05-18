@@ -237,6 +237,7 @@ CELERY_TASK_ROUTES = {
     "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
     "apps.jobs.tasks.generate_subtitles_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
     "apps.multiple_creator.tasks.multiple_creator_transcribe_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    "apps.multiple_creator.tasks.multiple_creator_fanout_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
     # FFmpeg / NVENC final output (GPU when available)
     "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": CELERY_QUEUE_RENDER},
     "apps.jobs.tasks.process_job": {"queue": CELERY_QUEUE_RENDER},

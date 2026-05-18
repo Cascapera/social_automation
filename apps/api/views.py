@@ -2396,11 +2396,11 @@ class FactoryYoutubeVideosView(APIView):
 
 
 class MultipleCreatorViewSet(viewsets.GenericViewSet):
-    """Multiple-Creator (Fase 4): cria job + N BrandExecution PENDING.
+    """Multiple-Creator: cria job + N BrandExecution e orquestra pipeline.
 
-    A orquestração real (transcrição única + fanout por brand + render) chega
-    nas Fases 5-6. Este endpoint apenas persiste o submit; nenhuma task é
-    enfileirada ainda.
+    Fase 4 entregou create+retrieve. Fase 5 ligou a transcribe_task. Fase 6
+    completa o ciclo: transcribe -> fanout -> N AutoCutAnalysis filhas. Esta
+    classe agora tambem expoe retry granular por brand.
     """
 
     queryset = MultipleCreatorJob.objects.all().prefetch_related("brand_executions")
@@ -2428,3 +2428,69 @@ class MultipleCreatorViewSet(viewsets.GenericViewSet):
         if page is not None:
             return self.get_paginated_response(self.get_serializer(page, many=True).data)
         return Response(self.get_serializer(qs, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="retry")
+    def retry_brand(self, request, pk=None):
+        """Retry granular: re-roda uma brand especifica reaproveitando a transcricao."""
+        from apps.multiple_creator.models import MultipleCreatorBrandExecution
+        from apps.multiple_creator.tasks import _dispatch_brand_execution
+
+        job = self.get_object()
+        if not (job.transcript_segments or []):
+            return Response(
+                {"detail": "Job sem transcricao concluida; nada para retry."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        brand_id = request.query_params.get("brand_id") or request.data.get("brand_id")
+        if not brand_id:
+            return Response(
+                {"detail": "brand_id obrigatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            brand_id = int(brand_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "brand_id invalido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            execution = MultipleCreatorBrandExecution.objects.select_for_update().get(
+                job=job, brand_id=brand_id
+            )
+        except MultipleCreatorBrandExecution.DoesNotExist:
+            return Response(
+                {"detail": "Brand nao pertence a este job."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if execution.status in ("PENDING", "ANALYZING", "FINALIZING"):
+            return Response(
+                {"detail": f"Execucao em andamento (status={execution.status}); aguarde."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        execution.status = "PENDING"
+        execution.error = ""
+        execution.finished_at = None
+        execution.started_at = None
+        execution.auto_cut_analysis = None
+        execution.save(
+            update_fields=[
+                "status",
+                "error",
+                "finished_at",
+                "started_at",
+                "auto_cut_analysis",
+                "updated_at",
+            ]
+        )
+        if job.status in ("DONE", "PARTIAL", "ERROR"):
+            job.status = "RUNNING_BRANDS"
+            job.progress_message = f"Retry brand={brand_id}."
+            job.save(update_fields=["status", "progress_message", "updated_at"])
+
+        _dispatch_brand_execution(job, execution)
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
