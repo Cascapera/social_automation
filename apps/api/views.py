@@ -2494,3 +2494,28 @@ class MultipleCreatorViewSet(viewsets.GenericViewSet):
 
         _dispatch_brand_execution(job, execution)
         return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel_job(self, request, pk=None):
+        """Cancela um job que ainda não terminou."""
+        from apps.multiple_creator.models import MultipleCreatorBrandExecution
+
+        job = self.get_object()
+        if job.status in ("DONE", "PARTIAL", "ERROR"):
+            return Response(
+                {"detail": f"Job já está em estado terminal ({job.status})."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        MultipleCreatorBrandExecution.objects.filter(job=job, status="PENDING").update(
+            status="ERROR", error="Cancelado pelo usuário."
+        )
+        job.status = "ERROR"
+        job.error = "Cancelado pelo usuário."
+        job.save(update_fields=["status", "error", "updated_at"])
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        """Exclui o job e todos os dados relacionados."""
+        job = self.get_object()
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

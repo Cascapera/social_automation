@@ -1036,6 +1036,14 @@ export async function retryMultipleCreatorBrand(jobId, brandId) {
   })
 }
 
+export async function cancelMultipleCreatorJob(jobId) {
+  return apiRequest(`/multiple-creator/${jobId}/cancel/`, { method: 'POST' })
+}
+
+export async function deleteMultipleCreatorJob(jobId) {
+  return apiRequest(`/multiple-creator/${jobId}/`, { method: 'DELETE' })
+}
+
 export async function deleteAutoCutSuggestion(id) {
   const res = await fetch(`${API_BASE}/auto-cut-suggestions/${id}/`, {
     method: 'DELETE',

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBrand } from '../context/BrandContext'
 import {
+  cancelMultipleCreatorJob,
   createMultipleCreator,
+  deleteMultipleCreatorJob,
   getBrandsAllPages,
   getFactories,
   getSourcesAllPages,
@@ -38,10 +40,6 @@ function formatDateTime(value) {
   return d.toLocaleString('pt-BR')
 }
 
-const PROMPT_VERSIONS = [
-  { value: 'educational', label: 'Educational' },
-  { value: 'viral', label: 'Viral' },
-]
 
 const VERTICAL_MODES = [
   { value: 'zoom_crop', label: 'Zoom + crop' },
@@ -70,7 +68,7 @@ export default function MultipleCreator() {
   const [name, setName] = useState('')
   const [assunto, setAssunto] = useState('')
   const [convidados, setConvidados] = useState('')
-  const [promptVersion, setPromptVersion] = useState('educational')
+  const [promptVersion, setPromptVersion] = useState('viral')
   const [verticalMode, setVerticalMode] = useState('zoom_crop')
   const [shortsTarget, setShortsTarget] = useState(12)
   const [longsTarget, setLongsTarget] = useState(3)
@@ -89,6 +87,8 @@ export default function MultipleCreator() {
   const [jobsTotal, setJobsTotal] = useState(0)
   const [jobsLoading, setJobsLoading] = useState(false)
   const [retryingKey, setRetryingKey] = useState('')
+  const [cancellingId, setCancellingId] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const jobsReqIdRef = useRef(0)
 
   useEffect(() => {
@@ -264,6 +264,34 @@ export default function MultipleCreator() {
     }
   }
 
+  async function handleCancel(jobId) {
+    setError('')
+    setCancellingId(jobId)
+    try {
+      const updated = await cancelMultipleCreatorJob(jobId)
+      setJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)))
+    } catch (err) {
+      setError(err?.message || 'Erro ao cancelar o job.')
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
+  async function handleDelete(jobId) {
+    if (!window.confirm('Excluir este job permanentemente?')) return
+    setError('')
+    setDeletingId(jobId)
+    try {
+      await deleteMultipleCreatorJob(jobId)
+      setJobs((prev) => prev.filter((j) => j.id !== jobId))
+      setJobsTotal((prev) => Math.max(0, prev - 1))
+    } catch (err) {
+      setError(err?.message || 'Erro ao excluir o job.')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const selectedCount = selectedBrandIds.size
 
   return (
@@ -380,9 +408,13 @@ export default function MultipleCreator() {
             <label>
               Prompt
               <select value={promptVersion} onChange={(e) => setPromptVersion(e.target.value)}>
-                {PROMPT_VERSIONS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
+                <option value="educational">Educacional (PT, 2–3 min)</option>
+                <option value="viral">Viral (PT, 30–60 seg)</option>
+                <option value="viral_long">Viral longo (PT, 90–160 seg)</option>
+                <option value="educational_en">Educacional (EN, 2–3 min)</option>
+                <option value="viral_en">Viral (EN, 30–60 seg)</option>
+                <option value="viral_long_en">Viral longo (EN, 90–160 seg)</option>
+                <option value="viral_translate">Viral Translate (EN→PT)</option>
               </select>
             </label>
             <label>
@@ -471,11 +503,35 @@ export default function MultipleCreator() {
                     <strong>#{job.id}</strong> {job.name || '(sem nome)'}
                     <span className="mc-job-meta"> · {job.source_kind}</span>
                   </div>
-                  <div className="mc-job-status">
-                    {JOB_STATUS_LABEL[job.status] || job.status}
-                    {job.progress != null && job.progress < 100 && job.progress > 0 && (
-                      <span className="mc-job-progress"> ({job.progress}%)</span>
-                    )}
+                  <div className="mc-job-head-right">
+                    <div className="mc-job-status">
+                      {JOB_STATUS_LABEL[job.status] || job.status}
+                      {job.progress != null && job.progress < 100 && job.progress > 0 && (
+                        <span className="mc-job-progress"> ({job.progress}%)</span>
+                      )}
+                    </div>
+                    <div className="mc-job-actions">
+                      {!TERMINAL_JOB_STATUS.has(job.status) && (
+                        <button
+                          type="button"
+                          className="btn-action btn-cancel"
+                          onClick={() => handleCancel(job.id)}
+                          disabled={cancellingId === job.id}
+                          title="Cancelar este job"
+                        >
+                          {cancellingId === job.id ? 'Cancelando...' : 'Cancelar'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-action btn-danger"
+                        onClick={() => handleDelete(job.id)}
+                        disabled={deletingId === job.id}
+                        title="Excluir este job permanentemente"
+                      >
+                        {deletingId === job.id ? 'Excluindo...' : 'Excluir'}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 {job.progress_message && (
