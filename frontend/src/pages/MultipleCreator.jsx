@@ -42,8 +42,8 @@ function formatDateTime(value) {
 
 
 const VERTICAL_MODES = [
-  { value: 'zoom_crop', label: 'Zoom + crop' },
-  { value: 'blur_background', label: 'Blur background' },
+  { value: 'zoom_crop', label: 'Zoom e corte' },
+  { value: 'frame_center', label: 'Enquadrar e centralizar' },
 ]
 
 const THUMBNAIL_FONTS = [
