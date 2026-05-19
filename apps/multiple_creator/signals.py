@@ -34,9 +34,14 @@ def _update_job_aggregate(job) -> None:
     if not statuses:
         return
     if not all(s in _TERMINAL_BRAND_STATES for s in statuses):
-        if job.status != "RUNNING_BRANDS":
-            job.status = "RUNNING_BRANDS"
-            job.save(update_fields=["status", "updated_at"])
+        done_count = sum(1 for s in statuses if s in _TERMINAL_BRAND_STATES)
+        total = len(statuses)
+        progress = 30 + int(65 * done_count / total)
+        msg = f"Processando brands: {done_count}/{total} concluída(s)."
+        job.status = "RUNNING_BRANDS"
+        job.progress = progress
+        job.progress_message = msg
+        job.save(update_fields=["status", "progress", "progress_message", "updated_at"])
         return
 
     if all(s == "DONE" for s in statuses):

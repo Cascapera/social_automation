@@ -78,10 +78,11 @@ def _download_youtube_to_job(job) -> Path | None:
     return saved_path
 
 
-def _transcribe_video(video_path: Path, language: str = "pt") -> list[dict]:
+def _transcribe_video(video_path: Path, language: str = "pt", progress_callback=None) -> list[dict]:
     """Transcreve o video usando o mesmo pipeline do auto_cuts.
 
     Vai chunked para videos longos (limite igual ao analyze_auto_cuts_task).
+    progress_callback(chunk_index, total_chunks) é chamado após cada chunk.
     Retorna lista de segmentos {start, end, text}.
     """
     duration_sec = ffprobe_duration(video_path)
@@ -97,6 +98,7 @@ def _transcribe_video(video_path: Path, language: str = "pt") -> list[dict]:
             device=None,
         )
         all_segments: list[dict] = []
+        total_chunks = len(chunk_paths)
         try:
             for i, (chunk_path, start_sec, end_sec) in enumerate(chunk_paths):
                 chunk = transcribe_single_chunk(
@@ -109,6 +111,8 @@ def _transcribe_video(video_path: Path, language: str = "pt") -> list[dict]:
                     if s.get("start", 0) >= prev_end
                 ]
                 all_segments.extend(segs)
+                if progress_callback:
+                    progress_callback(i + 1, total_chunks)
         finally:
             cleanup_cortes_processo(f"mc_{video_path.stem}")
         all_segments.sort(key=lambda s: s.get("start", 0))
@@ -178,7 +182,13 @@ def multiple_creator_transcribe_task(self, job_id: int) -> None:
             "viral_en", "viral_long_en", "educational_en", "viral_translate"
         ) else "pt"
 
-        segments = _transcribe_video(video_path, language=language)
+        def _chunk_progress(done, total):
+            pct = 5 + int(15 * done / total)
+            job.progress = pct
+            job.progress_message = f"Transcrevendo bloco {done}/{total}..."
+            job.save(update_fields=["progress", "progress_message", "updated_at"])
+
+        segments = _transcribe_video(video_path, language=language, progress_callback=_chunk_progress)
         if not segments:
             raise RuntimeError("Transcrição vazia.")
 

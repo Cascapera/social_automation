@@ -467,9 +467,6 @@ export default function MultipleCreator() {
                   <div className="mc-job-head-right">
                     <div className="mc-job-status">
                       {JOB_STATUS_LABEL[job.status] || job.status}
-                      {job.progress != null && job.progress < 100 && job.progress > 0 && (
-                        <span className="mc-job-progress"> ({job.progress}%)</span>
-                      )}
                     </div>
                     <div className="mc-job-actions">
                       {!TERMINAL_JOB_STATUS.has(job.status) && (
@@ -495,10 +492,22 @@ export default function MultipleCreator() {
                     </div>
                   </div>
                 </div>
-                {job.progress_message && (
-                  <p className="mc-job-msg">{job.progress_message}</p>
+                {!TERMINAL_JOB_STATUS.has(job.status) && (
+                  <div className="mc-job-progress-wrap">
+                    <div className="mc-progress-bar">
+                      <div
+                        className="mc-progress-fill"
+                        style={{ width: `${job.progress || 0}%` }}
+                      />
+                    </div>
+                    <span className="mc-progress-msg">
+                      {job.progress_message || '...'}
+                    </span>
+                  </div>
                 )}
-                {job.error && <p className="form-error mc-job-msg">{job.error}</p>}
+                {TERMINAL_JOB_STATUS.has(job.status) && job.error && (
+                  <p className="form-error mc-job-msg">{job.error}</p>
+                )}
                 <table className="mc-exec-table">
                   <thead>
                     <tr>

@@ -233,14 +233,36 @@
   color: var(--text-muted);
 }
 
-.mc-job-progress {
-  color: var(--accent, #3b82f6);
-}
 
 .mc-job-msg {
   margin: 0.4rem 0 0.55rem;
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.mc-job-progress-wrap {
+  margin: 0.45rem 0 0.55rem;
+}
+
+.mc-progress-bar {
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mc-progress-fill {
+  height: 100%;
+  background: var(--accent, #3b82f6);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.mc-progress-msg {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
 }
 
 .mc-exec-table {
