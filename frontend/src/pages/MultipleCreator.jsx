@@ -46,11 +46,6 @@ const VERTICAL_MODES = [
   { value: 'frame_center', label: 'Enquadrar e centralizar' },
 ]
 
-const THUMBNAIL_FONTS = [
-  { value: 'impact', label: 'Impact' },
-  { value: 'arial-black', label: 'Arial Black' },
-]
-
 export default function MultipleCreator() {
   const { brandId } = useBrand()
 
@@ -73,10 +68,6 @@ export default function MultipleCreator() {
   const [shortsTarget, setShortsTarget] = useState(12)
   const [longsTarget, setLongsTarget] = useState(3)
 
-  const [thumbnailFont, setThumbnailFont] = useState('impact')
-  const [thumbnailBandColor, setThumbnailBandColor] = useState('#E12E20')
-  const [thumbnailTextColor, setThumbnailTextColor] = useState('#0A0A0A')
-  const [thumbnailStrokeColor, setThumbnailStrokeColor] = useState('#FFEBDC')
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -228,10 +219,6 @@ export default function MultipleCreator() {
         verticalMode,
         shortsTarget,
         longsTarget,
-        thumbnailFont,
-        thumbnailBandColor,
-        thumbnailTextColor,
-        thumbnailStrokeColor,
       })
       const n = (job?.brand_executions || []).length
       setInfo(
@@ -442,32 +429,6 @@ export default function MultipleCreator() {
                 value={longsTarget}
                 onChange={(e) => setLongsTarget(Number(e.target.value) || 0)}
               />
-            </label>
-          </div>
-        </fieldset>
-
-        <fieldset className="mc-fieldset">
-          <legend>Thumbnail</legend>
-          <div className="mc-row">
-            <label>
-              Fonte
-              <select value={thumbnailFont} onChange={(e) => setThumbnailFont(e.target.value)}>
-                {THUMBNAIL_FONTS.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Cor da banda
-              <input type="color" value={thumbnailBandColor} onChange={(e) => setThumbnailBandColor(e.target.value)} />
-            </label>
-            <label>
-              Cor do texto
-              <input type="color" value={thumbnailTextColor} onChange={(e) => setThumbnailTextColor(e.target.value)} />
-            </label>
-            <label>
-              Cor do contorno
-              <input type="color" value={thumbnailStrokeColor} onChange={(e) => setThumbnailStrokeColor(e.target.value)} />
             </label>
           </div>
         </fieldset>

@@ -989,10 +989,6 @@ export async function createMultipleCreator({
   assunto,
   convidados,
   promptVersion,
-  thumbnailFont,
-  thumbnailBandColor,
-  thumbnailTextColor,
-  thumbnailStrokeColor,
   shortsTarget,
   longsTarget,
   verticalMode = 'zoom_crop',
@@ -1007,10 +1003,6 @@ export async function createMultipleCreator({
   if (assunto) formData.append('assunto', assunto)
   if (convidados) formData.append('convidados', convidados)
   if (promptVersion) formData.append('prompt_version', promptVersion)
-  if (thumbnailFont) formData.append('thumbnail_font', thumbnailFont)
-  if (thumbnailBandColor) formData.append('thumbnail_band_color', thumbnailBandColor)
-  if (thumbnailTextColor) formData.append('thumbnail_text_color', thumbnailTextColor)
-  if (thumbnailStrokeColor) formData.append('thumbnail_stroke_color', thumbnailStrokeColor)
   if (shortsTarget != null) formData.append('shorts_target', String(shortsTarget))
   if (longsTarget != null) formData.append('longs_target', String(longsTarget))
   const token = getToken()
