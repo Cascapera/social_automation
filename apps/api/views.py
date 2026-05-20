@@ -1505,7 +1505,7 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
             inventory.save(update_fields=["status", "posted_at", "last_error", "updated_at"])
             factory = inventory.factory
             brand = inventory.brand
-            if factory and brand and not PostedVideoLog.objects.filter(
+            if brand and not PostedVideoLog.objects.filter(
                 inventory_item=inventory,
                 external_platform="MANUAL",
                 external_video_id="manual",

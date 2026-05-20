@@ -347,7 +347,7 @@ def _sync_inventory_item_from_corte(corte):
         return
     suggestion = corte.suggestion
     target_brand = _resolve_target_brand_for_suggestion(analysis, suggestion)
-    if not target_brand or not getattr(target_brand, "factory_id", None):
+    if not target_brand:
         if getattr(analysis, "target_brand_id", None):
             logger.warning(
                 "[FLUXO] Cut %s: target_brand_id=%s set but brand not found. Check that the brand exists.",
