@@ -1220,8 +1220,8 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         rank = 0
         is_viral_prompt = pv in ("viral", "viral_en", "viral_translate", "viral_long", "viral_long_en")
         is_educational_prompt = pv in ("educational", "educational_en")
-        shorts_limit = max(1, min(30, int(getattr(analysis, "shorts_target", 12) or 12)))
-        longs_limit = max(1, min(10, int(getattr(analysis, "longs_target", 3) or 3)))
+        shorts_limit = max(1, min(10, int(getattr(analysis, "shorts_target", 10) or 10)))
+        longs_limit = max(1, min(5, int(getattr(analysis, "longs_target", 3) or 3)))
         from apps.jobs.services.ffmpeg import seconds_to_tc, tc_to_seconds
 
         candidate_shorts_source = final.get("candidate_shorts") or []
@@ -1237,6 +1237,7 @@ def analyze_auto_cuts_task(self, analysis_id: int) -> None:
         else:
             ranked_shorts = _sort_by_virality(shorts_source)[:shorts_limit]
         ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])[:longs_limit]
+
         source_asset_id = ""
         if getattr(analysis, "source_id", None):
             source_asset_id = str(analysis.source_id)

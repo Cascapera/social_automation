@@ -19,17 +19,20 @@ except ImportError:  # e.g. image not rebuilt after requirements.txt change
             pass
 
     class _NoOpMetric:
+        def __init__(self, labelnames=()):
+            self._labelnames = tuple(labelnames)
+
         def labels(self, *args, **kwargs):
             return _NoOpChild()
 
         def inc(self, amount: int = 1) -> None:
             pass
 
-    def Counter(*args, **kwargs):
-        return _NoOpMetric()
+    def Counter(name, documentation="", labelnames=(), **kwargs):
+        return _NoOpMetric(labelnames)
 
-    def Histogram(*args, **kwargs):
-        return _NoOpMetric()
+    def Histogram(name, documentation="", labelnames=(), **kwargs):
+        return _NoOpMetric(labelnames)
 
 # Buckets for durations stored as milliseconds (observed values are ms).
 _DURATION_MS_BUCKETS = (

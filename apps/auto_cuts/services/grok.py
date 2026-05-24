@@ -26,16 +26,51 @@ GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS = "ready_cuts_titles_from_tran
 GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME = "ready_cuts_titles_from_job_name"
 
 GROK_MODEL_ALIASES = {
-    "grok-4-1-fast": "grok-4-1-fast-reasoning",
     "grok-4-1-fast-reasoning-latest": "grok-4-1-fast-reasoning",
 }
+
+# Base URLs padrão por provedor (sobrescritas por LLM_BASE_URL se definido)
+LLM_PROVIDER_DEFAULTS: dict[str, str] = {
+    "xai": "https://api.x.ai/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "openai": "https://api.openai.com/v1",
+}
+
 GROK_PRICING = {
-    # Official xAI pricing at implementation time:
-    # input $0.20 / 1M, cached input $0.05 / 1M, output $0.50 / 1M.
+    # xAI
+    "grok-4-1-fast": {
+        "input_per_1k": 0.0002,
+        "cached_input_per_1k": 0.00005,
+        "output_per_1k": 0.0004,
+    },
+    # descontinuado em maio/2026 — mantido para métricas históricas
     "grok-4-1-fast-reasoning": {
         "input_per_1k": 0.0002,
         "cached_input_per_1k": 0.00005,
         "output_per_1k": 0.0005,
+    },
+    # destino atual do redirect xAI — input $1.25/M, output $2.50/M
+    "grok-4.3": {
+        "input_per_1k": 0.00125,
+        "cached_input_per_1k": 0.00125,
+        "output_per_1k": 0.0025,
+    },
+    # Google — input $0.10/M, output $0.40/M
+    "gemini-2.0-flash": {
+        "input_per_1k": 0.0001,
+        "cached_input_per_1k": 0.0001,
+        "output_per_1k": 0.0004,
+    },
+    # OpenAI
+    "gpt-4o-mini": {
+        "input_per_1k": 0.00015,
+        "cached_input_per_1k": 0.000075,
+        "output_per_1k": 0.0006,
+    },
+    "gpt-4o": {
+        "input_per_1k": 0.0025,
+        "cached_input_per_1k": 0.00125,
+        "output_per_1k": 0.01,
     },
 }
 
@@ -1246,11 +1281,14 @@ def _validate_minimum_items(
     enforce_minimum: bool = True,
     allowed_theme_categories: list[str] | None = None,
     brand_only: bool = False,
+    min_candidates: int = 1,
+    min_longs: int = 1,
 ) -> None:
     """
     Garante mínimos para prompts virais.
     Se não cumprir, levanta erro para o caller retentar.
     brand_only: quando True, não exige theme_category (conteúdo é de uma única marca).
+    min_candidates/min_longs: limites mínimos esperados (injetados por analyze_chunks_in_one_request).
     """
     pv = (prompt_version or "viral").strip().lower()
     candidate_shorts = payload.get("candidate_shorts")
@@ -1267,11 +1305,9 @@ def _validate_minimum_items(
         if not isinstance(candidate_shorts, list):
             raise ValueError("Resposta inválida: candidate_shorts ausente ou não é lista.")
 
-        min_candidates = 30
-        min_longs = 10
         if len(candidate_shorts) < min_candidates:
             msg = (
-                f"Resposta abaixo do mínimo para viral: "
+                f"Resposta abaixo do mínimo esperado: "
                 f"candidate_shorts={len(candidate_shorts)} < {min_candidates}."
             )
             if enforce_minimum:
@@ -1279,7 +1315,7 @@ def _validate_minimum_items(
             logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
         if len(final_long_cuts) < min_longs:
             msg = (
-                f"Resposta abaixo do mínimo para viral: "
+                f"Resposta abaixo do mínimo esperado: "
                 f"final_long_cuts={len(final_long_cuts)} < {min_longs}."
             )
             if enforce_minimum:
@@ -1516,28 +1552,79 @@ def _execute_grok_chat_completion(
     return response
 
 
+def _build_llm_client(light: bool = False) -> tuple:
+    """
+    Constrói (OpenAI client, model_name, provider) a partir de variáveis de ambiente.
+
+    Precedência:
+      API key : LLM_API_KEY > XAI_API_KEY (deprecated, emite warning)
+      Model   : LLM_MODEL_LIGHT (se light=True) ou LLM_MODEL > GROK_MODEL (deprecated)
+      Base URL: LLM_BASE_URL > padrão do LLM_PROVIDER
+    """
+    from openai import OpenAI
+
+    provider = (os.getenv("LLM_PROVIDER") or "xai").strip().lower()
+
+    # API key
+    api_key = (os.getenv("LLM_API_KEY") or "").strip()
+    if not api_key:
+        api_key = (os.getenv("XAI_API_KEY") or "").strip()
+        if api_key:
+            logger.warning(
+                "[LLM] XAI_API_KEY deprecated; migrar para LLM_API_KEY no .env"
+            )
+    if not api_key:
+        raise ValueError("LLM_API_KEY não configurada")
+
+    # Model
+    if light:
+        model = (os.getenv("LLM_MODEL_LIGHT") or "").strip()
+    else:
+        model = (os.getenv("LLM_MODEL") or "").strip()
+    if not model:
+        model = (os.getenv("GROK_MODEL") or "").strip()
+        if model:
+            logger.warning(
+                "[LLM] GROK_MODEL deprecated; migrar para LLM_MODEL/LLM_MODEL_LIGHT no .env"
+            )
+    if not model:
+        model = "grok-4-1-fast"
+
+    # Base URL
+    base_url = (os.getenv("LLM_BASE_URL") or "").strip()
+    if not base_url:
+        base_url = LLM_PROVIDER_DEFAULTS.get(provider, LLM_PROVIDER_DEFAULTS["xai"])
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    return client, model, provider
+
+
 def call_grok_chat(
     system: str,
     user: str,
     api_key: str | None = None,
     *,
     operation: str = "chat",
+    light: bool = False,
 ) -> str:
-    """Chama Grok API e retorna o conteúdo da resposta."""
-    import os
+    """Chama API LLM (OpenAI-compatible) e retorna o conteúdo da resposta."""
+    client, model_name, provider = _build_llm_client(light=light)
 
-    from openai import OpenAI
+    # api_key explícito (legado) substitui a key resolvida pelo builder
+    if api_key:
+        from openai import OpenAI as _OpenAI
+        base_url = (os.getenv("LLM_BASE_URL") or "").strip() or LLM_PROVIDER_DEFAULTS.get(
+            (os.getenv("LLM_PROVIDER") or "xai").strip().lower(),
+            LLM_PROVIDER_DEFAULTS["xai"],
+        )
+        client = _OpenAI(api_key=api_key, base_url=base_url)
 
-    key = api_key or os.getenv("XAI_API_KEY")
-    if not key:
-        raise ValueError("XAI_API_KEY não configurada")
+    logger.info("[LLM] provider=%s model=%s operation=%s", provider, model_name, operation)
 
-    client = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    model_name = os.getenv("GROK_MODEL", "grok-4-1-fast-reasoning")
 
     # Força JSON object na resposta quando suportado pela API.
     try:
@@ -1550,7 +1637,7 @@ def call_grok_chat(
         )
     except Exception as e:
         logger.warning(
-            "[FLUXO/Grok] response_format=json_object não suportado (%s). Tentando sem response_format.",
+            "[LLM] response_format=json_object não suportado (%s). Tentando sem response_format.",
             e,
         )
         resp = _execute_grok_chat_completion(
@@ -1559,6 +1646,16 @@ def call_grok_chat(
             messages=messages,
             operation=operation,
         )
+
+    # Detecta redirect de modelo pelo servidor
+    actual_model = (getattr(resp, "model", None) or "").strip()
+    if actual_model and actual_model != model_name:
+        logger.warning(
+            "[LLM] redirect detectado: solicitado=%s usado=%s — verificar configuração do provider",
+            model_name,
+            actual_model,
+        )
+
     return resp.choices[0].message.content or ""
 
 
@@ -1693,7 +1790,44 @@ def analyze_chunks_in_one_request(
     user = template.format(
         context_block=context_block, chunks_block=chunks_block
     )
-    logger.info("[FLUXO/Grok] Enviando requisição para Grok API...")
+
+    # Limites configuráveis via env (interpolados no prompt no momento da chamada)
+    llm_max_shorts = max(1, int(os.getenv("LLM_MAX_SHORTS", "10")))
+    llm_max_longs = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
+    if is_educational:
+        if lang == "en":
+            limit_block = (
+                f"\n\n---\nFINAL LIMIT INSTRUCTION (overrides all previous instructions):\n"
+                f"- ranked_shorts: return EXACTLY {llm_max_shorts} items.\n"
+                f"- final_long_cuts: return EXACTLY {llm_max_longs} items."
+            )
+        else:
+            limit_block = (
+                f"\n\n---\nINSTRUÇÃO FINAL DE LIMITE (prevalece sobre qualquer instrução anterior):\n"
+                f"- ranked_shorts: retorne EXATAMENTE {llm_max_shorts} itens.\n"
+                f"- final_long_cuts: retorne EXATAMENTE {llm_max_longs} itens."
+            )
+    else:
+        if lang == "en":
+            limit_block = (
+                f"\n\n---\nFINAL LIMIT INSTRUCTION (overrides all previous instructions):\n"
+                f"- candidate_shorts: return EXACTLY {llm_max_shorts} items.\n"
+                f"- final_long_cuts: return EXACTLY {llm_max_longs} items.\n"
+                f"- ranked_shorts: ALWAYS return [] (legacy field — do not populate)."
+            )
+        else:
+            limit_block = (
+                f"\n\n---\nINSTRUÇÃO FINAL DE LIMITE (prevalece sobre qualquer instrução anterior):\n"
+                f"- candidate_shorts: retorne EXATAMENTE {llm_max_shorts} itens.\n"
+                f"- final_long_cuts: retorne EXATAMENTE {llm_max_longs} itens.\n"
+                f"- ranked_shorts: SEMPRE retorne [] (campo legado — não preencher)."
+            )
+    user = user + limit_block
+
+    logger.info(
+        "[FLUXO/Grok] Enviando requisição (max_shorts=%d max_longs=%d)...",
+        llm_max_shorts, llm_max_longs,
+    )
     content = call_grok_chat(
         system_prompt,
         user,
@@ -1710,6 +1844,8 @@ def analyze_chunks_in_one_request(
         enforce_minimum=enforce_minimum,
         allowed_theme_categories=allowed_theme_categories,
         brand_only=brand_only,
+        min_candidates=max(1, llm_max_shorts // 2),
+        min_longs=max(1, llm_max_longs // 2),
     )
     from apps.auto_cuts.services.metadata_sanitizer import sanitize_payload
     sanitize_payload(parsed)
@@ -1822,6 +1958,7 @@ Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnai
         user,
         api_key,
         operation=GROK_OPERATION_READY_CUT_METADATA,
+        light=True,
     )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
@@ -1864,6 +2001,7 @@ def analyze_ready_cuts_batch_titles_from_transcripts(
         user,
         api_key,
         operation=GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS,
+        light=True,
     )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
@@ -1898,6 +2036,7 @@ def analyze_ready_cuts_batch_titles_from_job_name(
         user,
         api_key,
         operation=GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME,
+        light=True,
     )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
