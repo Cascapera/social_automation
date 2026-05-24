@@ -35,4 +35,9 @@ app.conf.beat_schedule = {
         "task": "apps.social.tasks.cleanup_posted_media_task",
         "schedule": crontab(minute=0, hour="*/4"),  # every 4 hours
     },
+    # Limpa MultipleCreatorJob.file de jobs terminados ha >= 24h.
+    "multiple-creator-cleanup-terminal-files": {
+        "task": "apps.multiple_creator.tasks.cleanup_terminal_job_files_task",
+        "schedule": crontab(minute=15, hour=3),  # daily at 03:15 UTC
+    },
 }

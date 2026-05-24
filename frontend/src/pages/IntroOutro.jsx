@@ -14,6 +14,7 @@ import {
   createBrandYoutubeCredential,
   updateBrandYoutubeCredential,
   deleteBrandYoutubeCredential,
+  getBrandCategories,
 } from '../api'
 import './IntroOutro.css'
 
@@ -25,14 +26,6 @@ const ASSET_TYPES = [
   { id: 'ANIMATION', label: 'Animação overlay (PNG/GIF)' },
   { id: 'THUMB_SHORT', label: 'Thumb Shorts' },
   { id: 'THUMB_LONG', label: 'Thumb Longs' },
-]
-
-const THEME_CATEGORY_OPTIONS = [
-  { id: 'BUSINESS_MONEY', label: 'Negócios / Dinheiro' },
-  { id: 'PSYCHOLOGY_RELATIONSHIPS', label: 'Psicologia / Relacionamentos' },
-  { id: 'STORIES_CURIOSITIES', label: 'Histórias e Curiosidades' },
-  { id: 'CONTROVERSIES_DEBATE', label: 'Polêmicas / Debate' },
-  { id: 'COMEDY_HUMOR', label: 'Comédia / Humor' },
 ]
 
 /** Fuso fixo do scheduler (sem edição na UI). */
@@ -368,6 +361,8 @@ export default function IntroOutro() {
   const [editingBrand, setEditingBrand] = useState(false)
   const [deletingBrand, setDeletingBrand] = useState(false)
   const [editThemeCategory, setEditThemeCategory] = useState('')
+  const [editBrandName, setEditBrandName] = useState('')
+  const [brandCategories, setBrandCategories] = useState([])
   const [editThumbnailFont, setEditThumbnailFont] = useState('impact')
   const [editBandColor, setEditBandColor] = useState('#E12E20')
   const [editTextColor, setEditTextColor] = useState('#0A0A0A')
@@ -441,6 +436,7 @@ export default function IntroOutro() {
     setYoutubeDescriptionExtra(selected?.youtube_description_extra || '')
     setYoutubeMadeForKids(!!selected?.youtube_made_for_kids)
     setEditThemeCategory(selected?.theme_category || '')
+    setEditBrandName(selected?.name || '')
     setEditThumbnailFont(selected?.thumbnail_font || 'impact')
     setEditBandColor(selected?.thumbnail_band_color || '#E12E20')
     setEditTextColor(selected?.thumbnail_text_color || '#0A0A0A')
@@ -456,6 +452,24 @@ export default function IntroOutro() {
     setUploadPostInstagramExtra(selected?.upload_post_instagram_extra_description || '')
     setUploadPostYoutubeEnabled(!!selected?.upload_post_youtube_enabled)
   }, [brandId, brands])
+
+  // Carrega categorias ativas da factory relevante (brand selecionada OU factory ativa OU
+  // factory escolhida no cadastro de nova brand).
+  useEffect(() => {
+    const selected = brands.find((b) => String(b.id) === String(brandId))
+    const fid =
+      (selected && selected.factory) ||
+      (viewMode === 'factory' ? factoryId : null) ||
+      newBrandFactoryId ||
+      null
+    if (!fid) {
+      setBrandCategories([])
+      return
+    }
+    getBrandCategories(fid)
+      .then((items) => setBrandCategories(items || []))
+      .catch(() => setBrandCategories([]))
+  }, [brandId, brands, viewMode, factoryId, newBrandFactoryId])
 
   async function handleAddOverlay(e) {
     e.preventDefault()
@@ -589,10 +603,16 @@ export default function IntroOutro() {
   async function handleSaveBrandScheduling(e) {
     e.preventDefault()
     if (!brandId) return
+    const trimmedName = (editBrandName || '').trim()
+    if (!trimmedName) {
+      setError('O nome da brand não pode ficar vazio.')
+      return
+    }
     setEditingBrand(true)
     setError('')
     try {
       await updateBrand(brandId, {
+        name: trimmedName,
         theme_category: editThemeCategory || '',
         thumbnail_font: editThumbnailFont || 'impact',
         thumbnail_band_color: (editBandColor || '').trim(),
@@ -793,8 +813,8 @@ export default function IntroOutro() {
                     required={viewMode === 'factory'}
                   >
                     <option value="">Selecione</option>
-                    {THEME_CATEGORY_OPTIONS.map((t) => (
-                      <option key={t.id} value={t.id}>{t.label}</option>
+                    {brandCategories.map((t) => (
+                      <option key={t.id} value={t.code}>{t.label}</option>
                     ))}
                   </select>
                 </div>
@@ -928,6 +948,19 @@ export default function IntroOutro() {
             <form onSubmit={handleSaveBrandScheduling} className="brand-create-form">
               <div className="form-row">
                 <div className="form-group">
+                  <label>Nome da brand</label>
+                  <input
+                    type="text"
+                    value={editBrandName}
+                    onChange={(e) => setEditBrandName(e.target.value)}
+                    placeholder="Nome da brand"
+                    required
+                  />
+                  <p className="form-hint">Renomear não altera o identificador interno da brand (brand_id) — canais e integrações existentes continuam válidos.</p>
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
                   <label>Fonte da thumbnail</label>
                   <select value={editThumbnailFont} onChange={(e) => setEditThumbnailFont(e.target.value)}>
                     <option value="impact">Impact</option>
@@ -949,10 +982,11 @@ export default function IntroOutro() {
                     required={viewMode === 'factory'}
                   >
                     <option value="">Selecione</option>
-                    {THEME_CATEGORY_OPTIONS.map((t) => (
-                      <option key={t.id} value={t.id}>{t.label}</option>
+                    {brandCategories.map((t) => (
+                      <option key={t.id} value={t.code}>{t.label}</option>
                     ))}
                   </select>
+                  <p className="form-hint">Categorias são gerenciadas em &quot;Factory Config&quot;.</p>
                 </div>
                 <div className="form-group">
                   <label>Modo de edição de shorts</label>

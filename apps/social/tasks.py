@@ -614,6 +614,8 @@ def _replace_ambiguous_short_slot(
     provider_not_found: bool,
     detail: str,
     external_ids: dict,
+    keep_failed_inventory_available: bool = False,
+    reason_prefix_override: str = "",
 ) -> dict | None:
     try:
         schedule = (
@@ -634,7 +636,7 @@ def _replace_ambiguous_short_slot(
     replacement_count = int((external_ids or {}).get("short_slot_replacement_count", 0) or 0)
     attempts = int(post.retry_count or 0) + int(getattr(post, "youtube_quota_retry_count", 0) or 0)
     detail_text = (detail or "").strip()
-    reason_prefix = (
+    reason_prefix = reason_prefix_override or (
         "Upload Post: request_id/job_id não localizado no provedor para este short."
         if provider_not_found
         else "Upload Post: reconciliação inconclusiva para este short."
@@ -672,7 +674,7 @@ def _replace_ambiguous_short_slot(
         post.external_ids = old_external_ids
         post.save(update_fields=["status", "error", "external_ids"])
 
-        inventory_item.status = "FAILED"
+        inventory_item.status = "AVAILABLE" if keep_failed_inventory_available else "FAILED"
         inventory_item.scheduled_for = None
         inventory_item.last_error = post_error
         inventory_item.attempt_count = attempts
@@ -768,7 +770,7 @@ def _replace_ambiguous_short_slot(
     schedule.next_retry_at = None
     schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
 
-    inventory_item.status = "FAILED"
+    inventory_item.status = "AVAILABLE" if keep_failed_inventory_available else "FAILED"
     inventory_item.scheduled_for = None
     inventory_item.last_error = post_error
     inventory_item.attempt_count = attempts
@@ -912,6 +914,8 @@ UPLOAD_INTERVAL_SECONDS = 60  # One video per minute on send queue
 THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer after last video before thumbnail uploads
 UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
 UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
+UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES = {499, 504}
+UPLOAD_POST_PROVIDER_BUSY_RETRY_COUNT = 1
 UPLOAD_POST_RECONCILE_BASE_DELAY_SEC = 90
 UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC = 120
 UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND = 1
@@ -922,6 +926,13 @@ DAILY_SCHEDULE_GENERATION_HOURS = (9, 11, 13)  # janelas locais: tentativa princ
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
 YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
+
+
+def _upload_post_retry_limit_for_error(error: Exception) -> int:
+    status_code = getattr(error, "status_code", None)
+    if status_code in UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES:
+        return UPLOAD_POST_PROVIDER_BUSY_RETRY_COUNT
+    return UPLOAD_POST_RETRY_COUNT
 
 
 @shared_task(
@@ -2929,19 +2940,38 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         )
                         if pending_result is not None:
                             return pending_result
-                    if attempt < UPLOAD_POST_RETRY_COUNT and e.retriable:
+                    retry_limit = _upload_post_retry_limit_for_error(e)
+                    if attempt < retry_limit and e.retriable:
                         logger.warning(
                             "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
                             attempt + 1,
-                            UPLOAD_POST_RETRY_COUNT + 1,
+                            retry_limit + 1,
                             UPLOAD_POST_RETRY_DELAY_SEC,
                             last_up_error,
                         )
                         _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
                     else:
+                        if e.status_code in UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES:
+                            replacement_result = _replace_ambiguous_short_slot(
+                                post,
+                                current_attempt=current_attempt,
+                                correlation_id=correlation_id,
+                                duration_ms=_timer.elapsed_ms(),
+                                provider_not_found=False,
+                                detail=last_up_error,
+                                external_ids=external_ids,
+                                keep_failed_inventory_available=True,
+                                reason_prefix_override=(
+                                    "Upload Post: erro temporário do provedor após tentar novamente o mesmo vídeo."
+                                ),
+                            )
+                            if replacement_result is not None:
+                                for idempotency_key in upload_post_keys_by_platform.values():
+                                    mark_idempotency_failed(key=idempotency_key, error_message=last_up_error)
+                                return replacement_result
                         logger.warning(
                             "[UploadPost] Failed after %s attempts: %s",
-                            UPLOAD_POST_RETRY_COUNT + 1,
+                            retry_limit + 1,
                             last_up_error,
                         )
                         if "YOUTUBE" in upload_post_platforms_to_execute:

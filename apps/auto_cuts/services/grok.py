@@ -26,16 +26,51 @@ GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS = "ready_cuts_titles_from_tran
 GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME = "ready_cuts_titles_from_job_name"
 
 GROK_MODEL_ALIASES = {
-    "grok-4-1-fast": "grok-4-1-fast-reasoning",
     "grok-4-1-fast-reasoning-latest": "grok-4-1-fast-reasoning",
 }
+
+# Base URLs padrão por provedor (sobrescritas por LLM_BASE_URL se definido)
+LLM_PROVIDER_DEFAULTS: dict[str, str] = {
+    "xai": "https://api.x.ai/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "openai": "https://api.openai.com/v1",
+}
+
 GROK_PRICING = {
-    # Official xAI pricing at implementation time:
-    # input $0.20 / 1M, cached input $0.05 / 1M, output $0.50 / 1M.
+    # xAI
+    "grok-4-1-fast": {
+        "input_per_1k": 0.0002,
+        "cached_input_per_1k": 0.00005,
+        "output_per_1k": 0.0004,
+    },
+    # descontinuado em maio/2026 — mantido para métricas históricas
     "grok-4-1-fast-reasoning": {
         "input_per_1k": 0.0002,
         "cached_input_per_1k": 0.00005,
         "output_per_1k": 0.0005,
+    },
+    # destino atual do redirect xAI — input $1.25/M, output $2.50/M
+    "grok-4.3": {
+        "input_per_1k": 0.00125,
+        "cached_input_per_1k": 0.00125,
+        "output_per_1k": 0.0025,
+    },
+    # Google — input $0.10/M, output $0.40/M
+    "gemini-2.0-flash": {
+        "input_per_1k": 0.0001,
+        "cached_input_per_1k": 0.0001,
+        "output_per_1k": 0.0004,
+    },
+    # OpenAI
+    "gpt-4o-mini": {
+        "input_per_1k": 0.00015,
+        "cached_input_per_1k": 0.000075,
+        "output_per_1k": 0.0006,
+    },
+    "gpt-4o": {
+        "input_per_1k": 0.0025,
+        "cached_input_per_1k": 0.00125,
+        "output_per_1k": 0.01,
     },
 }
 
@@ -204,7 +239,7 @@ IMPORTANTE:
 - Não invente timestamps.
 - Não retorne texto fora do JSON.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
 """ + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
@@ -253,7 +288,7 @@ IMPORTANTE:
 - Não invente timestamps.
 - Não retorne texto fora do JSON.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
 """ + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
@@ -285,15 +320,15 @@ Para shorts (2–3 min):
 - title: título informativo (máx 60 chars)
 - reason: por que é educativo
 - virality_score: 1–10 (10 = máximo valor didático)
-- theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: OBRIGATÓRIO (use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 
 Para cortes longos:
 - start, end, duration_min, title_suggestion, reason
-- theme_category: OBRIGATÓRIO (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: OBRIGATÓRIO (use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 
 IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou estime.
 
-IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos somente com essas categorias disponíveis (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Nunca deixe em branco ou utilize outros nomes ou tipos diferentes.
+IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
 """ + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
@@ -323,7 +358,7 @@ Para cada clipe (short ou longo), inclua:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (OBRIGATÓRIO: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE ou COMEDY_HUMOR)
+- theme_category (OBRIGATÓRIO: use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 - emotion_type (funny/shocking/inspiring/controversial/story)
 - main_topic
 - suggested_title
@@ -351,7 +386,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -369,7 +404,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -387,7 +422,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 720,
       "virality_score": 88,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "estratégia de crescimento",
       "hook_sentence": "frase mais impactante",
@@ -445,7 +480,7 @@ Para cada clipe (short ou longo), inclua:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (OBRIGATÓRIO: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE ou COMEDY_HUMOR)
+- theme_category (OBRIGATÓRIO: use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 - emotion_type (funny/shocking/inspiring/controversial/story)
 - main_topic
 - suggested_title
@@ -474,7 +509,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -492,7 +527,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "história constrangedora no trabalho",
       "hook_sentence": "frase mais impactante",
@@ -510,7 +545,7 @@ Responda SOMENTE com JSON válido:
       "end_timestamp": "MM:SS",
       "duration_seconds": 720,
       "virality_score": 88,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "estratégia de crescimento",
       "hook_sentence": "frase mais impactante",
@@ -577,7 +612,7 @@ Responda SOMENTE com JSON válido:
       "title": "Título informativo 📚",
       "reason": "valor didático",
       "virality_score": 9,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "IDEIA CENTRAL",
       "suggested_description": "Como você decide quando vale a pena arriscar no investimento? Este trecho apresenta um método simples em três passos para avaliar o risco antes de mover o dinheiro. Exemplos reais e aplicação prática ao final.",
@@ -591,7 +626,7 @@ Responda SOMENTE com JSON válido:
       "duration_min": 18,
       "title_suggestion": "Título informativo 📚",
       "reason": "valor didático",
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "RESUMO FORTE",
       "suggested_description": "Aula completa sobre alocação de patrimônio em três cenários distintos. Pontos abordados: (1) base defensiva, (2) diversificação internacional, (3) proteção cambial, (4) rebalanceamento anual. Material feito para quem está começando e quer uma visão estruturada.",
@@ -653,7 +688,7 @@ IMPORTANT:
 - Do not invent timestamps.
 - Return valid JSON only.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
 """ + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
@@ -683,7 +718,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- theme_category (REQUIRED: use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -712,7 +747,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -730,7 +765,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -748,7 +783,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -822,7 +857,7 @@ IMPORTANT:
 - Do not invent timestamps.
 - Return valid JSON only.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
 """ + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
@@ -854,7 +889,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- theme_category (REQUIRED: use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -884,7 +919,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:17:22",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -902,7 +937,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:17:22",
       "duration_seconds": 120,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -920,7 +955,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -987,7 +1022,7 @@ For each clip (short or long), include:
 - end_timestamp
 - duration_seconds
 - virality_score (0..100)
-- theme_category (REQUIRED: BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, or COMEDY_HUMOR)
+- theme_category (REQUIRED: use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 - emotion_type (funny / shocking / inspiring / controversial / story)
 - main_topic
 - suggested_title
@@ -1017,7 +1052,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -1036,7 +1071,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:16:05",
       "duration_seconds": 43,
       "virality_score": 96,
-      "theme_category": "COMEDY_HUMOR",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "funny",
       "main_topic": "embarrassing story at work",
       "hook_sentence": "And that was the moment I realized I had been fired live on stage.",
@@ -1055,7 +1090,7 @@ Respond ONLY with valid JSON:
       "end_timestamp": "00:53:40",
       "duration_seconds": 690,
       "virality_score": 88,
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "emotion_type": "inspiring",
       "main_topic": "career turning point",
       "hook_sentence": "One decision changed everything in my career.",
@@ -1114,15 +1149,15 @@ For shorts (2–3 min):
 - title: informative title (max 60 chars)
 - reason: why it's educational
 - virality_score: 1–10 (10 = max didactic value)
-- theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: REQUIRED (use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 
 For long cuts:
 - start, end, duration_min, title_suggestion, reason
-- theme_category: REQUIRED (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR)
+- theme_category: REQUIRED (use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 
 IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent or estimate.
 
-IMPORTANT: You must categorize all shorts and long cuts using ONLY these categories (BUSINESS_MONEY, PSYCHOLOGY_RELATIONSHIPS, STORIES_CURIOSITIES, CONTROVERSIES_DEBATE, COMEDY_HUMOR). Never leave blank or use other names or types.
+IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
 """ + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
@@ -1164,7 +1199,7 @@ Respond ONLY with valid JSON:
       "title": "Informative title 📚",
       "reason": "didactic value",
       "virality_score": 9,
-      "theme_category": "BUSINESS_MONEY",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "CORE IDEA",
       "suggested_description": "In this short cut we walk through the core idea of portfolio allocation in under three minutes. I explain why diversification matters, where most investors get it wrong, and a simple rule you can apply to your own setup today. Save it if you want to come back later.",
@@ -1178,7 +1213,7 @@ Respond ONLY with valid JSON:
       "duration_min": 18,
       "title_suggestion": "Informative title 📚",
       "reason": "didactic value",
-      "theme_category": "STORIES_CURIOSITIES",
+      "theme_category": "<UM_DOS_CODIGOS_PERMITIDOS>",
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "KEY LESSON",
       "suggested_description": "Full chapter on how to structure your investment portfolio for long-term growth. We cover the basics of asset allocation, the role of risk tolerance, a practical example with real numbers, and the mistakes that cost most investors 10+ years of compounding. Practical and friendly.",
@@ -1246,11 +1281,14 @@ def _validate_minimum_items(
     enforce_minimum: bool = True,
     allowed_theme_categories: list[str] | None = None,
     brand_only: bool = False,
+    min_candidates: int = 1,
+    min_longs: int = 1,
 ) -> None:
     """
     Garante mínimos para prompts virais.
     Se não cumprir, levanta erro para o caller retentar.
     brand_only: quando True, não exige theme_category (conteúdo é de uma única marca).
+    min_candidates/min_longs: limites mínimos esperados (injetados por analyze_chunks_in_one_request).
     """
     pv = (prompt_version or "viral").strip().lower()
     candidate_shorts = payload.get("candidate_shorts")
@@ -1267,11 +1305,9 @@ def _validate_minimum_items(
         if not isinstance(candidate_shorts, list):
             raise ValueError("Resposta inválida: candidate_shorts ausente ou não é lista.")
 
-        min_candidates = 30
-        min_longs = 10
         if len(candidate_shorts) < min_candidates:
             msg = (
-                f"Resposta abaixo do mínimo para viral: "
+                f"Resposta abaixo do mínimo esperado: "
                 f"candidate_shorts={len(candidate_shorts)} < {min_candidates}."
             )
             if enforce_minimum:
@@ -1279,7 +1315,7 @@ def _validate_minimum_items(
             logger.warning("[FLUXO/Grok] %s Seguindo com resposta parcial.", msg)
         if len(final_long_cuts) < min_longs:
             msg = (
-                f"Resposta abaixo do mínimo para viral: "
+                f"Resposta abaixo do mínimo esperado: "
                 f"final_long_cuts={len(final_long_cuts)} < {min_longs}."
             )
             if enforce_minimum:
@@ -1516,28 +1552,79 @@ def _execute_grok_chat_completion(
     return response
 
 
+def _build_llm_client(light: bool = False) -> tuple:
+    """
+    Constrói (OpenAI client, model_name, provider) a partir de variáveis de ambiente.
+
+    Precedência:
+      API key : LLM_API_KEY > XAI_API_KEY (deprecated, emite warning)
+      Model   : LLM_MODEL_LIGHT (se light=True) ou LLM_MODEL > GROK_MODEL (deprecated)
+      Base URL: LLM_BASE_URL > padrão do LLM_PROVIDER
+    """
+    from openai import OpenAI
+
+    provider = (os.getenv("LLM_PROVIDER") or "xai").strip().lower()
+
+    # API key
+    api_key = (os.getenv("LLM_API_KEY") or "").strip()
+    if not api_key:
+        api_key = (os.getenv("XAI_API_KEY") or "").strip()
+        if api_key:
+            logger.warning(
+                "[LLM] XAI_API_KEY deprecated; migrar para LLM_API_KEY no .env"
+            )
+    if not api_key:
+        raise ValueError("LLM_API_KEY não configurada")
+
+    # Model
+    if light:
+        model = (os.getenv("LLM_MODEL_LIGHT") or "").strip()
+    else:
+        model = (os.getenv("LLM_MODEL") or "").strip()
+    if not model:
+        model = (os.getenv("GROK_MODEL") or "").strip()
+        if model:
+            logger.warning(
+                "[LLM] GROK_MODEL deprecated; migrar para LLM_MODEL/LLM_MODEL_LIGHT no .env"
+            )
+    if not model:
+        model = "grok-4-1-fast"
+
+    # Base URL
+    base_url = (os.getenv("LLM_BASE_URL") or "").strip()
+    if not base_url:
+        base_url = LLM_PROVIDER_DEFAULTS.get(provider, LLM_PROVIDER_DEFAULTS["xai"])
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    return client, model, provider
+
+
 def call_grok_chat(
     system: str,
     user: str,
     api_key: str | None = None,
     *,
     operation: str = "chat",
+    light: bool = False,
 ) -> str:
-    """Chama Grok API e retorna o conteúdo da resposta."""
-    import os
+    """Chama API LLM (OpenAI-compatible) e retorna o conteúdo da resposta."""
+    client, model_name, provider = _build_llm_client(light=light)
 
-    from openai import OpenAI
+    # api_key explícito (legado) substitui a key resolvida pelo builder
+    if api_key:
+        from openai import OpenAI as _OpenAI
+        base_url = (os.getenv("LLM_BASE_URL") or "").strip() or LLM_PROVIDER_DEFAULTS.get(
+            (os.getenv("LLM_PROVIDER") or "xai").strip().lower(),
+            LLM_PROVIDER_DEFAULTS["xai"],
+        )
+        client = _OpenAI(api_key=api_key, base_url=base_url)
 
-    key = api_key or os.getenv("XAI_API_KEY")
-    if not key:
-        raise ValueError("XAI_API_KEY não configurada")
+    logger.info("[LLM] provider=%s model=%s operation=%s", provider, model_name, operation)
 
-    client = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    model_name = os.getenv("GROK_MODEL", "grok-4-1-fast-reasoning")
 
     # Força JSON object na resposta quando suportado pela API.
     try:
@@ -1550,7 +1637,7 @@ def call_grok_chat(
         )
     except Exception as e:
         logger.warning(
-            "[FLUXO/Grok] response_format=json_object não suportado (%s). Tentando sem response_format.",
+            "[LLM] response_format=json_object não suportado (%s). Tentando sem response_format.",
             e,
         )
         resp = _execute_grok_chat_completion(
@@ -1559,6 +1646,16 @@ def call_grok_chat(
             messages=messages,
             operation=operation,
         )
+
+    # Detecta redirect de modelo pelo servidor
+    actual_model = (getattr(resp, "model", None) or "").strip()
+    if actual_model and actual_model != model_name:
+        logger.warning(
+            "[LLM] redirect detectado: solicitado=%s usado=%s — verificar configuração do provider",
+            model_name,
+            actual_model,
+        )
+
     return resp.choices[0].message.content or ""
 
 
@@ -1693,7 +1790,44 @@ def analyze_chunks_in_one_request(
     user = template.format(
         context_block=context_block, chunks_block=chunks_block
     )
-    logger.info("[FLUXO/Grok] Enviando requisição para Grok API...")
+
+    # Limites configuráveis via env (interpolados no prompt no momento da chamada)
+    llm_max_shorts = max(1, int(os.getenv("LLM_MAX_SHORTS", "10")))
+    llm_max_longs = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
+    if is_educational:
+        if lang == "en":
+            limit_block = (
+                f"\n\n---\nFINAL LIMIT INSTRUCTION (overrides all previous instructions):\n"
+                f"- ranked_shorts: return EXACTLY {llm_max_shorts} items.\n"
+                f"- final_long_cuts: return EXACTLY {llm_max_longs} items."
+            )
+        else:
+            limit_block = (
+                f"\n\n---\nINSTRUÇÃO FINAL DE LIMITE (prevalece sobre qualquer instrução anterior):\n"
+                f"- ranked_shorts: retorne EXATAMENTE {llm_max_shorts} itens.\n"
+                f"- final_long_cuts: retorne EXATAMENTE {llm_max_longs} itens."
+            )
+    else:
+        if lang == "en":
+            limit_block = (
+                f"\n\n---\nFINAL LIMIT INSTRUCTION (overrides all previous instructions):\n"
+                f"- candidate_shorts: return EXACTLY {llm_max_shorts} items.\n"
+                f"- final_long_cuts: return EXACTLY {llm_max_longs} items.\n"
+                f"- ranked_shorts: ALWAYS return [] (legacy field — do not populate)."
+            )
+        else:
+            limit_block = (
+                f"\n\n---\nINSTRUÇÃO FINAL DE LIMITE (prevalece sobre qualquer instrução anterior):\n"
+                f"- candidate_shorts: retorne EXATAMENTE {llm_max_shorts} itens.\n"
+                f"- final_long_cuts: retorne EXATAMENTE {llm_max_longs} itens.\n"
+                f"- ranked_shorts: SEMPRE retorne [] (campo legado — não preencher)."
+            )
+    user = user + limit_block
+
+    logger.info(
+        "[FLUXO/Grok] Enviando requisição (max_shorts=%d max_longs=%d)...",
+        llm_max_shorts, llm_max_longs,
+    )
     content = call_grok_chat(
         system_prompt,
         user,
@@ -1710,6 +1844,8 @@ def analyze_chunks_in_one_request(
         enforce_minimum=enforce_minimum,
         allowed_theme_categories=allowed_theme_categories,
         brand_only=brand_only,
+        min_candidates=max(1, llm_max_shorts // 2),
+        min_longs=max(1, llm_max_longs // 2),
     )
     from apps.auto_cuts.services.metadata_sanitizer import sanitize_payload
     sanitize_payload(parsed)
@@ -1822,6 +1958,7 @@ Retorne JSON com: virality_score (1-10), title (SEMPRE com 1-3 emojis), thumbnai
         user,
         api_key,
         operation=GROK_OPERATION_READY_CUT_METADATA,
+        light=True,
     )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
@@ -1864,6 +2001,7 @@ def analyze_ready_cuts_batch_titles_from_transcripts(
         user,
         api_key,
         operation=GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS,
+        light=True,
     )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
@@ -1898,6 +2036,7 @@ def analyze_ready_cuts_batch_titles_from_job_name(
         user,
         api_key,
         operation=GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME,
+        light=True,
     )
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):

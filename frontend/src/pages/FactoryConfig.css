@@ -1,0 +1,158 @@
+.factory-config {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.factory-config h1 {
+  margin-top: 0;
+}
+
+.factory-config .panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 24px;
+}
+
+.factory-config .form-hint {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.factory-config .form-error {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 12px 0;
+}
+
+.factory-config .form-info {
+  background: #dcfce7;
+  color: #166534;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 12px 0;
+}
+
+.factory-config .form-group {
+  margin-bottom: 12px;
+}
+
+.factory-config .form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.factory-config .form-group select,
+.factory-config .form-group input {
+  width: 100%;
+  max-width: 420px;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.category-create {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  align-items: stretch;
+}
+
+.category-create input {
+  flex: 1;
+  max-width: 360px;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.category-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.category-table th,
+.category-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+
+.category-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  font-size: 13px;
+  color: #374151;
+}
+
+.category-table tr.inactive td {
+  color: #9ca3af;
+}
+
+.category-table code {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.muted {
+  color: #9ca3af;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #2563eb;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+.btn-danger {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-danger:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.inline-edit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.inline-edit input {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  min-width: 200px;
+}
+
+.factory-config h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.factory-config h3 {
+  margin-top: 24px;
+  font-size: 15px;
+  color: #6b7280;
+}

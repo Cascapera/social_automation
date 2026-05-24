@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     Brand,
     BrandAsset,
+    BrandCategory,
     BrandSocialAccount,
     BrandYouTubeCredential,
     Factory,
@@ -81,6 +82,14 @@ class BrandAdmin(admin.ModelAdmin):
     @admin.display(description="ID")
     def brand_id_display(self, obj):
         return f"brand_{obj.id}" if obj.id else "-"
+
+@admin.register(BrandCategory)
+class BrandCategoryAdmin(admin.ModelAdmin):
+    list_display = ("factory", "code", "label", "is_active", "updated_at")
+    list_filter = ("factory", "is_active")
+    search_fields = ("code", "label")
+    readonly_fields = ("code", "created_at", "updated_at")
+
 
 @admin.register(BrandAsset)
 class BrandAssetAdmin(admin.ModelAdmin):

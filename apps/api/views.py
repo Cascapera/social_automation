@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.utils.text import slugify
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -24,6 +25,7 @@ from apps.auto_cuts.tasks import analyze_auto_cuts_task, finalizar_auto_cut_task
 from apps.brands.models import (
     Brand,
     BrandAsset,
+    BrandCategory,
     BrandSocialAccount,
     BrandYouTubeCredential,
     Factory,
@@ -43,6 +45,7 @@ from apps.jobs.services.job_actions import delete_job as do_delete_job
 from apps.jobs.services.subtitles import align_edited_to_original_words
 from apps.jobs.tasks import burn_subtitles_task, generate_subtitles_task, process_job
 from apps.mediahub.models import SourceVideo
+from apps.multiple_creator.models import MultipleCreatorJob
 from apps.social.services.youtube_description import build_youtube_description
 
 from .pagination import StandardResultsSetPagination
@@ -50,6 +53,7 @@ from .serializers import (
     AutoCutAnalysisSerializer,
     AutoCutCorteSerializer,
     BrandAssetSerializer,
+    BrandCategorySerializer,
     BrandSerializer,
     BrandSocialAccountSerializer,
     BrandYouTubeCredentialSerializer,
@@ -58,6 +62,7 @@ from .serializers import (
     FactoryPostingScheduleSerializer,
     FactorySerializer,
     JobSerializer,
+    MultipleCreatorJobSerializer,
     PostedVideoLogSerializer,
     ScheduledPostSerializer,
     SearchChannelSerializer,
@@ -321,6 +326,61 @@ def _resolve_search_channel(channel: SearchChannel) -> None:
             channel.channel_title = (info.get("title") or "")[:200]
         channel.last_checked_at = timezone.now()
         channel.save(update_fields=["youtube_channel_id", "channel_title", "last_checked_at", "updated_at"])
+
+
+class BrandCategoryViewSet(viewsets.ModelViewSet):
+    """
+    CRUD de categorias temáticas por factory.
+    - DELETE é soft-delete (is_active=False). Bloqueia se alguma Brand ainda usar o code.
+    - Por padrão lista só categorias ativas. Use ?include_inactive=1 para listar todas.
+    - code é imutável; label é editável.
+    """
+    queryset = BrandCategory.objects.all()
+    serializer_class = BrandCategorySerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        factory = self.request.query_params.get("factory")
+        if factory:
+            qs = qs.filter(factory_id=factory)
+        include_inactive = (self.request.query_params.get("include_inactive") or "").strip() in ("1", "true", "True")
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs.order_by("factory_id", "label")
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        brands_using = Brand.objects.filter(
+            factory_id=instance.factory_id,
+            theme_category=instance.code,
+        ).values_list("id", "name")
+        brands_list = list(brands_using)
+        if brands_list:
+            names = ", ".join(name for _, name in brands_list)
+            return Response(
+                {
+                    "error": (
+                        "Não é possível excluir: a categoria está em uso por "
+                        f"{len(brands_list)} brand(s): {names}. "
+                        "Troque a categoria dessas brands antes de excluir."
+                    ),
+                    "in_use_by_brand_ids": [bid for bid, _ in brands_list],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        instance = self.get_object()
+        if instance.is_active:
+            return Response(self.get_serializer(instance).data)
+        instance.is_active = True
+        instance.save(update_fields=["is_active", "updated_at"])
+        return Response(self.get_serializer(instance).data)
 
 
 class BrandViewSet(viewsets.ModelViewSet):
@@ -1103,12 +1163,15 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
     )
     serializer_class = VideoInventoryItemSerializer
 
+    AWAITING_STATUSES = ("AVAILABLE", "SCHEDULED", "POSTING", "FAILED")
+
     def get_queryset(self):
         qs = super().get_queryset()
         factory = self.request.query_params.get("factory")
         brand = self.request.query_params.get("brand")
         status_filter = self.request.query_params.get("status")
         video_type = self.request.query_params.get("video_type")
+        bucket = (self.request.query_params.get("bucket") or "").strip().lower()
         if factory:
             qs = qs.filter(factory_id=factory)
         if brand:
@@ -1117,6 +1180,10 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(status=status_filter)
         if video_type in ("SHORT", "LONG"):
             qs = qs.filter(video_type=video_type)
+        if bucket == "awaiting":
+            qs = qs.filter(status__in=self.AWAITING_STATUSES)
+        elif bucket == "posted":
+            qs = qs.filter(status="POSTED")
         return qs.order_by("-created_at")
 
     @action(detail=True, methods=["post"], url_path="remove-awaiting")
@@ -1332,11 +1399,14 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 {"error": "Nenhuma mídia disponível para download."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        brand = getattr(inventory, "brand", None)
+        brand_slug = slugify(getattr(brand, "slug", "") or getattr(brand, "name", "")) or "brand"
+        file_base_name = f"{brand_slug}-{inventory.id}"
         safe_title = "".join(c for c in (inventory.title or f"video_{inventory.id}") if c not in r'\/:*?"<>|').strip() or f"video_{inventory.id}"
         # Descrição igual à usada na postagem (referência do vídeo original + texto extra da brand)
         full_description = build_youtube_description(
             corte=corte,
-            brand=getattr(inventory, "brand", None),
+            brand=brand,
             title=inventory.title,
             description_override=inventory.description,
         )
@@ -1369,7 +1439,7 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 except Exception:
                     pass
         zip_buffer.seek(0)
-        filename = f"{safe_title}_midias.zip"
+        filename = f"{file_base_name}.zip"
         response = FileResponse(zip_buffer, as_attachment=True, filename=filename)
         response["Content-Type"] = "application/zip"
         return response
@@ -1435,7 +1505,7 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
             inventory.save(update_fields=["status", "posted_at", "last_error", "updated_at"])
             factory = inventory.factory
             brand = inventory.brand
-            if factory and brand and not PostedVideoLog.objects.filter(
+            if brand and not PostedVideoLog.objects.filter(
                 inventory_item=inventory,
                 external_platform="MANUAL",
                 external_video_id="manual",
@@ -2323,3 +2393,129 @@ class FactoryYoutubeVideosView(APIView):
                 "scope": payload.get("scope") or {},
             }
         )
+
+
+class MultipleCreatorViewSet(viewsets.GenericViewSet):
+    """Multiple-Creator: cria job + N BrandExecution e orquestra pipeline.
+
+    Fase 4 entregou create+retrieve. Fase 5 ligou a transcribe_task. Fase 6
+    completa o ciclo: transcribe -> fanout -> N AutoCutAnalysis filhas. Esta
+    classe agora tambem expoe retry granular por brand.
+    """
+
+    queryset = MultipleCreatorJob.objects.all().prefetch_related("brand_executions")
+    serializer_class = MultipleCreatorJobSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    pagination_class = StandardResultsSetPagination
+
+    def create(self, request, *args, **kwargs):
+        from apps.multiple_creator.tasks import multiple_creator_transcribe_task
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        job = serializer.save()
+        multiple_creator_transcribe_task.delay(job.id)
+        out = self.get_serializer(job)
+        return Response(out.data, status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request, *args, **kwargs):
+        job = self.get_object()
+        return Response(self.get_serializer(job).data)
+
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="retry")
+    def retry_brand(self, request, pk=None):
+        """Retry granular: re-roda uma brand especifica reaproveitando a transcricao."""
+        from apps.multiple_creator.models import MultipleCreatorBrandExecution
+        from apps.multiple_creator.tasks import _dispatch_brand_execution
+
+        job = self.get_object()
+        if not (job.transcript_segments or []):
+            return Response(
+                {"detail": "Job sem transcricao concluida; nada para retry."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        brand_id = request.query_params.get("brand_id") or request.data.get("brand_id")
+        if not brand_id:
+            return Response(
+                {"detail": "brand_id obrigatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            brand_id = int(brand_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "brand_id invalido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            execution = MultipleCreatorBrandExecution.objects.select_for_update().get(
+                job=job, brand_id=brand_id
+            )
+        except MultipleCreatorBrandExecution.DoesNotExist:
+            return Response(
+                {"detail": "Brand nao pertence a este job."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if execution.status in ("PENDING", "ANALYZING", "FINALIZING"):
+            return Response(
+                {"detail": f"Execucao em andamento (status={execution.status}); aguarde."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        execution.status = "PENDING"
+        execution.error = ""
+        execution.finished_at = None
+        execution.started_at = None
+        execution.auto_cut_analysis = None
+        execution.save(
+            update_fields=[
+                "status",
+                "error",
+                "finished_at",
+                "started_at",
+                "auto_cut_analysis",
+                "updated_at",
+            ]
+        )
+        if job.status in ("DONE", "PARTIAL", "ERROR"):
+            job.status = "RUNNING_BRANDS"
+            job.progress_message = f"Retry brand={brand_id}."
+            job.save(update_fields=["status", "progress_message", "updated_at"])
+
+        _dispatch_brand_execution(job, execution)
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel_job(self, request, pk=None):
+        """Cancela um job que ainda não terminou."""
+        from apps.multiple_creator.models import MultipleCreatorBrandExecution
+
+        job = self.get_object()
+        if job.status in ("DONE", "PARTIAL", "ERROR"):
+            return Response(
+                {"detail": f"Job já está em estado terminal ({job.status})."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        MultipleCreatorBrandExecution.objects.filter(job=job, status="PENDING").update(
+            status="ERROR", error="Cancelado pelo usuário."
+        )
+        job.status = "ERROR"
+        job.error = "Cancelado pelo usuário."
+        job.save(update_fields=["status", "error", "updated_at"])
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        """Exclui o job e todos os dados relacionados."""
+        job = self.get_object()
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -611,6 +611,53 @@ class UploadPostReconciliationTests(TestCase):
         mock_up.assert_not_called()
         mock_native.assert_not_called()
 
+    @patch("apps.jobs.services.factory_scheduler._compute_slot_jitter_seconds", return_value=0)
+    @patch("apps.social.publishers.upload_post.publish_to_upload_post")
+    def test_upload_post_provider_busy_retries_once_then_replaces_slot_and_keeps_video_available(
+        self,
+        mock_up: MagicMock,
+        _mock_jitter: MagicMock,
+    ):
+        for index, status_code in enumerate((499, 504), start=1):
+            with self.subTest(status_code=status_code):
+                mock_up.reset_mock()
+                current_item = self._create_short_inventory_item(f"provider-busy-primary-{status_code}")
+                replacement_item = self._create_short_inventory_item(f"provider-busy-replacement-{status_code}")
+                slot_at = timezone.now() + timedelta(days=index, minutes=35)
+                post, schedule = self._factory_short_post(current_item, scheduled_at=slot_at)
+                mock_up.side_effect = [
+                    UploadPostPublishError(
+                        "Upload Post temporariamente indisponível",
+                        status_code=status_code,
+                        retriable=True,
+                        kind=UploadPostErrorKind.CONFIRMED_FAILURE,
+                    ),
+                    UploadPostPublishError(
+                        "Upload Post temporariamente indisponível",
+                        status_code=status_code,
+                        retriable=True,
+                        kind=UploadPostErrorKind.CONFIRMED_FAILURE,
+                    ),
+                ]
+
+                with patch("apps.social.publishers.get_publisher") as mock_native:
+                    result = _run_post_to_platforms(post.id)
+
+                post.refresh_from_db()
+                schedule.refresh_from_db()
+                current_item.refresh_from_db()
+                replacement_item.refresh_from_db()
+                scheduled_replacement = VideoInventoryItem.objects.get(pk=schedule.inventory_item_id)
+
+                self.assertEqual(mock_up.call_count, 2)
+                self.assertEqual(result.get("skipped"), "short_slot_replaced")
+                self.assertEqual(post.status, "FAILED")
+                self.assertEqual(current_item.status, "AVAILABLE")
+                self.assertIn("erro temporário do provedor", current_item.last_error.lower())
+                self.assertNotEqual(schedule.inventory_item_id, current_item.id)
+                self.assertEqual(scheduled_replacement.status, "SCHEDULED")
+                mock_native.assert_not_called()
+
     @patch("apps.social.services.upload_post_reconciliation.fetch_upload_post_status")
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
     def test_short_provider_not_found_with_daily_plan_item_replaces_slot_without_lock_error(

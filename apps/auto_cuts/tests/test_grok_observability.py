@@ -109,7 +109,7 @@ class GrokCostObservabilityTests(SimpleTestCase):
                 },
             )
 
-        model_name = "grok-4-1-fast-reasoning"
+        model_name = "grok-4-1-fast"
         self.assertEqual(
             requests.children[
                 self._labels_key(model=model_name, operation=GROK_OPERATION_ANALYZE_CHUNKS)
@@ -128,9 +128,12 @@ class GrokCostObservabilityTests(SimpleTestCase):
             duration.children[self._labels_key(model=model_name)].observations,
             [1234.5],
         )
+        # grok-4-1-fast: uncached_input=1000 tokens × $0.0002/1k = $0.0002
+        #                cached_input=500 tokens × $0.00005/1k  = $0.000025
+        #                output=500 tokens × $0.0004/1k          = $0.0002
         self.assertAlmostEqual(
             cost.children[self._labels_key(model=model_name)].incs[0],
-            0.000475,
+            0.000425,
         )
 
     def test_grok_metrics_use_low_cardinality_labels(self):

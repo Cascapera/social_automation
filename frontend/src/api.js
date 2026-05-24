@@ -151,8 +151,50 @@ export async function getBrands(factoryId = null) {
   return apiRequest(qs ? `/brands/?${qs}` : '/brands/')
 }
 
+export async function getBrandsAllPages(factoryId = null) {
+  return fetchAllListPages((page, pageSize) => {
+    const params = new URLSearchParams()
+    if (factoryId) params.append('factory', factoryId)
+    params.append('page', String(page))
+    params.append('page_size', String(pageSize))
+    return `/brands/?${params.toString()}`
+  })
+}
+
 export async function getFactories() {
   return apiRequest('/factories/')
+}
+
+export async function getBrandCategories(factoryId, { includeInactive = false } = {}) {
+  const params = new URLSearchParams()
+  if (factoryId) params.append('factory', String(factoryId))
+  if (includeInactive) params.append('include_inactive', '1')
+  params.append('page_size', '200')
+  const qs = params.toString()
+  const data = await apiRequest(qs ? `/brand-categories/?${qs}` : '/brand-categories/')
+  return Array.isArray(data) ? data : (data?.results || [])
+}
+
+export async function createBrandCategory(factoryId, label) {
+  return apiRequest('/brand-categories/', {
+    method: 'POST',
+    body: JSON.stringify({ factory: Number(factoryId), label }),
+  })
+}
+
+export async function updateBrandCategory(id, payload) {
+  return apiRequest(`/brand-categories/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload || {}),
+  })
+}
+
+export async function deleteBrandCategory(id) {
+  return apiRequest(`/brand-categories/${id}/`, { method: 'DELETE' })
+}
+
+export async function reactivateBrandCategory(id) {
+  return apiRequest(`/brand-categories/${id}/reactivate/`, { method: 'POST' })
 }
 
 /**
@@ -298,6 +340,7 @@ export async function getVideoInventory({
   brandId = null,
   status = null,
   videoType = null,
+  bucket = null,
   page = 1,
   pageSize = 25,
 } = {}) {
@@ -306,10 +349,10 @@ export async function getVideoInventory({
   if (brandId) params.append('brand', brandId)
   if (status) params.append('status', status)
   if (videoType) params.append('video_type', videoType)
+  if (bucket) params.append('bucket', bucket)
   params.append('page', String(page))
   params.append('page_size', String(pageSize))
-  const qs = params.toString()
-  const data = await apiRequest(qs ? `/video-inventory/?${qs}` : `/video-inventory/?${params.toString()}`)
+  const data = await apiRequest(`/video-inventory/?${params.toString()}`)
   return normalizeListResponse(data)
 }
 
@@ -339,7 +382,7 @@ export async function downloadInventoryMedia(id, title = '') {
   const blob = await res.blob()
   const disposition = res.headers.get('Content-Disposition')
   let filename = (title || `video_${id}`).replace(/[/\\:*?"<>|]/g, '').trim() || `video_${id}`
-  if (!filename.toLowerCase().endsWith('.zip')) filename = `${filename}_midias.zip`
+  if (!filename.toLowerCase().endsWith('.zip')) filename = `${filename}.zip`
   if (disposition) {
     const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i) || disposition.match(/filename=["']?([^"';]+)["']?/i)
     if (match) filename = match[1].trim()
@@ -935,6 +978,62 @@ export async function createAutoCutAnalysis({
     body: formData,
   })
   return jsonFromMultipartFetch(res)
+}
+
+export async function createMultipleCreator({
+  file,
+  sourceId,
+  youtubeUrl,
+  brandIds,
+  name,
+  assunto,
+  convidados,
+  promptVersion,
+  shortsTarget,
+  longsTarget,
+  verticalMode = 'zoom_crop',
+}) {
+  const formData = new FormData()
+  if (file) formData.append('file', file)
+  if (sourceId) formData.append('source', sourceId)
+  if (youtubeUrl) formData.append('youtube_url', youtubeUrl)
+  ;(brandIds || []).forEach((id) => formData.append('brand_ids', String(id)))
+  formData.append('vertical_mode', verticalMode || 'zoom_crop')
+  if (name) formData.append('name', name)
+  if (assunto) formData.append('assunto', assunto)
+  if (convidados) formData.append('convidados', convidados)
+  if (promptVersion) formData.append('prompt_version', promptVersion)
+  if (shortsTarget != null) formData.append('shorts_target', String(shortsTarget))
+  if (longsTarget != null) formData.append('longs_target', String(longsTarget))
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/multiple-creator/`, {
+    method: 'POST',
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    body: formData,
+  })
+  return jsonFromMultipartFetch(res)
+}
+
+export async function listMultipleCreatorJobs({ page = 1, pageSize = 10 } = {}) {
+  const params = new URLSearchParams()
+  params.append('page', String(page))
+  params.append('page_size', String(pageSize))
+  const data = await apiRequest(`/multiple-creator/?${params.toString()}`)
+  return normalizeListResponse(data)
+}
+
+export async function retryMultipleCreatorBrand(jobId, brandId) {
+  return apiRequest(`/multiple-creator/${jobId}/retry/?brand_id=${brandId}`, {
+    method: 'POST',
+  })
+}
+
+export async function cancelMultipleCreatorJob(jobId) {
+  return apiRequest(`/multiple-creator/${jobId}/cancel/`, { method: 'POST' })
+}
+
+export async function deleteMultipleCreatorJob(jobId) {
+  return apiRequest(`/multiple-creator/${jobId}/`, { method: 'DELETE' })
 }
 
 export async function deleteAutoCutSuggestion(id) {

@@ -13,6 +13,7 @@ from apps.auto_cuts.models import (
 from apps.brands.models import (
     Brand,
     BrandAsset,
+    BrandCategory,
     BrandSocialAccount,
     BrandYouTubeCredential,
     Factory,
@@ -29,6 +30,10 @@ from apps.jobs.models import (
     VideoInventoryItem,
 )
 from apps.mediahub.models import SourceVideo
+from apps.multiple_creator.models import (
+    MultipleCreatorBrandExecution,
+    MultipleCreatorJob,
+)
 from apps.social.services.secret_crypto import encrypt_secret, is_secret_configured
 
 User = get_user_model()
@@ -97,6 +102,75 @@ class SearchChannelSerializer(serializers.ModelSerializer):
         if getattr(obj, "distribute_by_brands", False):
             return "Distribuir pelas Brands"
         return getattr(obj.target_brand, "name", None) if obj.target_brand else "Por tema"
+
+
+class BrandCategorySerializer(serializers.ModelSerializer):
+    in_use_by_brand_ids = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = BrandCategory
+        fields = [
+            "id",
+            "factory",
+            "code",
+            "label",
+            "is_active",
+            "in_use_by_brand_ids",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["code", "is_active", "created_at", "updated_at"]
+
+    def get_in_use_by_brand_ids(self, obj):
+        return list(
+            Brand.objects.filter(factory_id=obj.factory_id, theme_category=obj.code)
+            .values_list("id", flat=True)
+        )
+
+    def _generate_code(self, factory, label: str) -> str:
+        base = slugify(label or "").replace("-", "_").upper()
+        if not base:
+            raise serializers.ValidationError({"label": "Rótulo inválido para gerar código."})
+        candidate = base[:40]
+        i = 2
+        while BrandCategory.objects.filter(factory=factory, code=candidate).exists():
+            suffix = f"_{i}"
+            candidate = (base[: 40 - len(suffix)] + suffix)
+            i += 1
+        return candidate
+
+    def validate(self, attrs):
+        factory = attrs.get("factory") or getattr(self.instance, "factory", None)
+        label = (attrs.get("label") or "").strip()
+        if self.instance is None:
+            if not factory:
+                raise serializers.ValidationError({"factory": "Factory é obrigatória."})
+            if not label:
+                raise serializers.ValidationError({"label": "Rótulo é obrigatório."})
+        if label and factory:
+            qs = BrandCategory.objects.filter(factory=factory, label=label)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"label": "Já existe uma categoria com esse nome nesta factory."})
+        return attrs
+
+    def create(self, validated_data):
+        factory = validated_data["factory"]
+        label = validated_data["label"].strip()
+        code = self._generate_code(factory, label)
+        validated_data["label"] = label
+        validated_data["code"] = code
+        validated_data["is_active"] = True
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # code e is_active não são editáveis aqui; is_active muda via action dedicada.
+        validated_data.pop("code", None)
+        validated_data.pop("is_active", None)
+        if "label" in validated_data:
+            validated_data["label"] = validated_data["label"].strip()
+        return super().update(instance, validated_data)
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -205,6 +279,18 @@ class BrandSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"min_gap_minutes": "Não pode ser maior que max_gap_minutes."}
             )
+
+        # theme_category: code precisa existir e estar ativo na factory da brand.
+        code = (attrs.get("theme_category") or "").strip()
+        factory = attrs.get("factory") or getattr(self.instance, "factory", None)
+        if code and factory:
+            exists_active = BrandCategory.objects.filter(
+                factory=factory, code=code, is_active=True
+            ).exists()
+            if not exists_active:
+                raise serializers.ValidationError(
+                    {"theme_category": "Categoria inválida ou inativa para esta factory."}
+                )
         return attrs
 
 
@@ -830,3 +916,132 @@ class PostedVideoLogSerializer(serializers.ModelSerializer):
             "metadata_snapshot",
             "created_at",
         ]
+
+
+class MultipleCreatorBrandExecutionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MultipleCreatorBrandExecution
+        fields = [
+            "id",
+            "brand",
+            "status",
+            "auto_cut_analysis",
+            "error",
+            "started_at",
+            "finished_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class MultipleCreatorJobSerializer(serializers.ModelSerializer):
+    brand_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        write_only=True,
+        allow_empty=False,
+        min_length=1,
+        help_text="Lista de brand IDs para gerar cortes em paralelo.",
+    )
+    brand_executions = MultipleCreatorBrandExecutionSerializer(many=True, read_only=True)
+    file = serializers.FileField(required=False, allow_null=True, write_only=True)
+    file_url = serializers.SerializerMethodField(read_only=True)
+    source = serializers.PrimaryKeyRelatedField(
+        queryset=SourceVideo.objects.all(), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = MultipleCreatorJob
+        fields = [
+            "id",
+            "name",
+            "source_kind",
+            "source",
+            "file",
+            "file_url",
+            "youtube_url",
+            "assunto",
+            "convidados",
+            "prompt_version",
+            "vertical_mode",
+            "shorts_target",
+            "longs_target",
+            "thumbnail_font",
+            "thumbnail_band_color",
+            "thumbnail_text_color",
+            "thumbnail_stroke_color",
+            "status",
+            "progress",
+            "progress_message",
+            "error",
+            "correlation_id",
+            "created_at",
+            "updated_at",
+            "brand_ids",
+            "brand_executions",
+        ]
+        read_only_fields = [
+            "id",
+            "source_kind",
+            "file_url",
+            "status",
+            "progress",
+            "progress_message",
+            "error",
+            "correlation_id",
+            "created_at",
+            "updated_at",
+            "brand_executions",
+        ]
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        try:
+            return obj.file.url
+        except ValueError:
+            return None
+
+    def validate_brand_ids(self, value):
+        unique = list(dict.fromkeys(value))
+        if not unique:
+            raise serializers.ValidationError("Selecione ao menos uma brand.")
+        existing = set(Brand.objects.filter(id__in=unique).values_list("id", flat=True))
+        missing = [bid for bid in unique if bid not in existing]
+        if missing:
+            raise serializers.ValidationError(
+                f"Brand(s) inexistente(s): {', '.join(str(m) for m in missing)}"
+            )
+        return unique
+
+    def validate(self, attrs):
+        file_obj = attrs.get("file")
+        source = attrs.get("source")
+        youtube_url = (attrs.get("youtube_url") or "").strip()
+        provided = sum(1 for x in (file_obj, source, youtube_url) if x)
+        if provided == 0:
+            raise serializers.ValidationError(
+                "Informe exatamente uma origem: arquivo, source ou URL do YouTube."
+            )
+        if provided > 1:
+            raise serializers.ValidationError(
+                "Escolha apenas uma origem (arquivo, source OU URL do YouTube)."
+            )
+        if file_obj:
+            attrs["source_kind"] = "FILE"
+        elif source:
+            attrs["source_kind"] = "SOURCE"
+        else:
+            attrs["source_kind"] = "YOUTUBE"
+            attrs["youtube_url"] = youtube_url
+        return attrs
+
+    def create(self, validated_data):
+        brand_ids = validated_data.pop("brand_ids")
+        request = self.context.get("request")
+        user = request.user if request and request.user and request.user.is_authenticated else None
+        job = MultipleCreatorJob.objects.create(user=user, **validated_data)
+        MultipleCreatorBrandExecution.objects.bulk_create(
+            [MultipleCreatorBrandExecution(job=job, brand_id=bid) for bid in brand_ids]
+        )
+        return job

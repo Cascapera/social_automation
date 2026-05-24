@@ -19,17 +19,20 @@ except ImportError:  # e.g. image not rebuilt after requirements.txt change
             pass
 
     class _NoOpMetric:
+        def __init__(self, labelnames=()):
+            self._labelnames = tuple(labelnames)
+
         def labels(self, *args, **kwargs):
             return _NoOpChild()
 
         def inc(self, amount: int = 1) -> None:
             pass
 
-    def Counter(*args, **kwargs):
-        return _NoOpMetric()
+    def Counter(name, documentation="", labelnames=(), **kwargs):
+        return _NoOpMetric(labelnames)
 
-    def Histogram(*args, **kwargs):
-        return _NoOpMetric()
+    def Histogram(name, documentation="", labelnames=(), **kwargs):
+        return _NoOpMetric(labelnames)
 
 # Buckets for durations stored as milliseconds (observed values are ms).
 _DURATION_MS_BUCKETS = (
@@ -183,5 +186,27 @@ grok_request_duration_ms = Histogram(
     "grok_request_duration_ms",
     "Grok API request duration in milliseconds",
     ("model",),
+    buckets=_DURATION_MS_BUCKETS,
+)
+
+# --- Multiple-Creator (Fase 7) ---
+multiple_creator_jobs_total = Counter(
+    "multiple_creator_jobs_total",
+    "MultipleCreatorJob terminados (DONE/PARTIAL/ERROR)",
+    ("result",),
+)
+multiple_creator_brand_executions_total = Counter(
+    "multiple_creator_brand_executions_total",
+    "MultipleCreatorBrandExecution terminadas (DONE/ERROR)",
+    ("result",),
+)
+multiple_creator_duration_ms = Histogram(
+    "multiple_creator_duration_ms",
+    "Duracao total do MultipleCreatorJob (criacao -> status terminal)",
+    buckets=_DURATION_MS_BUCKETS,
+)
+multiple_creator_transcription_savings_ms = Histogram(
+    "multiple_creator_transcription_savings_ms",
+    "Tempo economizado pela transcricao unica vs. abordagem antiga: duration * (n_brands - 1)",
     buckets=_DURATION_MS_BUCKETS,
 )
