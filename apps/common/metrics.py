@@ -11,21 +11,25 @@ try:
     from prometheus_client import Counter, Histogram
 except ImportError:  # e.g. image not rebuilt after requirements.txt change
 
-    class _NoOpChild:
-        def inc(self, amount: int = 1) -> None:
-            pass
-
-        def observe(self, value: float) -> None:
-            pass
-
     class _NoOpMetric:
+        """Stand-in for Counter/Histogram covering the surface used in this codebase.
+
+        ``labels()`` returns ``self`` on purpose: a single class means the labelled and
+        unlabelled paths can never drift apart (a previous split let ``observe()`` exist
+        only on the labelled side, so ``publish_duration_ms.observe()`` raised
+        ``AttributeError`` in the very scenario this fallback exists for).
+        """
+
         def __init__(self, labelnames=()):
             self._labelnames = tuple(labelnames)
 
         def labels(self, *args, **kwargs):
-            return _NoOpChild()
+            return self
 
-        def inc(self, amount: int = 1) -> None:
+        def inc(self, amount: float = 1) -> None:
+            pass
+
+        def observe(self, value: float) -> None:
             pass
 
     def Counter(name, documentation="", labelnames=(), **kwargs):
