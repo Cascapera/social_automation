@@ -835,7 +835,9 @@ def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, extern
     post.status = "DONE"
     post.posted_at = post.posted_at or now
     post.error = ""
-    post.save(update_fields=["status", "posted_at", "error", "updated_at"])
+    # ScheduledPost não tem updated_at (ver apps/jobs/models.py:409-412) — incluí-lo aqui
+    # levantava ValueError e abortava toda a reconciliação.
+    post.save(update_fields=["status", "posted_at", "error"])
     schedule.status = "DONE"
     schedule.attempt_count = int(post.retry_count or 0)
     schedule.next_retry_at = None
@@ -3834,7 +3836,9 @@ def post_youtube_first_comment_task(self, scheduled_post_id: int, video_id: str)
 
     post.external_ids = dict(post.external_ids or {})
     post.external_ids["first_comment_posted"] = True
-    post.save(update_fields=["external_ids", "updated_at"])
+    # ScheduledPost não tem updated_at — incluí-lo aqui impedia a gravação do flag
+    # first_comment_posted, quebrando a idempotência prometida na docstring.
+    post.save(update_fields=["external_ids"])
     return {"ok": True, "post_id": scheduled_post_id, "video_id": video_id}
 
 
