@@ -1240,17 +1240,27 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 0/18 itens concluídos · 3 com código pronto aguardando PR e deploy
-           (R-01, R-02, R-05) · atualizado em 2026-08-11
+Progresso: 2/18 itens concluídos (R-02, R-05) · 1 aguardando deploy de produção (R-01)
+           atualizado em 2026-08-11
 Itens que exigem parada de produção: 0
 ```
 
-> **Nota de honestidade do contador:** R-01, R-02 e R-05 estão com código escrito,
-> testado e commitado em branch local — mas **nada foi implantado**. Pela regra deste
-> checklist ("um item só é marcado quando todas as sub-caixas estão marcadas"), eles
-> continuam como não concluídos até passarem por PR e deploy. Branches locais:
-> `fix/noop-metric-observe` (`eb58699`), `chore/coverage-gate-real` (`5b7fdf4`,
-> empilhada sobre a anterior), `ci/frontend-tests` (`aeac2bf`, a partir de `develop`).
+> **Nota de honestidade do contador:** R-02 e R-05 só alteram CI e configuração de teste —
+> para eles, merge **é** o deploy, e estão concluídos. R-01 é código de aplicação: está
+> mergeado em `develop` com CI verde, mas **ainda não foi implantado em produção**, então
+> continua em aberto até que isso aconteça e a verificação pós-deploy seja feita.
+>
+> PRs mergeados: [#25](https://github.com/Cascapera/social_automation/pull/25) (R-01),
+> [#29](https://github.com/Cascapera/social_automation/pull/29) (R-02),
+> [#27](https://github.com/Cascapera/social_automation/pull/27) (R-05),
+> [#28](https://github.com/Cascapera/social_automation/pull/28) (este documento).
+> `develop` em `3df0074`, CI verde.
+>
+> [#26](https://github.com/Cascapera/social_automation/pull/26) foi fechada sem merge: era
+> a PR original do R-02, empilhada sobre a branch do R-01, e o GitHub a fechou
+> automaticamente quando aquela branch foi apagada no merge — sem permitir reabrir nem
+> reapontar a base. Substituída pela #29, mesmo commit. **Lição para as ondas seguintes:
+> em PR empilhada, não usar `--delete-branch` no merge da base.**
 
 ### ⚠ Itens que exigem parada de produção
 
@@ -1268,11 +1278,11 @@ Itens que exigem parada de produção: 0
   - [x] Correção aplicada
   - [x] Suíte completa verde (7 erros → 0)
   - [x] Lint verde
-  - [ ] PR aberto e revisado
-  - [ ] Implantado
+  - [x] PR aberto e revisado — [#25](https://github.com/Cascapera/social_automation/pull/25), CI verde, mergeado
+  - [ ] Implantado em produção
   - [ ] Verificado em produção — `publish_duration_ms` presente em `/metrics`
-  - [x] Commitado — `eb58699` (branch `fix/noop-metric-observe`)
-  - Status: **em andamento — aguardando PR/deploy** · Notas: dos 7 erros da linha de base,
+  - [x] Commitado — `eb58699` (mergeado em `develop` via `47eb3f2`)
+  - Status: **em andamento — aguardando deploy de produção** · Notas: dos 7 erros da linha de base,
     6 eram este bug. A correção colapsou `_NoOpChild` e `_NoOpMetric` numa classe só, com
     `labels()` retornando `self` — assim os caminhos com e sem label não podem divergir de
     novo (era essa divergência, não a falta de um método, a causa raiz). Teste anti-drift
@@ -1280,16 +1290,16 @@ Itens que exigem parada de produção: 0
     era `prometheus_client` faltando no `.venv` local — dependência já declarada em
     `requirements.txt`, venv sincronizado. Suíte: **294 testes, 60s, OK**.
 
-- [ ] **R-02** · Portão de cobertura sobre o código real, com catraca
+- [x] **R-02** · Portão de cobertura sobre o código real, com catraca
       risco: baixo · 2h · produção: transparente (só CI) · PR: ~25 linhas / 2 arquivos
       pré-requisito: R-01
   - [x] Cobertura real medida e registrada aqui nas notas
   - [x] `pyproject.toml` ajustado com o piso medido
   - [x] Suíte verde com o novo portão (local)
-  - [ ] CI verde com o novo portão
-  - [ ] PR aberto e revisado
-  - [x] Commitado — `5b7fdf4` (branch `chore/coverage-gate-real`, empilhada sobre R-01)
-  - Status: **em andamento — aguardando PR** · Notas: **cobertura real medida = 40,81%**
+  - [x] CI verde com o novo portão
+  - [x] PR aberto e revisado — [#29](https://github.com/Cascapera/social_automation/pull/29), mergeado
+  - [x] Commitado — `5b7fdf4` (mergeado em `develop` via `3df0074`)
+  - Status: **concluído** · Notas: **cobertura real medida = 40,81%**
     (12.844 statements, 7.061 sem cobertura, testes/migrations omitidos). Com os arquivos
     de teste incluídos o número subia para 51% — por isso o `omit`. Portão trocado de
     "70% sobre 12 módulos (7,5% do código)" para "40,8% sobre `apps` + `social_automation`
@@ -1320,15 +1330,15 @@ Itens que exigem parada de produção: 0
   - [ ] Commitado — `<hash>`
   - Status: não iniciado · Notas:
 
-- [ ] **R-05** · Rodar os testes do frontend no CI
+- [x] **R-05** · Rodar os testes do frontend no CI
       risco: baixo · 1h · produção: transparente · PR: ~3 linhas / 1 arquivo
       pré-requisito: nenhum — pode ir a qualquer momento
   - [x] `npm test` adicionado ao job frontend
   - [x] Testes rodados localmente antes de ligar no CI — **8 passam, 0 falham**
-  - [ ] CI verde (se um teste estiver quebrado, correção em PR **separado**)
-  - [ ] PR aberto e revisado
-  - [x] Commitado — `aeac2bf` (branch `ci/frontend-tests`, a partir de `develop`)
-  - Status: **em andamento — aguardando PR** · Notas: os 8 testes
+  - [x] CI verde (se um teste estiver quebrado, correção em PR **separado**)
+  - [x] PR aberto e revisado — [#27](https://github.com/Cascapera/social_automation/pull/27), mergeado
+  - [x] Commitado — `aeac2bf` (mergeado em `develop` via `c283b53`)
+  - Status: **concluído** · Notas: os 8 testes
     (`youtubeSummaryCache`, `factoryWeeklySchedule`) passam hoje — o risco de "teste
     quebrado há meses" não se materializou. `install`, `test` e `build` viraram passos
     separados no job para que falha de teste apareça como falha de teste, não perdida no
@@ -1545,7 +1555,8 @@ Uma linha por item concluído: data · o que mudou de fato · surpresas encontra
 | --- | --- | --- | --- |
 | 2026-08-11 | **R-01** | `_NoOpChild` e `_NoOpMetric` colapsadas numa classe só (`labels()` retorna `self`); teste anti-drift em `apps/common/tests/test_metrics_fallback.py`. Suíte 288→294 testes, 7 erros→0. Commit `eb58699`. | A causa raiz não era "falta o método `observe`" e sim **duas classes paralelas que podiam divergir**. Corrigir só o método deixaria a armadilha montada para a próxima. Também: 6 dos 7 erros eram o bug; só 1 era ambiente. |
 | 2026-08-11 | **R-02** | Portão passou de 12 módulos (7,5% do código) para `apps` + `social_automation` inteiros, com `omit` de testes/migrations. Piso = 40,8% (catraca). README corrigido. Commit `5b7fdf4`. | A cobertura real (**40,81%**) é quase metade dos "70%" declarados — e `apps/auto_cuts/tasks.py`, com 2.111 linhas e 7 commits de `fix`, está em **7%**. Pior que o diagnóstico previa. |
-| 2026-08-11 | **R-05** | `npm test` no CI, com `install`/`test`/`build` em passos separados. Commit `aeac2bf`. | Nenhuma: os 8 testes passam. O risco previsto ("podem estar quebrados") não se materializou. |
+| 2026-08-11 | **R-05** | `npm test` no CI, com `install`/`test`/`build` em passos separados. Commit `aeac2bf`, PR #27. | Nenhuma: os 8 testes passam. O risco previsto ("podem estar quebrados") não se materializou. |
+| 2026-08-11 | **PRs #25–#29** | Os 4 PRs da Onda 0 abertos, CI verde, mergeados em `develop` (`3df0074`). | A PR do R-02 (#26) foi **fechada automaticamente** pelo GitHub quando a branch base (do R-01) foi apagada no merge — e não dá para reabrir nem reapontar a base de uma PR fechada. Teve que ser recriada como #29. Em PR empilhada, não usar `--delete-branch` no merge da base. |
 
 ---
 
