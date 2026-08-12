@@ -26,7 +26,8 @@ from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
 )
-from apps.social.tasks import _mark_factory_posting_verified, post_youtube_first_comment_task
+from apps.social.services.posting_state import mark_posted
+from apps.social.tasks import post_youtube_first_comment_task
 
 
 class ScheduledPostHasNoUpdatedAtTests(TestCase):
@@ -45,7 +46,7 @@ class ScheduledPostHasNoUpdatedAtTests(TestCase):
 class MarkFactoryPostingVerifiedPersistsTests(TestCase):
     """Regressão do site 1: apps/social/tasks.py:838.
 
-    `_mark_factory_posting_verified` é o passo que confirma no banco que um vídeo foi
+    `mark_posted` é o passo que confirma no banco que um vídeo foi
     publicado. É chamado pelas duas tasks de reconciliação do YouTube
     (`reconcile_youtube_schedules_task:2187` e `reconcile_youtube_full_scan_task:2430`),
     ambas dentro de um `try/except Exception` amplo — então o ValueError não aparecia
@@ -82,7 +83,7 @@ class MarkFactoryPostingVerifiedPersistsTests(TestCase):
         )
 
     def test_persists_the_whole_transition_without_raising(self):
-        _mark_factory_posting_verified(
+        mark_posted(
             self.post, platform="YTB", external_video_id="vid-regressao"
         )
 

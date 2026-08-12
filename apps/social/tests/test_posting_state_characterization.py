@@ -6,7 +6,7 @@ FactoryPostingSchedule, VideoInventoryItem e PostedVideoLog — e hoje está esc
 
   A. apps/social/tasks.py:414  _sync_factory_posting_schedule, ramo YouTube-only
   B. apps/social/tasks.py:452  _sync_factory_posting_schedule, ramo demais plataformas
-  C. apps/social/tasks.py:823  _mark_factory_posting_verified
+  C. apps/social/services/posting_state.py  mark_posted  ← extraída no R-06
   D. apps/api/views.py:1447    VideoInventoryItemViewSet.mark_posted (ação HTTP)
   E. apps/social/management/commands/fix_youtube_posted_status.py:47
 
@@ -43,11 +43,8 @@ from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
 )
-from apps.social.tasks import (
-    _mark_factory_posting_still_scheduled,
-    _mark_factory_posting_verified,
-    _sync_factory_posting_schedule,
-)
+from apps.social.services.posting_state import mark_posted, mark_still_scheduled
+from apps.social.tasks import _sync_factory_posting_schedule
 
 
 class PostingStateFixtureMixin:
@@ -278,7 +275,7 @@ class SyncFactoryPostingScheduleFailureTests(PostingStateFixtureMixin, TestCase)
 
 
 class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
-    """Cópia C — _mark_factory_posting_verified (tasks.py:823)."""
+    """Cópia C — `posting_state.mark_posted`, extraída de `tasks.py` no R-06."""
 
     def test_drives_post_to_done_and_marks_everything(self):
         _factory, _brand, item, post, schedule = self.build_chain(
@@ -287,7 +284,7 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
         post.error = "erro anterior que deve ser limpo"
         post.save(update_fields=["error"])
 
-        _mark_factory_posting_verified(
+        mark_posted(
             post, platform="YT", external_video_id="vid-abc", metadata={"checked": True}
         )
 
@@ -319,7 +316,7 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
         _factory, _brand, _item, post, _schedule = self.build_chain(post_status="DONE")
         posted_at_original = post.posted_at
 
-        _mark_factory_posting_verified(post, platform="YT", external_video_id="vid-abc")
+        mark_posted(post, platform="YT", external_video_id="vid-abc")
 
         post.refresh_from_db()
         self.assertEqual(post.posted_at, posted_at_original)
@@ -327,8 +324,8 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
     def test_is_idempotent_on_second_call(self):
         _factory, _brand, item, post, _schedule = self.build_chain(post_status="PENDING")
 
-        _mark_factory_posting_verified(post, platform="YT", external_video_id="vid-abc")
-        _mark_factory_posting_verified(post, platform="YT", external_video_id="vid-abc")
+        mark_posted(post, platform="YT", external_video_id="vid-abc")
+        mark_posted(post, platform="YT", external_video_id="vid-abc")
 
         self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 1)
 
@@ -336,7 +333,7 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
         """DIVERGÊNCIA 1 (parte 3) — C deduplica mas não valida id vazio, como A faz."""
         _factory, _brand, item, post, _schedule = self.build_chain(post_status="PENDING")
 
-        _mark_factory_posting_verified(post, platform="YT", external_video_id="")
+        mark_posted(post, platform="YT", external_video_id="")
 
         log = PostedVideoLog.objects.get(inventory_item=item)
         self.assertEqual(log.external_video_id, "")
@@ -348,53 +345,55 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
             scheduled_at=timezone.now(), platforms=["YTB"], status="PENDING"
         )
 
-        _mark_factory_posting_verified(post, platform="YT", external_video_id="vid-abc")
+        mark_posted(post, platform="YT", external_video_id="vid-abc")
 
         post.refresh_from_db()
         self.assertEqual(post.status, "PENDING")
         self.assertEqual(PostedVideoLog.objects.count(), 0)
 
-    def test_transition_is_not_atomic_today(self):
-        """D-03 — as 4 escritas não estão em transaction.atomic().
+    def test_transition_is_atomic(self):
+        """D-03 / R-06 — as 4 escritas estão em `transaction.atomic()`.
 
-        Fixa a ausência de atomicidade: se a criação do PostedVideoLog falhar, as três
-        escritas anteriores já foram persistidas. R-06 deve INVERTER esta asserção.
+        Esta asserção era o inverso até o R-06: o teste do R-03 fixava a **ausência** de
+        atomicidade e dizia, no próprio docstring, "R-06 deve INVERTER esta asserção".
+        É esta a inversão.
+
+        Se a criação do `PostedVideoLog` — a última das 4 escritas — falhar, nenhuma das
+        três anteriores pode sobreviver. O estado parcial era exatamente o que produzia
+        `ScheduledPost` em DONE com `VideoInventoryItem` ainda em SCHEDULED, a
+        inconsistência que obrigou a existir o comando `fix_youtube_posted_status`.
         """
         _factory, _brand, item, post, schedule = self.build_chain(post_status="PENDING")
+        status_inicial = (post.status, schedule.status, item.status)
 
         with self.assertRaises(RuntimeError):
-            with self.settings():
-                original_create = PostedVideoLog.objects.create
+            original_create = PostedVideoLog.objects.create
 
-                def explode(*args, **kwargs):
-                    raise RuntimeError("falha simulada no ultimo passo")
+            def explode(*args, **kwargs):
+                raise RuntimeError("falha simulada no ultimo passo")
 
-                PostedVideoLog.objects.create = explode
-                try:
-                    _mark_factory_posting_verified(
-                        post, platform="YT", external_video_id="vid-abc"
-                    )
-                finally:
-                    PostedVideoLog.objects.create = original_create
+            PostedVideoLog.objects.create = explode
+            try:
+                mark_posted(post, platform="YT", external_video_id="vid-abc")
+            finally:
+                PostedVideoLog.objects.create = original_create
 
         post.refresh_from_db()
         schedule.refresh_from_db()
         item.refresh_from_db()
 
-        # Estado parcial persistido — é exatamente a inconsistência que R-06 elimina.
-        self.assertEqual(post.status, "DONE")
-        self.assertEqual(schedule.status, "DONE")
-        self.assertEqual(item.status, "POSTED")
+        # Nada persistiu: os 3 modelos continuam como estavam antes da tentativa.
+        self.assertEqual((post.status, schedule.status, item.status), status_inicial)
         self.assertEqual(PostedVideoLog.objects.count(), 0)
 
 
 class MarkFactoryPostingStillScheduledTests(PostingStateFixtureMixin, TestCase):
-    """_mark_factory_posting_still_scheduled (tasks.py:870) — 2 modelos, sem atomic."""
+    """`posting_state.mark_still_scheduled` — 2 modelos, atômica desde o R-06."""
 
     def test_keeps_item_scheduled_with_next_check(self):
         _factory, _brand, item, post, schedule = self.build_chain(post_status="PENDING")
 
-        _mark_factory_posting_still_scheduled(post, publish_at_raw=None, note="")
+        mark_still_scheduled(post, publish_at_raw=None, note="")
 
         schedule.refresh_from_db()
         item.refresh_from_db()
@@ -410,7 +409,7 @@ class MarkFactoryPostingStillScheduledTests(PostingStateFixtureMixin, TestCase):
         _factory, _brand, _item, post, schedule = self.build_chain(post_status="PENDING")
         publish_at = timezone.now() + timedelta(hours=3)
 
-        _mark_factory_posting_still_scheduled(
+        mark_still_scheduled(
             post, publish_at_raw=publish_at.isoformat(), note="agendado"
         )
 
@@ -619,7 +618,7 @@ class PostedTransitionDivergenceTests(PostingStateFixtureMixin, TestCase):
 
         # C — verificação
         _f, _b, item_c, post_c, sched_c = self.build_chain(post_status="PENDING")
-        _mark_factory_posting_verified(post_c, platform="YT", external_video_id="vid-c")
+        mark_posted(post_c, platform="YT", external_video_id="vid-c")
 
         # E — management command
         _f, _b, item_e, _post_e, sched_e = self.build_chain(

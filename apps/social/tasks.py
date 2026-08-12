@@ -55,6 +55,7 @@ from apps.social.services.idempotency import (
     mark_idempotency_failed,
     mark_idempotency_success,
 )
+from apps.social.services.posting_state import mark_posted, mark_still_scheduled
 
 logger = logging.getLogger(__name__)
 YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
@@ -818,81 +819,6 @@ def _replace_ambiguous_short_slot(
         error=post_error,
     )
     return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
-
-
-def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, external_video_id: str, metadata: dict | None = None) -> None:
-    """
-    Mark schedule/inventory as confirmed on the platform.
-    Set ScheduledPost to DONE to leave waiting list and move to posted.
-    """
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
-        "inventory_item", "factory", "brand"
-    ).first()
-    if not schedule:
-        return
-    item = schedule.inventory_item
-    now = timezone.now()
-    post.status = "DONE"
-    post.posted_at = post.posted_at or now
-    post.error = ""
-    # ScheduledPost não tem updated_at (ver apps/jobs/models.py:409-412) — incluí-lo aqui
-    # levantava ValueError e abortava toda a reconciliação.
-    post.save(update_fields=["status", "posted_at", "error"])
-    schedule.status = "DONE"
-    schedule.attempt_count = int(post.retry_count or 0)
-    schedule.next_retry_at = None
-    schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-    item.status = "POSTED"
-    item.posted_at = post.posted_at or now
-    item.scheduled_for = post.scheduled_at
-    item.last_error = ""
-    item.attempt_count = int(post.retry_count or 0)
-    item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-    if not PostedVideoLog.objects.filter(
-        inventory_item=item,
-        external_platform=platform,
-        external_video_id=external_video_id,
-    ).exists():
-        PostedVideoLog.objects.create(
-            factory=schedule.factory,
-            brand=schedule.brand,
-            inventory_item=item,
-            external_platform=platform,
-            external_video_id=external_video_id,
-            posted_at=post.posted_at or now,
-            metadata_snapshot={
-                "scheduled_post_id": post.id,
-                "platforms": post.platforms or [],
-                "external_ids": post.external_ids or {},
-                "youtube_verify": metadata or {},
-            },
-        )
-
-
-def _mark_factory_posting_still_scheduled(post: ScheduledPost, *, publish_at_raw: str | None, note: str = "") -> None:
-    """
-    Keep internal status as scheduled on channel (not published yet), without confirming POSTED.
-    """
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
-        "inventory_item"
-    ).first()
-    if not schedule:
-        return
-    item = schedule.inventory_item
-    next_check = timezone.now() + timedelta(minutes=15)
-    publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
-    if publish_at:
-        if timezone.is_naive(publish_at):
-            publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-        # Re-check shortly after actual publish time on channel.
-        next_check = max(next_check, publish_at + timedelta(minutes=5))
-
-    schedule.status = "PLANNED"
-    schedule.next_retry_at = next_check
-    schedule.save(update_fields=["status", "next_retry_at", "updated_at"])
-    item.status = "SCHEDULED"
-    item.last_error = note or "Agendado no YouTube. Aguardando publicação no canal."
-    item.save(update_fields=["status", "last_error", "updated_at"])
 
 
 def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str) -> None:
@@ -2186,7 +2112,7 @@ def reconcile_youtube_schedules_task():
                 # Confirmed on YouTube (already published or scheduled): mark POSTED
                 # and skip re-check to save API quota.
                 confirmed += 1
-                _mark_factory_posting_verified(
+                mark_posted(
                     post,
                     platform=platform,
                     external_video_id=video_id,
@@ -2201,7 +2127,7 @@ def reconcile_youtube_schedules_task():
                 continue
             # Temporary error (auth/network/etc): keep scheduled and revalidate next cycle.
             skipped += 1
-            _mark_factory_posting_still_scheduled(
+            mark_still_scheduled(
                 post,
                 publish_at_raw=None,
                 note=f"Falha temporária na confirmação YouTube: {verify_data.get('error', 'unknown')}",
@@ -2421,7 +2347,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                 if publish_at and timezone.is_naive(publish_at):
                     publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
                 if publish_at and publish_at > timezone.now():
-                    _mark_factory_posting_still_scheduled(
+                    mark_still_scheduled(
                         post,
                         publish_at_raw=publish_at_raw,
                         note="Agendado no YouTube (full scan).",
@@ -2429,7 +2355,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                     summary["still_scheduled"] += 1
                     brand_still_scheduled += 1
                 else:
-                    _mark_factory_posting_verified(
+                    mark_posted(
                         post,
                         platform=platform,
                         external_video_id=video_id,
