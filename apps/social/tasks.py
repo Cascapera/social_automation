@@ -2495,7 +2495,12 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
             post.error = "Job sem marca"
             post.save(update_fields=["status", "error"])
             return {"error": "Job sem marca"}
-        output = post.job.output
+        # Reverse OneToOne: the attribute access itself raises when the job has no
+        # RenderOutput at all, so the guard below would never run (R-22).
+        try:
+            output = post.job.output
+        except RenderOutput.DoesNotExist:
+            output = None
         if not output or not output.file:
             post.status = "FAILED"
             post.error = "Job sem vídeo final"
