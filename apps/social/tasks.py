@@ -3571,8 +3571,9 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
         post.retry_count = 0
         post.youtube_quota_retry_count = 0
         post.posted_at = timezone.now()
-        if warnings:
-            post.error = "; ".join(warnings)
+        # Clear the previous attempt's error: "error" is in update_fields below, so a
+        # stale message would be written back alongside status=DONE (R-23).
+        post.error = "; ".join(warnings) if warnings else ""
     post.upload_fingerprint = upload_fingerprint
     post.external_ids = external_ids
     update_fields = [

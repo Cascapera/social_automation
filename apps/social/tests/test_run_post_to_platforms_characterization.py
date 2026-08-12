@@ -41,7 +41,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -558,18 +558,36 @@ class RunPostToPlatformsHappyPathTests(RunPostToPlatformsFixtureMixin, TestCase)
         self.assertEqual(result.get("status"), "DONE")
         self.assertIsNotNone(post.posted_at)
         self.assertGreaterEqual(post.posted_at, antes)
-        # Sucesso zera os dois contadores de retry.
+        # Sucesso zera os dois contadores de retry e limpa o erro da tentativa anterior
+        # (regressão do R-23: `error` está no `update_fields`, então um texto antigo era
+        # gravado de volta junto com status=DONE e aparecia no painel).
         self.assertEqual(post.retry_count, 0)
         self.assertEqual(post.youtube_quota_retry_count, 0)
-        # ⚠ BUG CARACTERIZADO — o erro da tentativa anterior NÃO é limpo no sucesso.
-        # O ramo de sucesso só escreve em `post.error` quando há warnings; sem warnings,
-        # o texto antigo sobrevive — e "error" está no `update_fields`, então é salvo de
-        # volta. Resultado: um post DONE exibe no painel o erro da tentativa que falhou.
-        # Correção em PR próprio — ver R-23 no refactor.md.
-        self.assertEqual(post.error, "erro anterior")
+        self.assertEqual(post.error, "")
         # A API nativa do YouTube não é chamada quando o Upload-Post resolve.
         mock_up.assert_called_once()
         mock_native.assert_not_called()
+
+    def test_publicacao_com_warning_preserva_o_texto_no_error(self):
+        """Contraparte do R-23: o sucesso limpa o erro, mas NÃO engole warnings.
+
+        Um warning do publisher vira o texto de `post.error` mesmo com `status=DONE` —
+        é o canal que avisa "publicou, mas com ressalva". A limpeza do erro anterior não
+        pode atropelar isso.
+        """
+        self.brand.upload_post_youtube_enabled = False
+        self.brand.save(update_fields=["upload_post_youtube_enabled"])
+        post = self._post(error="erro anterior")
+
+        publisher = MagicMock()
+        publisher.publish.return_value = {"video_id": "vid-nativo", "warning": "legenda cortada"}
+        with patch(NATIVE_PUBLISHER_PATCH_TARGET, return_value=publisher):
+            result = _run_post_to_platforms(post.id)
+
+        post.refresh_from_db()
+        self.assertEqual(post.status, "DONE")
+        self.assertEqual(post.error, "YTB: legenda cortada")
+        self.assertEqual(result.get("status"), "DONE")
 
     def test_publicacao_bem_sucedida_grava_o_fingerprint_do_arquivo(self):
         """O fingerprint é o sha256 do vídeo e é o que protege contra repost.
