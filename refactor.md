@@ -36,24 +36,29 @@ testes**, cobertura 40,8% → **42,03%** (catraca subida para 42,0).
 | **R-04** · characterization tests (22) | [#32](https://github.com/Cascapera/social_automation/pull/32) | ✅ concluído |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
-### ▶ PRÓXIMO PASSO: escolher entre R-22/R-23 e a Onda 1
+### ▶ PRÓXIMO PASSO: Onda 1, começando por R-06
 
-A Onda 0 entregou o que prometia: a rede está no lugar e **já pegou três bugs** (R-21,
-R-22, R-23). R-22 e R-23 são pequenos (30 min e 20 min), estão totalmente especificados na
-seção 7 e têm o teste caracterizador já no repo — a correção é literalmente inverter uma
-asserção. **Recomendado fazer os dois antes de abrir a Onda 1**, porque o R-09 vai mexer
-exatamente na região do R-22 e é melhor não refatorar em cima de um bug conhecido.
+R-22 e R-23 estão corrigidos e mergeados — os dois bugs que a própria Onda 0 encontrou
+foram fechados antes de abrir a onda seguinte, de propósito: o R-09 vai mexer exatamente
+na região do R-22 e não vale refatorar em cima de bug conhecido.
 
-Depois deles, a Onda 1 começa por **R-06** (pré-requisito: R-03 e R-04, ambos feitos).
-Sequenciamento completo na seção 8.
+A **Onda 1 começa por R-06**, cujos pré-requisitos (R-03 e R-04) estão ambos feitos.
+Sequenciamento completo na seção 8. Atenção: **R-07 continua bloqueado** pelas 4 decisões
+do L-7 — R-06 não depende delas, mas não dá para emendar um no outro sem decidir.
 
 ### ⚠ Três pendências fora do código
 
-1. **Deploy de R-01 e R-21 em produção.** O R-21 **muda comportamento**: hoje a
-   reconciliação do YouTube aborta na primeira confirmação; depois do deploy ela vai
-   processar a fila acumulada e marcar itens como `POSTED` em lote. **Avisar quem
-   acompanha os painéis antes** — o pico é o conserto, não um incidente. Verificar
-   depois: `publish_reconciliation_failures_total` caindo.
+1. **Deploy de R-01, R-21, R-22 e R-23 em produção.** Nenhum tem migração ou flag; podem
+   ir juntos. **Dois mudam comportamento observável e valem aviso antes:**
+   - **R-21** — hoje a reconciliação do YouTube aborta na primeira confirmação; depois do
+     deploy ela vai processar a fila acumulada e marcar itens como `POSTED` em lote. O
+     pico é o conserto, não um incidente. Verificar depois:
+     `publish_reconciliation_failures_total` caindo.
+   - **R-22** — posts de job sem render que hoje parecem **travados em PENDING** vão
+     passar a aparecer como **FAILED** com motivo legível. O número de FAILED sobe; é
+     diagnóstico ficando visível, não regressão.
+
+   R-01 e R-23 são transparentes (R-23 só para de exibir erro em post que deu certo).
 2. **4 decisões pendentes que bloqueiam o R-07** — as divergências 2, 3, 4 e 5 entre as
    cópias da máquina de estados. Estão detalhadas em **L-7** (seção 15). Não bloqueiam
    R-06, R-22 nem R-23.
@@ -1435,8 +1440,8 @@ nada. A abordagem incremental deste plano é a correta.
 ```
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
-           2 aguardando deploy de produção (R-01, R-21)
-           ✅ ONDA 0 FECHADA · atualizado em 2026-08-12
+           4 mergeados aguardando deploy de produção (R-01, R-21, R-22, R-23)
+           ✅ ONDA 0 FECHADA · próximo: R-06 (Onda 1) · atualizado em 2026-08-12
 Itens que exigem parada de produção: 0
 ```
 
@@ -1446,13 +1451,14 @@ Itens que exigem parada de produção: 0
 >
 > | Item | Encontrado em | O que é |
 > | --- | --- | --- |
-> | **R-21** | R-03 | `update_fields` com campo inexistente — já corrigido e mergeado |
-> | **R-22** | R-04 | `post.job.output` levanta exceção e torna uma guarda inalcançável |
-> | **R-23** | R-04 | erro da tentativa anterior sobrevive num post `DONE` |
+> | **R-21** | R-03 | `update_fields` com campo inexistente — corrigido, PR #30 |
+> | **R-22** | R-04 | `post.job.output` levanta exceção e torna uma guarda inalcançável — corrigido, PR #33 |
+> | **R-23** | R-04 | erro da tentativa anterior sobrevive num post `DONE` — corrigido, PR #34 |
 >
-> Estão registrados na seção 7 junto com os demais. R-22 e R-23 ainda não foram
-> corrigidos: os testes do R-04 **afirmam o comportamento errado de hoje**, para que a
-> correção seja uma inversão explícita e visível no diff.
+> Estão registrados na seção 7 junto com os demais. **Os três já estão corrigidos e
+> mergeados**, faltando só o deploy. O padrão que funcionou nos três: o characterization
+> test entra primeiro afirmando o comportamento **errado** de hoje, e a correção o inverte
+> — assim o bug aparece no diff da correção, não fica implícito nela.
 
 > **Nota de honestidade do contador:** R-02 e R-05 só alteram CI e configuração de teste —
 > para eles, merge **é** o deploy, e estão concluídos. R-01 é código de aplicação: está
@@ -1543,8 +1549,8 @@ Itens que exigem parada de produção: 0
   - [x] Teste novo do ramo com warnings, que garante a cláusula "não muda": o warning do
         publisher continua virando o texto de `post.error` mesmo com `status=DONE`
   - [x] Suíte completa verde · Lint verde
-  - [x] PR aberto e revisado — [#34](https://github.com/Cascapera/social_automation/pull/34)
-  - [x] Commitado — `<hash>`
+  - [x] PR aberto e revisado — [#34](https://github.com/Cascapera/social_automation/pull/34), CI verde, mergeado
+  - [x] Commitado — `2322efa` (mergeado em `develop` via `7c316a4`)
   - [ ] Implantado em produção
   - [ ] Verificado em produção — posts DONE param de exibir erro no painel
   - Status: **em andamento — aguardando deploy de produção** · Notas: só afeta posts que
@@ -1597,8 +1603,8 @@ Itens que exigem parada de produção: 0
   - [x] Gap conhecido (`YOUTUBE_CHECK_CLIENT_ENABLED`) documentado no topo do arquivo
   - [x] Suíte completa verde · Lint verde
   - [x] Catraca de cobertura subida: 40,8% → **42,0%** (medido 42,03% no CI)
-  - [x] PR aberto e revisado
-  - [x] Commitado — `<hash>`
+  - [x] PR aberto e revisado — [#32](https://github.com/Cascapera/social_automation/pull/32), CI verde, mergeado
+  - [x] Commitado — `b727d4a` (mergeado em `develop` via `575920f`)
   - Status: **concluído** · 22 testes novos.
     Notas: dois bugs de produção descobertos ao escrever os testes, registrados como
     **R-22** e **R-23** na seção 7. Ambos estão caracterizados (o teste afirma o
@@ -1833,6 +1839,10 @@ Uma linha por item concluído: data · o que mudou de fato · surpresas encontra
 | 2026-08-11 | **R-05** | `npm test` no CI, com `install`/`test`/`build` em passos separados. Commit `aeac2bf`, PR #27. | Nenhuma: os 8 testes passam. O risco previsto ("podem estar quebrados") não se materializou. |
 | 2026-08-11 | **PRs #25–#29** | Os 4 PRs da Onda 0 abertos, CI verde, mergeados em `develop` (`3df0074`). | A PR do R-02 (#26) foi **fechada automaticamente** pelo GitHub quando a branch base (do R-01) foi apagada no merge — e não dá para reabrir nem reapontar a base de uma PR fechada. Teve que ser recriada como #29. Em PR empilhada, não usar `--delete-branch` no merge da base. |
 | 2026-08-11 | **R-21** | `updated_at` removido de dois `update_fields` de `ScheduledPost` (`tasks.py:838` e `:3837`) + 4 testes de regressão. Commit `4b83424`, PR #30. | **Item que não existia no plano.** A cópia C da máquina de estados levantava `ValueError` em toda chamada — a reconciliação do YouTube **nunca marcava nada como POSTED**, e a idempotência do primeiro comentário nunca valeu. O `except Exception` amplo das tasks de reconciliação escondeu isso como "reconciliação falhou". Achado que só apareceu porque o R-03 obrigou a executar a função de verdade. |
+| 2026-08-12 | **R-04** | 22 characterization tests de `_run_post_to_platforms`, passando contra o código atual sem alterá-lo. Catraca 40,8% → 42,0%. Commit `b727d4a`, PR #32. | Três surpresas. (1) São **9 guardas de saída antecipada, não 6** — a contagem do plano omitia as duas do ramo de corte e a de post sem origem. (2) Dois bugs de produção apareceram na primeira execução dos testes, viraram **R-22** e **R-23**. (3) A catraca subida pela medição **local** (42,23%) quebrou o CI, que mede 42,03%: `settings.py` e `upload_post_analytics_client.py` têm ramos que dependem de env vars e deps opcionais. A catraca sempre sai do log do CI. |
+| 2026-08-12 | **R-22** | `post.job.output` envolvido em `try/except RenderOutput.DoesNotExist` (`tasks.py:2498`); teste caracterizador invertido de `assertRaises` para `FAILED`. Commit `ffcfc27`, PR #33. | **Item que não existia no plano.** O acesso ao OneToOne reverso levantava *antes* da guarda que trataria o caso — a guarda era código morto desde sempre. O efeito em produção é silencioso do jeito ruim: o post fica preso em PENDING e a task queima as 3 tentativas de retry sem registrar o motivo em lugar nenhum além do log do worker. |
+| 2026-08-12 | **R-23** | `post.error` zerado no ramo de sucesso quando não há warnings (`tasks.py:3568`) + teste novo do ramo com warnings. Commit `2322efa`, PR #34. | **Item que não existia no plano.** `"error"` está no `update_fields`, então o texto da tentativa anterior era *regravado* junto com `status=DONE` — um post publicado com sucesso exibia o erro da tentativa que falhou, para sempre. O teste do ramo com warnings passa nas duas versões: é ele que prova que a limpeza não engoliu a ressalva legítima. |
+| 2026-08-12 | **PRs #33–#34** | As duas correções mergeadas em `develop` (`7c316a4`). | Conflito no `refactor.md`: as duas branches saíram de `develop` e inseriram bloco de checklist no mesmo ponto. Código e testes juntaram limpo — as correções tocam `tasks.py:2498` e `:3568`. Em itens irmãos que atualizam o mesmo documento, contar com conflito no doc mesmo quando o código não conflita. |
 | 2026-08-11 | **R-03** | 31 characterization tests das 5 cópias, passando contra o código atual sem alterá-lo. PR #31. | As 5 cópias concordam em **apenas 3 campos**. A divergência 1 (ramo não-YouTube não deduplica `PostedVideoLog` nem valida id vazio) é bug claro. Confirmou também que o diagnóstico D-02 subestimava o problema: não era só duplicação, era duplicação **com uma das cópias quebrada**. |
 
 ---
