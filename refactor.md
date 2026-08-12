@@ -1516,6 +1516,24 @@ Itens que exigem parada de produção: 0
     `auto_cuts/tasks.py` **7%**, `api/views.py` **21%**, `grok.py` **30%**,
     `social/tasks.py` **41%**, `api/serializers.py` **43%**.
 
+- [x] **R-23** · Limpar `post.error` ao concluir uma publicação com sucesso
+      risco: baixo · 20min · produção: transparente, corrige exibição
+      PR: ~25 linhas / 2 arquivos · pré-requisito: R-04
+      🔧 **correção de bug, não refatoração — PR próprio `fix()`** · item novo, não estava no plano
+  - [x] Teste caracterizador já no repo (veio do R-04), invertido de `"erro anterior"`
+        para `""` — falha antes da correção, passa depois
+  - [x] Correção aplicada em `tasks.py:3568`
+  - [x] Teste novo do ramo com warnings, que garante a cláusula "não muda": o warning do
+        publisher continua virando o texto de `post.error` mesmo com `status=DONE`
+  - [x] Suíte completa verde · Lint verde
+  - [x] PR aberto e revisado — [#34](https://github.com/Cascapera/social_automation/pull/34)
+  - [x] Commitado — `<hash>`
+  - [ ] Implantado em produção
+  - [ ] Verificado em produção — posts DONE param de exibir erro no painel
+  - Status: **em andamento — aguardando deploy de produção** · Notas: só afeta posts que
+    passaram por pelo menos uma tentativa falha antes do sucesso. Como `"error"` está no
+    `update_fields`, o texto antigo era regravado junto com `status=DONE`.
+
 - [x] **R-21** · Corrigir `update_fields` com campo inexistente em `ScheduledPost`
       risco: baixo · 2h · produção: transparente no deploy, **muda comportamento**
       PR: ~157 linhas / 2 arquivos · pré-requisito: nenhum
