@@ -1632,20 +1632,34 @@ Itens que exigem parada de produção: 0
 
 ### Onda 1 — Fluxo de publicação  ·  ~45h  ·  *é aqui que o projeto se paga*
 
-- [ ] **R-06** · Criar `posting_state.py` — dono único das transições
-      risco: médio · 6h · ⚠ **produção: requer cuidado** · PR: ~180 linhas / 3 arquivos
+- [x] **R-06** · Criar `posting_state.py` — dono único das transições
+      risco: médio · 6h · ⚠ **produção: requer cuidado** · PR: ~330 linhas / 5 arquivos
       pré-requisito: R-03
-  - [ ] Diff revisado: **nenhuma chamada de rede dentro do `atomic`**
-  - [ ] R-03 verde sem alteração nos testes
-  - [ ] Teste de abort no meio da transição (prova de atomicidade)
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado
+  - [x] Diff revisado: **nenhuma chamada de rede dentro do `atomic`** — as duas funções só
+        fazem ORM. A query do `FactoryPostingSchedule` e o `parse_datetime` de
+        `publish_at_raw` ficaram **fora** do bloco, encurtando o lock
+  - [x] Teste anti-drift que trava essa regra: falha se alguém importar `requests`,
+        `httpx`, `urllib` ou `socket` no módulo
+  - [x] R-03 verde **sem alteração de asserção** — só mudou a linha de `import` e as
+        referências de linha nos docstrings
+  - [x] ⚠ **Uma inversão prevista pelo próprio R-03**: `test_transition_is_not_atomic_today`
+        afirmava a ausência de atomicidade e dizia no docstring "R-06 deve INVERTER esta
+        asserção". Virou `test_transition_is_atomic`
+  - [x] Teste de abort no meio da transição (prova de atomicidade) — 6 testes novos em
+        `test_posting_state_service.py`, abortando em passo **intermediário**, não no último
+  - [x] Suíte completa verde (358 testes) · Lint verde · cobertura 42,30%
+  - [x] PR aberto e revisado — [#35](https://github.com/Cascapera/social_automation/pull/35)
   - [ ] Janela de baixo tráfego de publicação escolhida
   - [ ] Implantado
   - [ ] Verificado 24h: `ScheduledPost` DONE com inventário não-POSTED = 0
   - [ ] Verificado 24h: sem aumento de deadlock no Postgres
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Commitado — `<hash>`
+  - Status: **em andamento — aguardando janela de deploy** · Notas: as duas funções saíram
+    de `tasks.py` (cópia C) para o serviço, como `mark_posted` e `mark_still_scheduled`.
+    Estado final dos 4 modelos idêntico; a única diferença observável é atomicidade.
+    ⚠ **O módulo ainda não é o dono único** — as cópias A, B, D e E continuam de pé, e
+    unificá-las é o R-07, bloqueado pelo L-7. Isso está dito no docstring do módulo para
+    quem chegar nele sem o contexto do plano.
 
 - [ ] **R-07** · Apontar as 5 cópias para `posting_state`
       risco: médio · 4h · produção: transparente · PR: ~150 linhas / 4 arquivos
