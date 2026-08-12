@@ -10,8 +10,74 @@
 | **Foco** | global (não informado) |
 | **Itens que exigem parada de produção** | **nenhum** |
 
-> Este é um **plano**, não a execução. Nada foi refatorado nesta rodada. O único arquivo
-> criado no repositório é este `refactor.md`.
+---
+
+## ⏸ PONTO DE RETOMADA — sessão de 2026-08-11
+
+**Onde paramos:** Onda 0 quase fechada. `develop` em `9426e1c`, CI verde, suíte de 288 →
+**360 testes**.
+
+### Feito e mergeado
+
+| Item | PR | Estado |
+| --- | --- | --- |
+| **R-01** · `_NoOpMetric.observe()` | [#25](https://github.com/Cascapera/social_automation/pull/25) | mergeado · **falta deploy** |
+| **R-02** · portão de cobertura real (40,8%) | [#29](https://github.com/Cascapera/social_automation/pull/29) | ✅ concluído |
+| **R-05** · testes do frontend no CI | [#27](https://github.com/Cascapera/social_automation/pull/27) | ✅ concluído |
+| **R-21** · `update_fields` com campo inexistente | [#30](https://github.com/Cascapera/social_automation/pull/30) | mergeado · **falta deploy** |
+| **R-03** · characterization tests (31) | [#31](https://github.com/Cascapera/social_automation/pull/31) | ✅ concluído |
+| — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
+
+### ▶ PRÓXIMO PASSO: R-04
+
+Characterization tests de `_run_post_to_platforms` (`apps/social/tasks.py:2459`, **1.189
+linhas**). É o último item da Onda 0 e o que destrava R-09 a R-13 — a parte mais pesada
+do plano. Esforço estimado: 1 dia. Detalhe completo na seção 7.
+
+O que cobrir: caminho feliz + as 6 guardas de saída antecipada (linhas 2476, 2481, 2494,
+2500, 2520, 2553) + slot expirado + factory pausada. **Gap conhecido:** o ramo de
+`YOUTUBE_CHECK_CLIENT_ENABLED` (`tasks.py:65`) não é testável até o R-17 — registrar
+como comentário explícito no arquivo de teste.
+
+### ⚠ Duas pendências fora do código
+
+1. **Deploy de R-01 e R-21 em produção.** O R-21 **muda comportamento**: hoje a
+   reconciliação do YouTube aborta na primeira confirmação; depois do deploy ela vai
+   processar a fila acumulada e marcar itens como `POSTED` em lote. **Avisar quem
+   acompanha os painéis antes** — o pico é o conserto, não um incidente. Verificar
+   depois: `publish_reconciliation_failures_total` caindo.
+2. **4 decisões pendentes que bloqueiam o R-07** — as divergências 2, 3, 4 e 5 entre as
+   cópias da máquina de estados. Estão detalhadas em **L-7** (seção 15). Não bloqueiam
+   R-04 nem R-06.
+
+### Ambiente
+
+O `.venv` foi sincronizado com o que o projeto já declarava: `prometheus-client`,
+`pytest`, `pytest-django`, `pytest-cov`. Comandos que valem hoje:
+
+```
+# suíte (rápida, sem cobertura)
+DJANGO_SETTINGS_MODULE=social_automation.settings_test  manage.py test
+# suíte com o portão de cobertura, igual ao CI
+pytest -q
+# lint
+.venv/Scripts/ruff.exe check .
+```
+
+### Convenções em vigor nesta execução
+
+- **Um item = uma branch = um PR.** Correção de bug vai em PR próprio com prefixo
+  `fix()`, nunca misturada com refatoração.
+- **Merge quando o CI ficar verde** (autorizado pelo usuário em 2026-08-11).
+- **Não usar `--delete-branch` no merge** de uma branch que seja base de outra PR — o
+  GitHub fecha a PR empilhada e ela não pode ser reaberta (aconteceu com a #26).
+- Mensagem de commit/PR longa vai por arquivo (`-F` / `--body-file`): here-string no
+  PowerShell deste ambiente quebra o texto.
+
+---
+
+> Este documento nasceu como **plano**. A partir de 2026-08-11 ele é também o registro da
+> execução: a seção 13 é o checklist vivo e a seção 15 guarda o que ficou em aberto.
 
 ---
 
