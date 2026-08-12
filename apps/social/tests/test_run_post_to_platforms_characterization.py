@@ -260,8 +260,8 @@ class RunPostToPlatformsEarlyExitTests(RunPostToPlatformsFixtureMixin, TestCase)
     def test_job_com_render_output_vazio_marca_failed(self):
         """tasks.py:2503 — RenderOutput existe mas sem arquivo: encerra como FAILED.
 
-        Este é o único caminho em que a guarda "Job sem vídeo final" realmente dispara —
-        ver o teste seguinte para o caso em que ela é inalcançável.
+        Um dos dois caminhos que chegam na guarda "Job sem vídeo final"; o outro (job sem
+        RenderOutput nenhum) está no teste seguinte e só passou a ser alcançável no R-22.
         """
         job = self._build_job(brand=self.brand, with_output=False)
         RenderOutput.objects.create(job=job)
@@ -275,31 +275,29 @@ class RunPostToPlatformsEarlyExitTests(RunPostToPlatformsFixtureMixin, TestCase)
         self.assertEqual(post.error, "Job sem vídeo final")
         mock_up.assert_not_called()
 
-    def test_job_sem_render_output_levanta_excecao_em_vez_de_falhar(self):
-        """⚠ BUG CARACTERIZADO — a guarda de `tasks.py:2503` é inalcançável sem RenderOutput.
+    def test_job_sem_render_output_marca_failed(self):
+        """Regressão do R-22 — a guarda de `tasks.py:2503` precisa ser alcançável.
 
-        `output = post.job.output` (tasks.py:2498) acessa um OneToOne reverso. Quando o job
-        não tem nenhum RenderOutput, o próprio acesso levanta
-        `RelatedObjectDoesNotExist` — a linha seguinte, que trataria o caso como FAILED,
-        nunca executa.
+        `post.job.output` é um OneToOne reverso: quando o job não tem nenhum RenderOutput,
+        o **próprio acesso** levantava `RelatedObjectDoesNotExist` e a guarda seguinte
+        nunca executava. O post ficava preso em PENDING e a task Celery estourava,
+        queimando as 3 tentativas de retry sem registrar o motivo em lugar nenhum além do
+        log do worker.
 
-        Consequência em produção: o post fica preso em PENDING (não vira FAILED) e a task
-        Celery estoura, consumindo as 3 tentativas de retry sem nunca registrar o motivo
-        no post. Só aparece no log do worker.
-
-        Este teste afirma o comportamento de HOJE. A correção vai em PR próprio com
-        prefixo `fix()` — ver R-22 no refactor.md. Quando ela entrar, este teste inverte:
-        vira `{"error": "Job sem vídeo final"}` e o post em FAILED.
+        Este teste falha (com `RelatedObjectDoesNotExist`) contra o código anterior ao
+        R-22. Se alguém trocar o `try/except` por acesso direto de novo, ele volta a
+        falhar — é essa a razão de ele existir.
         """
         job_sem_output = self._build_job(brand=self.brand, with_output=False)
         post = self._post(job=job_sem_output)
 
-        with self.assertRaises(RenderOutput.DoesNotExist):
-            self._run(post.id)
+        result, mock_up, _ = self._run(post.id)
 
         post.refresh_from_db()
-        self.assertEqual(post.status, "PENDING")
-        self.assertEqual(post.error, "")
+        self.assertEqual(result, {"error": "Job sem vídeo final"})
+        self.assertEqual(post.status, "FAILED")
+        self.assertEqual(post.error, "Job sem vídeo final")
+        mock_up.assert_not_called()
 
     def test_corte_sem_marca_marca_failed(self):
         """tasks.py:2512 — a marca do corte vem da análise; sem ela, FAILED.
