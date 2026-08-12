@@ -15,9 +15,9 @@ addopts = [
   "--cov=apps",
   "--cov=social_automation",
   "--cov-report=term-missing:skip-covered",
-  # Ratchet: this is the coverage MEASURED at 3c7f0e8, not a target. Raise it whenever the
-  # real number goes up; never lower it to make a red build green.
-  "--cov-fail-under=40.8",
+  # Ratchet: this is the coverage MEASURED at bb05fb8 (R-04), not a target. Raise it
+  # whenever the real number goes up; never lower it to make a red build green.
+  "--cov-fail-under=42.2",
 ]
 filterwarnings = [
   "ignore::DeprecationWarning",
