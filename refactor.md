@@ -1516,6 +1516,23 @@ Itens que exigem parada de produção: 0
     `auto_cuts/tasks.py` **7%**, `api/views.py` **21%**, `grok.py` **30%**,
     `social/tasks.py` **41%**, `api/serializers.py` **43%**.
 
+- [x] **R-22** · Corrigir guarda inalcançável de "Job sem vídeo final"
+      risco: baixo · 30min · produção: **muda comportamento observável**
+      PR: ~30 linhas / 2 arquivos · pré-requisito: R-04
+      🔧 **correção de bug, não refatoração — PR próprio `fix()`** · item novo, não estava no plano
+  - [x] Teste caracterizador já no repo (veio do R-04), invertido de `assertRaises` para
+        `FAILED` — falha com `RelatedObjectDoesNotExist` antes da correção, passa depois
+  - [x] Correção aplicada em `tasks.py:2498` (`try/except RenderOutput.DoesNotExist`)
+  - [x] Suíte completa verde · Lint verde
+  - [x] PR aberto e revisado — [#33](https://github.com/Cascapera/social_automation/pull/33), CI verde, mergeado
+  - [x] Commitado — `ffcfc27` (mergeado em `develop` via `a702796`)
+  - [ ] Implantado em produção
+  - [ ] Verificado em produção — posts de job sem render viram FAILED com motivo legível
+  - Status: **em andamento — aguardando deploy de produção** · Notas: o acesso ao OneToOne
+    reverso levantava antes da guarda, então o post ficava preso em PENDING e a task
+    queimava as 3 tentativas sem registrar nada no post. Depois do deploy esses itens
+    passam a aparecer como FAILED — é o diagnóstico ficando visível, não uma regressão.
+
 - [x] **R-23** · Limpar `post.error` ao concluir uma publicação com sucesso
       risco: baixo · 20min · produção: transparente, corrige exibição
       PR: ~25 linhas / 2 arquivos · pré-requisito: R-04
