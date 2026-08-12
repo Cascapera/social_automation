@@ -12,10 +12,13 @@
 
 ---
 
-## ⏸ PONTO DE RETOMADA — sessão de 2026-08-12
+## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-12
 
-**Onde paramos:** ✅ **ONDA 0 FECHADA.** `develop` + R-04, CI verde, suíte de 288 → **351
-testes**, cobertura 40,8% → **42,03%** (catraca subida para 42,0).
+**Onde paramos:** ✅ **Onda 0 fechada e Onda 1 aberta com o R-06 mergeado.** `develop` em
+`995980d`, CI verde, suíte de 288 → **358 testes**, cobertura 40,8% → **42,30%** (catraca
+em 42,0).
+
+Foram 4 PRs nesta sessão: **#32** (R-04), **#33** (R-22), **#34** (R-23) e **#35** (R-06).
 
 > ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
 > (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
@@ -34,22 +37,37 @@ testes**, cobertura 40,8% → **42,03%** (catraca subida para 42,0).
 | **R-21** · `update_fields` com campo inexistente | [#30](https://github.com/Cascapera/social_automation/pull/30) | mergeado · **falta deploy** |
 | **R-03** · characterization tests (31) | [#31](https://github.com/Cascapera/social_automation/pull/31) | ✅ concluído |
 | **R-04** · characterization tests (22) | [#32](https://github.com/Cascapera/social_automation/pull/32) | ✅ concluído |
+| **R-22** · guarda inalcançável de "Job sem vídeo final" | [#33](https://github.com/Cascapera/social_automation/pull/33) | mergeado · **falta deploy** |
+| **R-23** · `post.error` sobrevivia num post `DONE` | [#34](https://github.com/Cascapera/social_automation/pull/34) | mergeado · **falta deploy** |
+| **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | mergeado · **falta deploy em janela** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
-### ▶ PRÓXIMO PASSO: Onda 1, começando por R-06
+### ▶ PRÓXIMO PASSO: R-08
 
-R-22 e R-23 estão corrigidos e mergeados — os dois bugs que a própria Onda 0 encontrou
-foram fechados antes de abrir a onda seguinte, de propósito: o R-09 vai mexer exatamente
-na região do R-22 e não vale refatorar em cima de bug conhecido.
+O R-06 abriu a Onda 1 e está mergeado. **O R-07 é o próximo na ordem do plano mas está
+bloqueado** pelas 4 decisões do L-7 (divergências 2, 3, 4 e 5 entre as cópias da máquina
+de estados, seção 15) — são decisões de produto, não de código, e precisam de você.
 
-A **Onda 1 começa por R-06**, cujos pré-requisitos (R-03 e R-04) estão ambos feitos.
-Sequenciamento completo na seção 8. Atenção: **R-07 continua bloqueado** pelas 4 decisões
-do L-7 — R-06 não depende delas, mas não dá para emendar um no outro sem decidir.
+Enquanto elas não saem, **seguir pelo R-08**, que não depende do R-07. Conferir na seção 8
+o pré-requisito antes de começar.
+
+> **Se você tiver 15 minutos amanhã, gaste-os no L-7 em vez do código.** As 4 decisões
+> destravam o R-07, e o R-07 é o que de fato acaba com as 5 cópias — o R-06 só extraiu
+> uma delas. Cada item da Onda 1 feito antes disso é feito sobre um alicerce que ainda vai
+> mudar.
+
+### 📌 O que fazer ao retomar
+
+1. `git pull` em `develop` (esperado: `995980d` ou mais novo).
+2. Ler esta seção e a seção 15 (L-7).
+3. Decidir: L-7 (destrava R-07) ou seguir no R-08.
 
 ### ⚠ Três pendências fora do código
 
-1. **Deploy de R-01, R-21, R-22 e R-23 em produção.** Nenhum tem migração ou flag; podem
-   ir juntos. **Dois mudam comportamento observável e valem aviso antes:**
+1. **Deploy de R-01, R-21, R-22, R-23 e R-06 em produção.** Nenhum tem migração ou flag.
+   ⚠ **O R-06 pede janela de baixo tráfego de publicação** (a transação passa a segurar
+   lock em até 4 tabelas por alguns ms); os outros quatro podem ir a qualquer momento.
+   **Dois mudam comportamento observável e valem aviso antes:**
    - **R-21** — hoje a reconciliação do YouTube aborta na primeira confirmação; depois do
      deploy ela vai processar a fila acumulada e marcar itens como `POSTED` em lote. O
      pico é o conserto, não um incidente. Verificar depois:
@@ -59,6 +77,8 @@ do L-7 — R-06 não depende delas, mas não dá para emendar um no outro sem de
      diagnóstico ficando visível, não regressão.
 
    R-01 e R-23 são transparentes (R-23 só para de exibir erro em post que deu certo).
+   Verificação pós-deploy do R-06, por 24h: `ScheduledPost` `DONE` com
+   `VideoInventoryItem` não-`POSTED` deve ser **0**, e sem aumento de deadlock no Postgres.
 2. **4 decisões pendentes que bloqueiam o R-07** — as divergências 2, 3, 4 e 5 entre as
    cópias da máquina de estados. Estão detalhadas em **L-7** (seção 15). Não bloqueiam
    R-06, R-22 nem R-23.
@@ -1440,8 +1460,10 @@ nada. A abordagem incremental deste plano é a correta.
 ```
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
-           4 mergeados aguardando deploy de produção (R-01, R-21, R-22, R-23)
-           ✅ ONDA 0 FECHADA · próximo: R-06 (Onda 1) · atualizado em 2026-08-12
+           5 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06)
+           ✅ Onda 0 fechada · Onda 1 aberta (R-06 mergeado)
+           ▶ próximo: R-08 — R-07 está BLOQUEADO pelo L-7
+           atualizado em 2026-08-12
 Itens que exigem parada de produção: 0
 ```
 
@@ -1648,12 +1670,12 @@ Itens que exigem parada de produção: 0
   - [x] Teste de abort no meio da transição (prova de atomicidade) — 6 testes novos em
         `test_posting_state_service.py`, abortando em passo **intermediário**, não no último
   - [x] Suíte completa verde (358 testes) · Lint verde · cobertura 42,30%
-  - [x] PR aberto e revisado — [#35](https://github.com/Cascapera/social_automation/pull/35)
+  - [x] PR aberto e revisado — [#35](https://github.com/Cascapera/social_automation/pull/35), CI verde, mergeado
   - [ ] Janela de baixo tráfego de publicação escolhida
   - [ ] Implantado
   - [ ] Verificado 24h: `ScheduledPost` DONE com inventário não-POSTED = 0
   - [ ] Verificado 24h: sem aumento de deadlock no Postgres
-  - [x] Commitado — `<hash>`
+  - [x] Commitado — `1e85d53` (mergeado em `develop` via `995980d`)
   - Status: **em andamento — aguardando janela de deploy** · Notas: as duas funções saíram
     de `tasks.py` (cópia C) para o serviço, como `mark_posted` e `mark_still_scheduled`.
     Estado final dos 4 modelos idêntico; a única diferença observável é atomicidade.
@@ -1856,6 +1878,7 @@ Uma linha por item concluído: data · o que mudou de fato · surpresas encontra
 | 2026-08-12 | **R-04** | 22 characterization tests de `_run_post_to_platforms`, passando contra o código atual sem alterá-lo. Catraca 40,8% → 42,0%. Commit `b727d4a`, PR #32. | Três surpresas. (1) São **9 guardas de saída antecipada, não 6** — a contagem do plano omitia as duas do ramo de corte e a de post sem origem. (2) Dois bugs de produção apareceram na primeira execução dos testes, viraram **R-22** e **R-23**. (3) A catraca subida pela medição **local** (42,23%) quebrou o CI, que mede 42,03%: `settings.py` e `upload_post_analytics_client.py` têm ramos que dependem de env vars e deps opcionais. A catraca sempre sai do log do CI. |
 | 2026-08-12 | **R-22** | `post.job.output` envolvido em `try/except RenderOutput.DoesNotExist` (`tasks.py:2498`); teste caracterizador invertido de `assertRaises` para `FAILED`. Commit `ffcfc27`, PR #33. | **Item que não existia no plano.** O acesso ao OneToOne reverso levantava *antes* da guarda que trataria o caso — a guarda era código morto desde sempre. O efeito em produção é silencioso do jeito ruim: o post fica preso em PENDING e a task queima as 3 tentativas de retry sem registrar o motivo em lugar nenhum além do log do worker. |
 | 2026-08-12 | **R-23** | `post.error` zerado no ramo de sucesso quando não há warnings (`tasks.py:3568`) + teste novo do ramo com warnings. Commit `2322efa`, PR #34. | **Item que não existia no plano.** `"error"` está no `update_fields`, então o texto da tentativa anterior era *regravado* junto com `status=DONE` — um post publicado com sucesso exibia o erro da tentativa que falhou, para sempre. O teste do ramo com warnings passa nas duas versões: é ele que prova que a limpeza não engoliu a ressalva legítima. |
+| 2026-08-12 | **R-06** | `mark_posted` e `mark_still_scheduled` extraídas de `tasks.py` para `apps/social/services/posting_state.py`, cada uma em `transaction.atomic()`. 6 testes novos de rollback. Commit `1e85d53`, PR #35, mergeado em `995980d`. | Duas. (1) O R-03 **já tinha previsto a inversão**: `test_transition_is_not_atomic_today` dizia no docstring "R-06 deve INVERTER esta asserção" — o characterization test funcionou como contrato entre dois itens separados por dias. (2) `tasks.py` está commitado com **CRLF** neste repo enquanto todo o resto é LF; reescrever o arquivo por script normalizou para LF e inflou o diff de 84 para **8.014 linhas**. Corrigido com `git -c core.autocrlf=false add`. Quem mexer em `tasks.py` por script: conferir o `--stat` antes de commitar. |
 | 2026-08-12 | **PRs #33–#34** | As duas correções mergeadas em `develop` (`7c316a4`). | Conflito no `refactor.md`: as duas branches saíram de `develop` e inseriram bloco de checklist no mesmo ponto. Código e testes juntaram limpo — as correções tocam `tasks.py:2498` e `:3568`. Em itens irmãos que atualizam o mesmo documento, contar com conflito no doc mesmo quando o código não conflita. |
 | 2026-08-11 | **R-03** | 31 characterization tests das 5 cópias, passando contra o código atual sem alterá-lo. PR #31. | As 5 cópias concordam em **apenas 3 campos**. A divergência 1 (ramo não-YouTube não deduplica `PostedVideoLog` nem valida id vazio) é bug claro. Confirmou também que o diagnóstico D-02 subestimava o problema: não era só duplicação, era duplicação **com uma das cópias quebrada**. |
 
