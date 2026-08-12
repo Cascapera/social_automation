@@ -15,7 +15,14 @@
 ## ⏸ PONTO DE RETOMADA — sessão de 2026-08-12
 
 **Onde paramos:** ✅ **ONDA 0 FECHADA.** `develop` + R-04, CI verde, suíte de 288 → **351
-testes**, cobertura 40,8% → **42,23%** (catraca subida para 42,2).
+testes**, cobertura 40,8% → **42,03%** (catraca subida para 42,0).
+
+> ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
+> (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
+> dependências opcionais que diferem entre os dois — `settings.py` mede 84% local e 77% no
+> CI; `upload_post_analytics_client.py`, 19% contra 11%. A primeira tentativa do R-04
+> subiu a catraca para 42,2 com base na medição local e **quebrou o CI** com os 351 testes
+> passando. Quem subir a catraca de novo: pegar o número do log do CI.
 
 ### Feito e mergeado
 
@@ -1554,7 +1561,7 @@ Itens que exigem parada de produção: 0
         slot que morre durante a pausa e slot que sobrevive)
   - [x] Gap conhecido (`YOUTUBE_CHECK_CLIENT_ENABLED`) documentado no topo do arquivo
   - [x] Suíte completa verde · Lint verde
-  - [x] Catraca de cobertura subida: 40,8% → **42,2%** (medido 42,23%)
+  - [x] Catraca de cobertura subida: 40,8% → **42,0%** (medido 42,03% no CI)
   - [x] PR aberto e revisado
   - [x] Commitado — `<hash>`
   - Status: **concluído** · 22 testes novos.
