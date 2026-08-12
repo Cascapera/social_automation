@@ -246,6 +246,32 @@ trimestre no ritmo atual, e a próxima plataforma de publicação o empurra para
 existe uma função que seja **a** dona dessa transição. Existem cinco variações, escritas
 em momentos diferentes, com conjuntos diferentes de `update_fields`.
 
+> **Medido em R-03 (2026-08-11).** As cinco cópias concordam em **apenas 3 campos**:
+> `schedule.status=DONE`, `item.status=POSTED`, `item.last_error=""`. Divergências reais,
+> cada uma travada por um teste:
+>
+> | # | Divergência | Quem faz diferente |
+> | --- | --- | --- |
+> | 1 | **Não deduplica `PostedVideoLog` e não valida id vazio** → gera log duplicado e log com `external_video_id=""` | só **B** |
+> | 2 | Não zera `schedule.next_retry_at` | só **D** |
+> | 3 | Não atualiza `attempt_count` | **D** e **E** |
+> | 4 | Preserva `posted_at`/`scheduled_for` em vez de sobrescrever | só **E** |
+> | 5 | Dirige o próprio `ScheduledPost` para `DONE` | só **C** |
+>
+> Legenda: A=`tasks.py:414` (YouTube), B=`tasks.py:452` (demais), C=`tasks.py:823`,
+> D=`views.py:1447`, E=`fix_youtube_posted_status.py:47`.
+>
+> **A divergência 1 é bug, não intenção** — não há motivo para o ramo não-YouTube gerar
+> log duplicado. As outras quatro precisam de decisão (ver L-7).
+
+> **Bug encontrado ao caracterizar (R-21, corrigido em [#30](https://github.com/Cascapera/social_automation/pull/30)):**
+> a cópia **C** levantava `ValueError` em **toda** chamada, porque incluía `updated_at`
+> num `update_fields` de `ScheduledPost` — modelo que não tem esse campo. Como as duas
+> tasks de reconciliação do YouTube a chamam de dentro de um `except Exception` amplo, o
+> erro se disfarçava de "reconciliação falhou" e abortava a rodada inteira no primeiro
+> vídeo confirmado. **Nenhum item chegava a `POSTED` por esse caminho** — o que é
+> consistente com a existência do management command de reparo manual (cópia E).
+
 **Por que atrapalha na prática.** É a causa direta do ranking de `fix`. Quando um estado
 fica inconsistente, a correção é aplicada no caminho que o bug apareceu — e os outros
 quatro continuam com o comportamento antigo. A existência do management command
@@ -607,6 +633,32 @@ Reversão:    rollback simples
 Esforço:     30 min
 Ganho:       suíte local verde — pré-condição para todo o resto do plano
 ⚠ NÃO É REFATORAÇÃO: é correção de bug. PR próprio, prefixo fix(), sem misturar.
+```
+
+```
+[R-21] Corrigir update_fields com campo inexistente em ScheduledPost
+Motivação:   D-02 — descoberto ao escrever R-03. ScheduledPost não tem updated_at, mas
+             dois pontos o incluíam em update_fields, levantando ValueError SEMPRE
+Arquivos:    apps/social/tasks.py:838 e :3837, apps/social/tests/test_scheduled_post_save_fields.py
+O que muda:  remover "updated_at" dos dois update_fields
+Não muda:    nenhum schema. O modelo realmente não tem o campo; adicioná-lo seria
+             mudança de banco, fora do escopo deste projeto
+Pré-requisito: nenhum — bloqueia R-03, então vem antes
+PR:          ~157 linhas · 2 arquivos
+Produção:    transparente no deploy, mas MUDA COMPORTAMENTO (ver abaixo)
+Deploy:      deploy normal
+Como validar: 3 dos 4 testes novos falham sem a correção (verificado com git stash)
+Verificação pós-deploy: publish_reconciliation_failures_total deve CAIR; itens devem
+             começar a sair de "Aguardando Postagem" sozinhos
+Risco:       baixo na correção, médio no efeito — ver abaixo
+Reversão:    rollback simples
+Esforço:     2h (feito)
+Ganho:       a reconciliação do YouTube volta a funcionar; a idempotência do primeiro
+             comentário passa a valer
+⚠ NÃO É REFATORAÇÃO: é correção de bug, PR próprio com prefixo fix().
+⚠ MUDA COMPORTAMENTO OBSERVÁVEL: hoje a reconciliação aborta na primeira confirmação.
+   Depois do deploy ela vai processar a fila acumulada e marcar itens como POSTED em
+   lote. Avisar quem acompanha os painéis — o pico é o conserto, não um incidente.
 ```
 
 ```
@@ -1240,10 +1292,15 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 2/18 itens concluídos (R-02, R-05) · 1 aguardando deploy de produção (R-01)
-           atualizado em 2026-08-11
+Progresso: 3/19 itens concluídos (R-02, R-03, R-05)
+           2 aguardando deploy de produção (R-01, R-21)
+           Onda 0 falta só o R-04 · atualizado em 2026-08-11
 Itens que exigem parada de produção: 0
 ```
+
+> **O backlog cresceu de 18 para 19 itens.** R-21 não estava no plano original: é um bug
+> de produção encontrado ao escrever os characterization tests do R-03. Está registrado
+> na seção 7 junto com os demais.
 
 > **Nota de honestidade do contador:** R-02 e R-05 só alteram CI e configuração de teste —
 > para eles, merge **é** o deploy, e estão concluídos. R-01 é código de aplicação: está
@@ -1307,16 +1364,39 @@ Itens que exigem parada de produção: 0
     `auto_cuts/tasks.py` **7%**, `api/views.py` **21%**, `grok.py` **30%**,
     `social/tasks.py` **41%**, `api/serializers.py` **43%**.
 
-- [ ] **R-03** · Characterization tests da máquina de estados (CT-1)
-      risco: baixo · 6h · produção: transparente · PR: ~300 linhas / 1 arquivo
-      pré-requisito: R-02
-  - [ ] Testes escritos cobrindo as 5 cópias
-  - [ ] Passam contra o código atual **sem alterá-lo**
-  - [ ] Divergências entre as cópias registradas nas notas
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+- [x] **R-21** · Corrigir `update_fields` com campo inexistente em `ScheduledPost`
+      risco: baixo · 2h · produção: transparente no deploy, **muda comportamento**
+      PR: ~157 linhas / 2 arquivos · pré-requisito: nenhum
+      🔧 **correção de bug, não refatoração — PR próprio `fix()`** · item novo, não estava no plano
+  - [x] Testes de regressão escritos e falhando antes da correção (3 de 4, via `git stash`)
+  - [x] Correção aplicada nos dois sites
+  - [x] Suíte completa verde · Lint verde
+  - [x] PR aberto e revisado — [#30](https://github.com/Cascapera/social_automation/pull/30), CI verde, mergeado
+  - [x] Commitado — `4b83424` (mergeado em `develop` via `d8ae450`)
+  - [ ] Implantado em produção
+  - [ ] Verificado em produção — `publish_reconciliation_failures_total` caindo
+  - [ ] **Avisado quem acompanha os painéis** sobre o pico de itens virando POSTED
+  - Status: **em andamento — aguardando deploy de produção** · Notas: `ScheduledPost` não
+    tem `updated_at`, mas `tasks.py:838` e `:3837` o incluíam em `update_fields` →
+    `ValueError` em toda chamada. Site 1 abortava as duas tasks de reconciliação do
+    YouTube já no primeiro vídeo confirmado (dentro de `except Exception` amplo, aparecia
+    como "reconciliação falhou"). Site 2 impedia a gravação de `first_comment_posted`,
+    quebrando a idempotência prometida na docstring — com `acks_late` + `max_retries=2`,
+    o comentário fixado podia ser postado mais de uma vez.
+
+- [x] **R-03** · Characterization tests da máquina de estados (CT-1)
+      risco: baixo · 6h · produção: transparente · PR: 640 linhas / 1 arquivo
+      pré-requisito: R-02, R-21
+  - [x] Testes escritos cobrindo as 5 cópias — 31 testes
+  - [x] Passam contra o código atual **sem alterá-lo**
+  - [x] Divergências entre as cópias registradas nas notas
+  - [x] Suíte completa verde · Lint verde
+  - [x] PR aberto e revisado — [#31](https://github.com/Cascapera/social_automation/pull/31), CI verde, mergeado
+  - [x] Commitado — mergeado em `develop`
+  - Status: **concluído** · Notas: **as 5 cópias concordam em apenas 3 campos**
+    (`schedule.status=DONE`, `item.status=POSTED`, `item.last_error=""`). Tudo além disso
+    diverge — ver as 5 divergências abaixo, que são o insumo do R-07.
+    `test_transition_is_not_atomic_today` documenta o D-03 e **deve ser invertido pelo R-06**.
 
 - [ ] **R-04** · Characterization tests de `_run_post_to_platforms` (CT-2)
       risco: baixo · 1d · produção: transparente · PR: ~380 linhas / 1 arquivo
@@ -1557,6 +1637,8 @@ Uma linha por item concluído: data · o que mudou de fato · surpresas encontra
 | 2026-08-11 | **R-02** | Portão passou de 12 módulos (7,5% do código) para `apps` + `social_automation` inteiros, com `omit` de testes/migrations. Piso = 40,8% (catraca). README corrigido. Commit `5b7fdf4`. | A cobertura real (**40,81%**) é quase metade dos "70%" declarados — e `apps/auto_cuts/tasks.py`, com 2.111 linhas e 7 commits de `fix`, está em **7%**. Pior que o diagnóstico previa. |
 | 2026-08-11 | **R-05** | `npm test` no CI, com `install`/`test`/`build` em passos separados. Commit `aeac2bf`, PR #27. | Nenhuma: os 8 testes passam. O risco previsto ("podem estar quebrados") não se materializou. |
 | 2026-08-11 | **PRs #25–#29** | Os 4 PRs da Onda 0 abertos, CI verde, mergeados em `develop` (`3df0074`). | A PR do R-02 (#26) foi **fechada automaticamente** pelo GitHub quando a branch base (do R-01) foi apagada no merge — e não dá para reabrir nem reapontar a base de uma PR fechada. Teve que ser recriada como #29. Em PR empilhada, não usar `--delete-branch` no merge da base. |
+| 2026-08-11 | **R-21** | `updated_at` removido de dois `update_fields` de `ScheduledPost` (`tasks.py:838` e `:3837`) + 4 testes de regressão. Commit `4b83424`, PR #30. | **Item que não existia no plano.** A cópia C da máquina de estados levantava `ValueError` em toda chamada — a reconciliação do YouTube **nunca marcava nada como POSTED**, e a idempotência do primeiro comentário nunca valeu. O `except Exception` amplo das tasks de reconciliação escondeu isso como "reconciliação falhou". Achado que só apareceu porque o R-03 obrigou a executar a função de verdade. |
+| 2026-08-11 | **R-03** | 31 characterization tests das 5 cópias, passando contra o código atual sem alterá-lo. PR #31. | As 5 cópias concordam em **apenas 3 campos**. A divergência 1 (ramo não-YouTube não deduplica `PostedVideoLog` nem valida id vazio) é bug claro. Confirmou também que o diagnóstico D-02 subestimava o problema: não era só duplicação, era duplicação **com uma das cópias quebrada**. |
 
 ---
 
@@ -1610,11 +1692,23 @@ Os de fatiamento de função crítica (R-09 a R-12) podem facilmente custar 50% 
 aparecerem acoplamentos que a leitura estática não revelou. **A margem de erro está
 concentrada na onda 1.**
 
-**L-7 · Decisões de produto pendentes.** Duas coisas precisam de decisão de quem conhece o
-histórico, e não de análise de código:
-1. **As divergências entre as 5 cópias do D-02 são bug ou intenção?** R-03 vai revelar as
-   diferenças; alguém precisa dizer qual é o comportamento certo.
-2. **Vale congelar features em `apps/social/` durante a onda 1** (~2 semanas), ou é
+**L-7 · Decisões de produto pendentes.** O R-03 já revelou as diferenças; agora falta
+decidir. **Estas quatro decisões bloqueiam o R-07** (nada impede o R-04 e o R-06):
+
+1. **Divergência 2** — `mark_posted` pela API não zera `schedule.next_retry_at`.
+   Deve zerar como as outras? (Meu palpite: sim, é esquecimento.)
+2. **Divergência 3** — `mark_posted` e o management command não mexem em `attempt_count`.
+   O `attempt_count` deve refletir as tentativas mesmo quando a marcação é manual?
+3. **Divergência 4** — o management command preserva `posted_at`/`scheduled_for`
+   existentes; as outras sobrescrevem. Qual é o certo? (O command é de reparo, então
+   preservar pode ser intencional — só quem escreveu sabe.)
+4. **Divergência 5** — só a cópia C dirige o `ScheduledPost` para `DONE`. A função
+   unificada deve fazer isso sempre, nunca, ou por parâmetro?
+
+A **divergência 1** não precisa de decisão: gerar `PostedVideoLog` duplicado e com
+`external_video_id` vazio é bug, e será corrigido no R-07.
+
+5. **Vale congelar features em `apps/social/` durante a onda 1** (~2 semanas), ou é
    preferível aceitar rebases frequentes? Isso muda o risco de conflito de "alto" para
    "baixo".
 
