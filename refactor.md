@@ -12,10 +12,17 @@
 
 ---
 
-## ⏸ PONTO DE RETOMADA — sessão de 2026-08-11
+## ⏸ PONTO DE RETOMADA — sessão de 2026-08-12
 
-**Onde paramos:** Onda 0 quase fechada. `develop` em `9426e1c`, CI verde, suíte de 288 →
-**360 testes**.
+**Onde paramos:** ✅ **ONDA 0 FECHADA.** `develop` + R-04, CI verde, suíte de 288 → **351
+testes**, cobertura 40,8% → **42,03%** (catraca subida para 42,0).
+
+> ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
+> (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
+> dependências opcionais que diferem entre os dois — `settings.py` mede 84% local e 77% no
+> CI; `upload_post_analytics_client.py`, 19% contra 11%. A primeira tentativa do R-04
+> subiu a catraca para 42,2 com base na medição local e **quebrou o CI** com os 351 testes
+> passando. Quem subir a catraca de novo: pegar o número do log do CI.
 
 ### Feito e mergeado
 
@@ -26,20 +33,21 @@
 | **R-05** · testes do frontend no CI | [#27](https://github.com/Cascapera/social_automation/pull/27) | ✅ concluído |
 | **R-21** · `update_fields` com campo inexistente | [#30](https://github.com/Cascapera/social_automation/pull/30) | mergeado · **falta deploy** |
 | **R-03** · characterization tests (31) | [#31](https://github.com/Cascapera/social_automation/pull/31) | ✅ concluído |
+| **R-04** · characterization tests (22) | [#32](https://github.com/Cascapera/social_automation/pull/32) | ✅ concluído |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
-### ▶ PRÓXIMO PASSO: R-04
+### ▶ PRÓXIMO PASSO: escolher entre R-22/R-23 e a Onda 1
 
-Characterization tests de `_run_post_to_platforms` (`apps/social/tasks.py:2459`, **1.189
-linhas**). É o último item da Onda 0 e o que destrava R-09 a R-13 — a parte mais pesada
-do plano. Esforço estimado: 1 dia. Detalhe completo na seção 7.
+A Onda 0 entregou o que prometia: a rede está no lugar e **já pegou três bugs** (R-21,
+R-22, R-23). R-22 e R-23 são pequenos (30 min e 20 min), estão totalmente especificados na
+seção 7 e têm o teste caracterizador já no repo — a correção é literalmente inverter uma
+asserção. **Recomendado fazer os dois antes de abrir a Onda 1**, porque o R-09 vai mexer
+exatamente na região do R-22 e é melhor não refatorar em cima de um bug conhecido.
 
-O que cobrir: caminho feliz + as 6 guardas de saída antecipada (linhas 2476, 2481, 2494,
-2500, 2520, 2553) + slot expirado + factory pausada. **Gap conhecido:** o ramo de
-`YOUTUBE_CHECK_CLIENT_ENABLED` (`tasks.py:65`) não é testável até o R-17 — registrar
-como comentário explícito no arquivo de teste.
+Depois deles, a Onda 1 começa por **R-06** (pré-requisito: R-03 e R-04, ambos feitos).
+Sequenciamento completo na seção 8.
 
-### ⚠ Duas pendências fora do código
+### ⚠ Três pendências fora do código
 
 1. **Deploy de R-01 e R-21 em produção.** O R-21 **muda comportamento**: hoje a
    reconciliação do YouTube aborta na primeira confirmação; depois do deploy ela vai
@@ -48,7 +56,13 @@ como comentário explícito no arquivo de teste.
    depois: `publish_reconciliation_failures_total` caindo.
 2. **4 decisões pendentes que bloqueiam o R-07** — as divergências 2, 3, 4 e 5 entre as
    cópias da máquina de estados. Estão detalhadas em **L-7** (seção 15). Não bloqueiam
-   R-04 nem R-06.
+   R-06, R-22 nem R-23.
+3. **5 erros locais só no Windows, que o CI não vê.** `manage.py test` acusa 5 erros em
+   `test_posting_state_characterization.py`; `pytest` (o que o CI roda) passa limpo. A
+   causa não é o teste: `fix_youtube_posted_status.py:74` escreve `→` (U+2192) em stdout,
+   que no console Windows é cp1252 e levanta `UnicodeEncodeError`. Em Linux — CI e
+   produção — não acontece. **Não é bloqueio**, mas o comando quebraria se alguém o
+   rodasse de um terminal Windows. Candidato a item próprio quando incomodar.
 
 ### Ambiente
 
@@ -653,7 +667,7 @@ apps/auto_cuts/                          apps/auto_cuts/
 | # | Área | O que fixar | Esforço |
 | --- | --- | --- | --- |
 | **CT-1** | Máquina de estados de publicação | Para cada uma das 5 cópias do D-02: o estado exato dos 4 modelos **antes e depois**, incluindo `update_fields` e o `PostedVideoLog` criado. Inclusive o comportamento esquisito (ex.: `_mark_factory_posting_verified` retornar silenciosamente quando não há `schedule` — `apps/social/tasks.py:831`). | 6h → **R-03** |
-| **CT-2** | `_run_post_to_platforms` | Caminho feliz + as 6 guardas de saída antecipada (linhas 2476, 2481, 2494, 2500, 2520, 2553) + slot expirado + factory pausada. | 1d → **R-04** |
+| **CT-2** | `_run_post_to_platforms` | Caminho feliz + as ~~6~~ **9** guardas de saída antecipada (`tasks.py` 2479, 2484, 2497, 2503, 2512, 2517, 2523, 2556, 2596) + slot expirado + factory pausada. ✅ feito no R-04 — 22 testes. A contagem original omitia as duas guardas do ramo de corte e a de post sem origem. | 1d → **R-04** |
 | **CT-3** | Ações de inventário via API | `remove_awaiting` e `retry_posting` (`apps/api/views.py:1189` e `:1250`) — resposta HTTP e efeito no banco. | 4h → dentro de **R-14** |
 | **CT-4** | Fluxo `auto_cuts` | `analyze_auto_cuts_task` e `finalizar_auto_cut_task` — só as fronteiras (entrada, estado final da análise, tasks enfileiradas). | 1d → dentro de **R-19** |
 
@@ -791,6 +805,68 @@ Esforço:     1 dia
 Ganho:       destrava R-09 a R-13 — a parte mais pesada do plano
 LIMITE CONHECIDO: o ramo de YOUTUBE_CHECK_CLIENT_ENABLED (apps/social/tasks.py:65) não
              é coberto aqui; depende de R-17. Registrar como gap explícito no arquivo.
+CONCLUÍDO em 2026-08-12: 22 testes, 9 guardas (não 6). Descobriu R-22 e R-23.
+```
+
+```
+[R-22] Corrigir guarda inalcançável de "Job sem vídeo final"
+Motivação:   descoberto ao escrever R-04. apps/social/tasks.py:2498 faz
+             `output = post.job.output` — acesso a um OneToOne reverso. Quando o job não
+             tem nenhum RenderOutput, o ACESSO levanta RelatedObjectDoesNotExist, e a
+             guarda da linha 2503, que trataria o caso como FAILED, nunca executa
+Arquivos:    apps/social/tasks.py:2498,
+             apps/social/tests/test_run_post_to_platforms_characterization.py
+O que muda:  trocar o acesso direto por getattr(post.job, "output", None) (ou try/except
+             RenderOutput.DoesNotExist); inverter o teste
+             test_job_sem_render_output_levanta_excecao_em_vez_de_falhar, que hoje afirma
+             o comportamento errado
+Não muda:    o caminho em que o RenderOutput existe mas está vazio — esse já funciona e
+             tem teste próprio (test_job_com_render_output_vazio_marca_failed)
+Pré-requisito: R-04 (feito) — o teste que caracteriza o bug já está no repo
+PR:          ~20 linhas · 2 arquivos
+Produção:    MUDA COMPORTAMENTO — ver abaixo
+Deploy:      deploy normal. Sem flag, sem migração.
+Como validar: o teste caracterizador inverte de assertRaises para assertEqual FAILED;
+             falha antes da correção, passa depois
+Verificação pós-deploy: posts de job sem render parado em PENDING devem passar a virar
+             FAILED com motivo legível, em vez de estourar a task
+Risco:       baixo
+Reversão:    rollback simples
+Esforço:     30 min
+Ganho:       o post deixa de ficar presos em PENDING e o motivo aparece no painel em vez
+             de só no log do worker
+⚠ NÃO É REFATORAÇÃO: é correção de bug. PR próprio, prefixo fix().
+⚠ MUDA COMPORTAMENTO OBSERVÁVEL: hoje a task estoura e queima as 3 tentativas de retry
+   sem registrar nada no post. Depois da correção o post vira FAILED na primeira
+   tentativa. Itens que hoje parecem "travados em PENDING" vão aparecer como FAILED —
+   é o diagnóstico ficando visível, não uma regressão.
+```
+
+```
+[R-23] Limpar post.error ao concluir uma publicação com sucesso
+Motivação:   descoberto ao escrever R-04. No ramo de sucesso (apps/social/tasks.py:3565)
+             post.error só é escrito quando há warnings. Sem warnings, o texto da
+             tentativa anterior sobrevive — e "error" está no update_fields, então é
+             gravado de volta junto com status=DONE
+Arquivos:    apps/social/tasks.py:3565,
+             apps/social/tests/test_run_post_to_platforms_characterization.py
+O que muda:  no ramo de sucesso, zerar post.error quando não houver warnings; inverter a
+             asserção do teste test_publicacao_bem_sucedida_deixa_o_post_em_done
+Não muda:    o ramo com warnings, que deve continuar preservando o texto; nem o ramo de
+             falha
+Pré-requisito: R-04 (feito)
+PR:          ~10 linhas · 2 arquivos
+Produção:    transparente no deploy; corrige exibição
+Deploy:      deploy normal
+Como validar: o teste caracterizador inverte de "erro anterior" para ""
+Verificação pós-deploy: posts DONE que hoje mostram erro no painel param de mostrar
+Risco:       baixo — só afeta posts que já estão em DONE
+Reversão:    rollback simples
+Esforço:     20 min
+Ganho:       o painel para de mostrar erro em publicação que deu certo; o retry deixa de
+             deixar rastro falso
+⚠ NÃO É REFATORAÇÃO: é correção de bug. PR próprio, prefixo fix().
+⚠ Só afeta posts que já passaram por pelo menos uma tentativa falha antes do sucesso.
 ```
 
 ```
@@ -1282,7 +1358,7 @@ imediatamente, avise e reclassifique.** Não siga "porque já começou".
 | Cobertura real (linhas) | **40,81%** (medida em R-02) | catraca — só sobe | relatório do pytest |
 | Cobertura de `auto_cuts/tasks.py` | **7%** | **> 40%** (via R-19/CT-4) | relatório do pytest |
 | Cobertura de `api/views.py` | **21%** | **> 50%** (via R-14/CT-3) | relatório do pytest |
-| Cobertura de `social/tasks.py` | **41%** | **> 65%** (via R-03/R-04) | relatório do pytest |
+| Cobertura de `social/tasks.py` | ~~41%~~ → **49%** (R-03/R-04 feitos) | **> 65%** (o resto vem com a fatiagem, R-09 a R-13) | relatório do pytest |
 | Imports dentro de função (`apps.*`) | 96 | **< 20** | `grep -rn '^\s\+from apps\.'` |
 | `os.getenv` fora de settings | 57 | **0** | `grep -rn 'os.getenv' apps/` |
 | `except Exception: pass` | 52 | **≤ 40** (top 10 tratados) | `grep -rA1 'except Exception'` |
@@ -1358,15 +1434,25 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 3/19 itens concluídos (R-02, R-03, R-05)
+Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
            2 aguardando deploy de produção (R-01, R-21)
-           Onda 0 falta só o R-04 · atualizado em 2026-08-11
+           ✅ ONDA 0 FECHADA · atualizado em 2026-08-12
 Itens que exigem parada de produção: 0
 ```
 
-> **O backlog cresceu de 18 para 19 itens.** R-21 não estava no plano original: é um bug
-> de produção encontrado ao escrever os characterization tests do R-03. Está registrado
-> na seção 7 junto com os demais.
+> **O backlog cresceu de 18 para 21 itens.** Nenhum dos três acréscimos estava no plano
+> original — todos são bugs de produção encontrados **pelos characterization tests**, que
+> era exatamente o objetivo da Onda 0:
+>
+> | Item | Encontrado em | O que é |
+> | --- | --- | --- |
+> | **R-21** | R-03 | `update_fields` com campo inexistente — já corrigido e mergeado |
+> | **R-22** | R-04 | `post.job.output` levanta exceção e torna uma guarda inalcançável |
+> | **R-23** | R-04 | erro da tentativa anterior sobrevive num post `DONE` |
+>
+> Estão registrados na seção 7 junto com os demais. R-22 e R-23 ainda não foram
+> corrigidos: os testes do R-04 **afirmam o comportamento errado de hoje**, para que a
+> correção seja uma inversão explícita e visível no diff.
 
 > **Nota de honestidade do contador:** R-02 e R-05 só alteram CI e configuração de teste —
 > para eles, merge **é** o deploy, e estão concluídos. R-01 é código de aplicação: está
@@ -1464,17 +1550,25 @@ Itens que exigem parada de produção: 0
     diverge — ver as 5 divergências abaixo, que são o insumo do R-07.
     `test_transition_is_not_atomic_today` documenta o D-03 e **deve ser invertido pelo R-06**.
 
-- [ ] **R-04** · Characterization tests de `_run_post_to_platforms` (CT-2)
-      risco: baixo · 1d · produção: transparente · PR: ~380 linhas / 1 arquivo
+- [x] **R-04** · Characterization tests de `_run_post_to_platforms` (CT-2)
+      risco: baixo · 1d · produção: transparente · PR: ~470 linhas / 3 arquivos
       pré-requisito: R-02
-  - [ ] Caminho feliz coberto
-  - [ ] 6 guardas de saída antecipada cobertas
-  - [ ] Slot expirado e factory pausada cobertos
-  - [ ] Gap conhecido (`YOUTUBE_CHECK_CLIENT_ENABLED`) documentado no arquivo de teste
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Caminho feliz coberto (5 testes: estado final, fingerprint, ids do provedor,
+        attempt log, contrato de chamada)
+  - [x] Guardas de saída antecipada cobertas — **9, não 6**: a contagem original omitia as
+        duas guardas do ramo de corte (`tasks.py:2512` e `:2517`) e a de post sem origem
+  - [x] Slot expirado e factory pausada cobertos (6 testes, incluindo o contraste entre
+        slot que morre durante a pausa e slot que sobrevive)
+  - [x] Gap conhecido (`YOUTUBE_CHECK_CLIENT_ENABLED`) documentado no topo do arquivo
+  - [x] Suíte completa verde · Lint verde
+  - [x] Catraca de cobertura subida: 40,8% → **42,0%** (medido 42,03% no CI)
+  - [x] PR aberto e revisado
+  - [x] Commitado — `<hash>`
+  - Status: **concluído** · 22 testes novos.
+    Notas: dois bugs de produção descobertos ao escrever os testes, registrados como
+    **R-22** e **R-23** na seção 7. Ambos estão caracterizados (o teste afirma o
+    comportamento errado de hoje) e o teste correspondente aponta o item que vai
+    invertê-lo.
 
 - [x] **R-05** · Rodar os testes do frontend no CI
       risco: baixo · 1h · produção: transparente · PR: ~3 linhas / 1 arquivo

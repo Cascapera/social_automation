@@ -15,9 +15,12 @@ addopts = [
   "--cov=apps",
   "--cov=social_automation",
   "--cov-report=term-missing:skip-covered",
-  # Ratchet: this is the coverage MEASURED at 3c7f0e8, not a target. Raise it whenever the
-  # real number goes up; never lower it to make a red build green.
-  "--cov-fail-under=40.8",
+  # Ratchet: this is the coverage MEASURED at bb05fb8 (R-04), not a target. Raise it
+  # whenever the real number goes up; never lower it to make a red build green.
+  # Always take the number from the CI run, never from a local one: the local suite reads
+  # ~0.2pp higher because some branches (settings.py, upload_post_analytics_client.py)
+  # depend on env vars and optional deps that differ between the two.
+  "--cov-fail-under=42.0",
 ]
 filterwarnings = [
   "ignore::DeprecationWarning",
