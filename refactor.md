@@ -12,13 +12,26 @@
 
 ---
 
-## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-12
+## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-13
 
-**Onde paramos:** ✅ **Onda 0 fechada e Onda 1 aberta com o R-06 mergeado.** `develop` em
-`995980d`, CI verde, suíte de 288 → **358 testes**, cobertura 40,8% → **42,30%** (catraca
-em 42,0).
+**Onde paramos:** ✅ **O D-02 está fechado.** As 4 decisões do L-7 foram tomadas e o R-07
+mergeado — a máquina de estados de publicação tem **um dono só**, e um teste no CI impede
+que nasça uma sexta cópia. Suíte de 288 → **365 testes**.
 
-Foram 4 PRs nesta sessão: **#32** (R-04), **#33** (R-22), **#34** (R-23) e **#35** (R-06).
+> **Este era o item que paga o projeto.** O resumo executivo dizia que a onda 1 "elimina a
+> duplicação da máquina de estados e torna as transições atômicas — é onde 15 dos commits
+> de `fix` nasceram". R-06 fez a atomicidade; R-07 fez a unificação. O que vem a seguir na
+> onda 1 é fatiamento de função: valioso, mas não é mais sangramento.
+
+Foi 1 PR nesta sessão: **#36** (R-07). Na anterior foram 4: #32, #33, #34 e #35.
+
+> 🔴 **A catraca está a 0,01pp de estourar.** O CI mediu **42,01%** contra um piso de
+> **42,0** (era 42,03 antes do R-07). Uma linha nova sem teste derruba o build do próximo
+> item. **Antes de começar o R-08, gastar 30 minutos subindo a cobertura** de qualquer
+> módulo barato — `apps/social/publishers/__init__.py` está em 25%, `settings_test.py` em
+> 91%, e há 43 arquivos em 0%. Não é dívida do R-07: o número já vinha raspando desde o
+> R-04, e cada item que **remove** código bem coberto (como o R-08 vai fazer) empurra o
+> total para baixo mesmo sem piorar nada.
 
 > ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
 > (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
@@ -40,31 +53,31 @@ Foram 4 PRs nesta sessão: **#32** (R-04), **#33** (R-22), **#34** (R-23) e **#3
 | **R-22** · guarda inalcançável de "Job sem vídeo final" | [#33](https://github.com/Cascapera/social_automation/pull/33) | mergeado · **falta deploy** |
 | **R-23** · `post.error` sobrevivia num post `DONE` | [#34](https://github.com/Cascapera/social_automation/pull/34) | mergeado · **falta deploy** |
 | **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | mergeado · **falta deploy em janela** |
+| **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
-### ▶ PRÓXIMO PASSO: R-08
+### ▶ PRÓXIMO PASSO: deploy, e só depois R-08
 
-O R-06 abriu a Onda 1 e está mergeado. **O R-07 é o próximo na ordem do plano mas está
-bloqueado** pelas 4 decisões do L-7 (divergências 2, 3, 4 e 5 entre as cópias da máquina
-de estados, seção 15) — são decisões de produto, não de código, e precisam de você.
+⏸ **O plano manda deixar R-06+R-07 em produção por ≥48h antes de seguir para o R-08**
+(seção 8). São os dois itens que mexeram na atomicidade e na unificação da transição de
+publicação — é o ponto de maior atenção do projeto inteiro, e o R-08 em cima deles sem
+observação nenhuma desperdiça a janela de verificação.
 
-Enquanto elas não saem, **seguir pelo R-08**, que não depende do R-07. Conferir na seção 8
-o pré-requisito antes de começar.
+Então a ordem é: **deploy → 48h de observação → R-08**. O R-08 já está destravado
+(pré-requisito é o R-04, que está feito) e é movimentação pura, de risco baixo.
 
-> **Se você tiver 15 minutos amanhã, gaste-os no L-7 em vez do código.** As 4 decisões
-> destravam o R-07, e o R-07 é o que de fato acaba com as 5 cópias — o R-06 só extraiu
-> uma delas. Cada item da Onda 1 feito antes disso é feito sobre um alicerce que ainda vai
-> mudar.
+> Se o deploy demorar e você quiser adiantar código, o R-05 e os itens da onda 3
+> (R-17, R-18) não tocam `apps/social/tasks.py` e não conflitam com nada em voo.
 
 ### 📌 O que fazer ao retomar
 
-1. `git pull` em `develop` (esperado: `995980d` ou mais novo).
-2. Ler esta seção e a seção 15 (L-7).
-3. Decidir: L-7 (destrava R-07) ou seguir no R-08.
+1. `git pull` em `develop` (esperado: o merge da #36 ou mais novo).
+2. Ler esta seção e as 3 pendências fora do código, abaixo.
+3. Se o deploy já saiu e passaram 48h: começar o R-08 (seção 7).
 
-### ⚠ Três pendências fora do código
+### ⚠ Duas pendências fora do código
 
-1. **Deploy de R-01, R-21, R-22, R-23 e R-06 em produção.** Nenhum tem migração ou flag.
+1. **Deploy de R-01, R-21, R-22, R-23, R-06 e R-07 em produção.** Nenhum tem migração ou flag.
    ⚠ **O R-06 pede janela de baixo tráfego de publicação** (a transação passa a segurar
    lock em até 4 tabelas por alguns ms); os outros quatro podem ir a qualquer momento.
    **Dois mudam comportamento observável e valem aviso antes:**
@@ -76,18 +89,22 @@ o pré-requisito antes de começar.
      passar a aparecer como **FAILED** com motivo legível. O número de FAILED sobe; é
      diagnóstico ficando visível, não regressão.
 
+   - **R-07** — o ramo não-YouTube para de gerar `PostedVideoLog` duplicado e de gravar
+     log com `external_video_id` vazio. **A contagem de logs novos cai** — é a duplicata
+     sumindo, não perda de auditoria. E `attempt_count` passa a ser preenchido em itens
+     marcados manualmente ou pelo comando de reparo, que antes ficavam com valor velho.
+
    R-01 e R-23 são transparentes (R-23 só para de exibir erro em post que deu certo).
-   Verificação pós-deploy do R-06, por 24h: `ScheduledPost` `DONE` com
+   Verificação pós-deploy de R-06 e R-07, por 24h: `ScheduledPost` `DONE` com
    `VideoInventoryItem` não-`POSTED` deve ser **0**, e sem aumento de deadlock no Postgres.
-2. **4 decisões pendentes que bloqueiam o R-07** — as divergências 2, 3, 4 e 5 entre as
-   cópias da máquina de estados. Estão detalhadas em **L-7** (seção 15). Não bloqueiam
-   R-06, R-22 nem R-23.
-3. **5 erros locais só no Windows, que o CI não vê.** `manage.py test` acusa 5 erros em
-   `test_posting_state_characterization.py`; `pytest` (o que o CI roda) passa limpo. A
-   causa não é o teste: `fix_youtube_posted_status.py:74` escreve `→` (U+2192) em stdout,
-   que no console Windows é cp1252 e levanta `UnicodeEncodeError`. Em Linux — CI e
-   produção — não acontece. **Não é bloqueio**, mas o comando quebraria se alguém o
-   rodasse de um terminal Windows. Candidato a item próprio quando incomodar.
+2. **1 decisão de processo em aberto** (não bloqueia nada): vale congelar features em
+   `apps/social/` durante o resto da onda 1, ou aceitar rebases? Está no **L-7**
+   (seção 15). As 4 decisões técnicas que bloqueavam o R-07 já foram tomadas.
+
+> ~~5 erros locais só no Windows~~ — **resolvido no R-07.** O `→` (U+2192) que
+> `fix_youtube_posted_status.py` escrevia em stdout levantava `UnicodeEncodeError` em
+> console cp1252. A linha foi reescrita no R-07 e virou ASCII; `manage.py test` passa
+> limpo no Windows agora (365 testes, OK).
 
 ### Ambiente
 
@@ -334,7 +351,13 @@ trimestre no ritmo atual, e a próxima plataforma de publicação o empurra para
 
 ---
 
-### D-02 · A máquina de estados de publicação está duplicada em 5 lugares, sem dono
+### D-02 · ~~A máquina de estados de publicação está duplicada em 5 lugares, sem dono~~ — RESOLVIDO em R-06 + R-07
+
+> **Fechado em 2026-08-13.** `apps/social/services/posting_state.py` é o dono único: os 5
+> sites abaixo passaram a chamá-lo, as 5 divergências foram decididas (L-7) e um teste no
+> CI — `test_posting_state_is_the_only_writer_of_posted_status` — quebra o build se uma
+> sexta cópia nascer. O diagnóstico fica registrado abaixo como estava, porque é ele que
+> explica por que `apps/social/tasks.py` lidera o ranking de `fix`.
 
 **Onde:**
 
@@ -1460,10 +1483,10 @@ nada. A abordagem incremental deste plano é a correta.
 ```
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
-           5 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06)
-           ✅ Onda 0 fechada · Onda 1 aberta (R-06 mergeado)
-           ▶ próximo: R-08 — R-07 está BLOQUEADO pelo L-7
-           atualizado em 2026-08-12
+           6 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06, R-07)
+           ✅ Onda 0 fechada · ✅ D-02 fechado (R-06 + R-07)
+           ▶ próximo: deploy → 48h de observação → R-08
+           atualizado em 2026-08-13
 Itens que exigem parada de produção: 0
 ```
 
@@ -1683,18 +1706,31 @@ Itens que exigem parada de produção: 0
     unificá-las é o R-07, bloqueado pelo L-7. Isso está dito no docstring do módulo para
     quem chegar nele sem o contexto do plano.
 
-- [ ] **R-07** · Apontar as 5 cópias para `posting_state`
-      risco: médio · 4h · produção: transparente · PR: ~150 linhas / 4 arquivos
+- [x] **R-07** · Apontar as 5 cópias para `posting_state`
+      risco: médio · 4h · produção: transparente · PR: ~580 linhas / 6 arquivos
       pré-requisito: R-06
-  - [ ] Divergências entre cópias documentadas no PR
-  - [ ] `grep 'status = "POSTED"' apps/` retorna **1** site
-  - [ ] R-03 verde
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado
+  - [x] As 4 decisões do L-7 tomadas (2026-08-13) e registradas na seção 15
+  - [x] Divergências entre cópias documentadas no PR — as 5, com a decisão de cada uma
+  - [x] `grep '\.status = "POSTED"' apps/` retorna **1** site (o serviço) — e agora tem
+        **teste no CI** afirmando isso: `test_posting_state_is_the_only_writer_of_posted_status`
+  - [x] R-03 verde — 7 testes **invertidos** de propósito, um por divergência, cada um
+        com o docstring dizendo o que mudou. Nenhum apagado; as 5 entradas continuam
+        sendo exercitadas
+  - [x] Suíte completa verde (358 → **365** testes) · Lint verde · cobertura 42,21% local
+  - [x] PR aberto e revisado — [#36](https://github.com/Cascapera/social_automation/pull/36)
   - [ ] Implantado
   - [ ] Verificado 24h — mesma checagem de consistência de R-06
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Commitado — `7e81e16`
+  - Status: **em andamento — aguardando deploy** · Notas: as cópias A e B eram idênticas
+    exceto pela deduplicação do log, então unificar **apagou o ramo** em vez de escolher
+    um lado — `_sync_factory_posting_schedule` perdeu 60 linhas. O serviço ganhou
+    `mark_item_posted()`, ancorada no `VideoInventoryItem`, porque a marcação manual
+    parte do vídeo e não de uma tentativa de publicação — inclusive para item **sem
+    schedule nenhum**, caso que `mark_posted()` recusa de propósito (a reconciliação
+    depende dessa recusa). Custo aceito: uma query a mais por sync, porque o dono da
+    transição busca o próprio schedule em vez de recebê-lo por parâmetro.
+    ⚠ Efeito observável no deploy: a contagem de `PostedVideoLog` novos **cai** no ramo
+    não-YouTube — é a duplicata sumindo, não perda de auditoria.
   - ⏸ **Deixar R-06+R-07 em produção por ≥48h antes de seguir para R-08.**
 
 - [ ] **R-08** · Extrair `services/publish_targets.py`
@@ -1934,25 +1970,30 @@ Os de fatiamento de função crítica (R-09 a R-12) podem facilmente custar 50% 
 aparecerem acoplamentos que a leitura estática não revelou. **A margem de erro está
 concentrada na onda 1.**
 
-**L-7 · Decisões de produto pendentes.** O R-03 já revelou as diferenças; agora falta
-decidir. **Estas quatro decisões bloqueiam o R-07** (nada impede o R-04 e o R-06):
+**L-7 · ~~Decisões de produto pendentes~~ — RESOLVIDO em 2026-08-13.** As quatro decisões
+que bloqueavam o R-07 foram tomadas com o código das 5 cópias na frente. Todas venceram
+pela mesma lógica: onde uma cópia divergia por esquecimento, ganhou a maioria; onde
+divergia por bom motivo, o bom motivo virou regra geral.
 
-1. **Divergência 2** — `mark_posted` pela API não zera `schedule.next_retry_at`.
-   Deve zerar como as outras? (Meu palpite: sim, é esquecimento.)
-2. **Divergência 3** — `mark_posted` e o management command não mexem em `attempt_count`.
-   O `attempt_count` deve refletir as tentativas mesmo quando a marcação é manual?
-3. **Divergência 4** — o management command preserva `posted_at`/`scheduled_for`
-   existentes; as outras sobrescrevem. Qual é o certo? (O command é de reparo, então
-   preservar pode ser intencional — só quem escreveu sabe.)
-4. **Divergência 5** — só a cópia C dirige o `ScheduledPost` para `DONE`. A função
-   unificada deve fazer isso sempre, nunca, ou por parâmetro?
+| # | Divergência | Decisão |
+| --- | --- | --- |
+| 1 | Só o ramo não-YouTube gerava log duplicado e log com id vazio | **Bug.** Todos deduplicam; nenhum grava log sem id externo |
+| 2 | A marcação manual não zerava `schedule.next_retry_at` | **Sempre zerar** — schedule `DONE` com retry pendente é estado sujo |
+| 3 | Marcação manual e comando de reparo não mexiam em `attempt_count` | **Sempre sincronizar** com `post.retry_count` |
+| 4 | Só o comando de reparo preservava `posted_at`/`scheduled_for` | **Preservar virou a regra geral** |
+| 5 | Só a cópia C levava o `ScheduledPost` a `DONE` | **Sempre**, com `save()` condicional |
 
-A **divergência 1** não precisa de decisão: gerar `PostedVideoLog` duplicado e com
-`external_video_id` vazio é bug, e será corrigido no R-07.
+Sobre a **4**: no fluxo normal esses campos estão vazios quando a transição roda, então
+nada muda ali — a regra existe para o caso de reparo. A única exceção é a data explícita
+digitada na API, que é afirmação deliberada do operador e sobrescreve.
 
-5. **Vale congelar features em `apps/social/` durante a onda 1** (~2 semanas), ou é
-   preferível aceitar rebases frequentes? Isso muda o risco de conflito de "alto" para
-   "baixo".
+Aplicadas no R-07 ([#36](https://github.com/Cascapera/social_automation/pull/36)) e
+travadas em teste. **Continua em aberto** a quinta pergunta, que é de processo e não de
+código:
+
+- **Vale congelar features em `apps/social/` durante a onda 1** (~2 semanas), ou é
+  preferível aceitar rebases frequentes? Isso muda o risco de conflito de "alto" para
+  "baixo".
 
 **L-8 · Não executei nada além da suíte de testes.** Não subi a aplicação, não processei
 vídeo, não chamei a API do YouTube. Toda afirmação sobre comportamento em runtime vem de
