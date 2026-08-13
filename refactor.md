@@ -1914,7 +1914,7 @@ Itens que exigem parada de produção: 0
   - [x] PR aberto e revisado — [#38](https://github.com/Cascapera/social_automation/pull/38)
   - [ ] Implantado
   - [ ] Verificado — custo médio por análise e taxa de retry do Grok estáveis
-  - [x] Commitado — `4a4c1a4`
+  - [x] Commitado — `d8a1b37`
   - Status: **em andamento — aguardando deploy** · Notas: `grok.py` final = **897 linhas**
     (era 2.057). O teste de hash **ficou permanente** em vez de ser descartado depois de
     usar: mudança de prompt quebra o build e exige atualizar o hash no mesmo PR. É a outra
