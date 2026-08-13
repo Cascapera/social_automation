@@ -3,6 +3,7 @@ import os
 from urllib.parse import urlencode
 
 import requests
+from django.conf import settings
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -186,15 +187,12 @@ def fetch_tokens_and_channels(code: str, brand_id: int, youtube_credential_id: i
 
 def get_check_client_config() -> dict | None:
     """Retorna config do YOUTUBE_CHECK_CLIENT_* para OAuth de busca de vídeos."""
-    client_id = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+    client_id = settings.YOUTUBE_CHECK_CLIENT_ID
+    client_secret = settings.YOUTUBE_CHECK_CLIENT_SECRET
     if not client_id or not client_secret:
         return None
     # Não usar YOUTUBE_REDIRECT_URI (callback de Contas); factory-check tem callback próprio
-    redirect_uri = (
-        (os.getenv("YOUTUBE_CHECK_REDIRECT_URI") or "").strip()
-        or "http://127.0.0.1:8000/api/youtube/factory-check-callback/"
-    )
+    redirect_uri = settings.YOUTUBE_CHECK_REDIRECT_URI
     return {
         "web": {
             "client_id": client_id,

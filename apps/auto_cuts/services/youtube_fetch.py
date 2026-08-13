@@ -7,6 +7,7 @@ import os
 import re
 from urllib.parse import parse_qs, urlparse
 
+from django.conf import settings
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -91,8 +92,8 @@ def _get_youtube_client():
             from google.auth.transport.requests import Request
             from google.oauth2.credentials import Credentials
 
-            check_id = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
-            check_secret = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+            check_id = settings.YOUTUBE_CHECK_CLIENT_ID
+            check_secret = settings.YOUTUBE_CHECK_CLIENT_SECRET
             if check_id and check_secret:
                 from apps.social.services.youtube_oauth import YOUTUBE_SCOPES
 
