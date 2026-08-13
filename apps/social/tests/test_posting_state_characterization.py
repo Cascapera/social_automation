@@ -1,34 +1,40 @@
 """Characterization tests da máquina de estados de publicação (refactor.md R-03 / D-02).
 
 A transição "este vídeo foi publicado" coordena 4 modelos — ScheduledPost,
-FactoryPostingSchedule, VideoInventoryItem e PostedVideoLog — e hoje está escrita em
-**cinco lugares diferentes**, sem dono:
+FactoryPostingSchedule, VideoInventoryItem e PostedVideoLog — e até o R-07 estava escrita
+em **cinco lugares diferentes**, sem dono:
 
-  A. apps/social/tasks.py:414  _sync_factory_posting_schedule, ramo YouTube-only
-  B. apps/social/tasks.py:452  _sync_factory_posting_schedule, ramo demais plataformas
-  C. apps/social/services/posting_state.py  mark_posted  ← extraída no R-06
-  D. apps/api/views.py:1447    VideoInventoryItemViewSet.mark_posted (ação HTTP)
-  E. apps/social/management/commands/fix_youtube_posted_status.py:47
+  A. apps/social/tasks.py  _sync_factory_posting_schedule, ramo YouTube-only
+  B. apps/social/tasks.py  _sync_factory_posting_schedule, ramo demais plataformas
+  C. apps/social/tasks.py  reconciliação (era _mark_factory_posting_verified)
+  D. apps/api/views.py     VideoInventoryItemViewSet.mark_posted (ação HTTP)
+  E. apps/social/management/commands/fix_youtube_posted_status.py
 
-Estes testes NÃO julgam o comportamento: eles **fixam o comportamento atual**, inclusive
-o esquisito e o que parece bug, para que R-06 e R-07 possam unificar as cinco cópias sem
-mudar nada sem querer. Onde o comportamento atual é suspeito, o teste diz isso no nome e
-no comentário — mas continua afirmando o que o código faz hoje.
+Estes testes nasceram no R-03 **fixando o comportamento de cada cópia**, inclusive o
+esquisito e o que parecia bug, para que R-06 e R-07 pudessem unificá-las sem mudar nada
+sem querer. Eles continuam entrando por cada um dos cinco pontos de chamada — a cobertura
+não encolheu — mas as cinco entradas agora desembocam em apps/social/services/
+posting_state.py, e por isso este arquivo passou a afirmar o comportamento **unificado**.
 
-Divergências que estes testes travam (decisão de qual é o certo fica para R-07):
+As 5 divergências que o R-03 mediu foram resolvidas no R-07 (decisões em L-7, 2026-08-13).
+Cada uma tem aqui o teste que inverteu, com o docstring dizendo o que mudou:
 
-  1. B cria PostedVideoLog SEM deduplicar e SEM exigir external_video_id;
-     A, C, D e E deduplicam. B é o único que gera log duplicado e log com id vazio.
-  2. D não zera schedule.next_retry_at; A, C e E zeram.
-  3. D e E não atualizam attempt_count; A, B e C atualizam.
-  4. A, B, C e D sobrescrevem item.posted_at / item.scheduled_for;
-     E preserva o valor já existente.
-  5. Só C mexe no ScheduledPost dentro da própria transição (DONE/posted_at/error).
+  1. B criava PostedVideoLog SEM deduplicar e SEM exigir external_video_id.
+     → agora todos deduplicam e nenhum grava log com id vazio. Era bug, não intenção.
+  2. D não zerava schedule.next_retry_at.        → agora todos zeram.
+  3. D e E não atualizavam attempt_count.        → agora todos sincronizam com o post.
+  4. Só E preservava item.posted_at/scheduled_for já existentes.  → virou a regra geral.
+  5. Só C levava o ScheduledPost a DONE.         → agora todos levam (no-op onde já está).
+
+O teste que fecha o arquivo, PostedTransitionConvergenceTests, é o que trava o ganho: as
+quatro entradas produzem o mesmo estado final. Era ele que, no R-03, provava o contrário.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
+from pathlib import Path
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
@@ -190,11 +196,13 @@ class SyncFactoryPostingScheduleNonYouTubeTests(PostingStateFixtureMixin, TestCa
         self.assertEqual(log.external_platform, "TIKTOK")
         self.assertEqual(log.external_video_id, "tt-999")
 
-    def test_second_call_creates_a_DUPLICATE_log(self):
-        """DIVERGÊNCIA 1 — este ramo NÃO deduplica, ao contrário de A, C, D e E.
+    def test_second_call_does_not_duplicate_the_log(self):
+        """DIVERGÊNCIA 1 — INVERTIDO no R-07.
 
-        Duas sincronizações do mesmo post geram duas linhas em PostedVideoLog. O teste
-        fixa o comportamento atual; a decisão de corrigir é do R-07.
+        Este era o único ramo que não deduplicava: duas sincronizações do mesmo post
+        geravam duas linhas em PostedVideoLog. O R-03 fixou esse comportamento e o
+        classificou como bug, não intenção — não há motivo para o ramo não-YouTube
+        auditar em dobro. Agora ele passa pelo posting_state e deduplica como os outros.
         """
         _factory, _brand, item, post, _schedule = self.build_chain(
             platforms=["TIKTOK"], external_ids={"TIKTOK": "tt-999"}
@@ -203,18 +211,24 @@ class SyncFactoryPostingScheduleNonYouTubeTests(PostingStateFixtureMixin, TestCa
         _sync_factory_posting_schedule(post)
         _sync_factory_posting_schedule(post)
 
-        self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 2)
+        self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 1)
 
-    def test_without_external_id_creates_log_with_EMPTY_video_id(self):
-        """DIVERGÊNCIA 1 (parte 2) — sem guard de id vazio, grava log com id em branco."""
+    def test_without_external_id_creates_no_log(self):
+        """DIVERGÊNCIA 1 (parte 2) — INVERTIDO no R-07.
+
+        Sem guard de id vazio, este ramo gravava um log com external_video_id em branco:
+        uma linha que não audita nada e ainda envenena a deduplicação das chamadas
+        seguintes. O item continua virando POSTED — o que sumiu é só a linha inútil.
+        """
         _factory, _brand, item, post, _schedule = self.build_chain(
             platforms=["TIKTOK"], external_ids={}
         )
 
         _sync_factory_posting_schedule(post)
 
-        log = PostedVideoLog.objects.get(inventory_item=item)
-        self.assertEqual(log.external_video_id, "")
+        item.refresh_from_db()
+        self.assertEqual(item.status, "POSTED")
+        self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 0)
 
 
 class SyncFactoryPostingScheduleFailureTests(PostingStateFixtureMixin, TestCase):
@@ -285,14 +299,17 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
         post.save(update_fields=["error"])
 
         mark_posted(
-            post, platform="YT", external_video_id="vid-abc", metadata={"checked": True}
+            post,
+            platform="YT",
+            external_video_id="vid-abc",
+            log_metadata={"youtube_verify": {"checked": True}},
         )
 
         post.refresh_from_db()
         schedule.refresh_from_db()
         item.refresh_from_db()
 
-        # DIVERGÊNCIA 5 — só esta cópia dirige o ScheduledPost para DONE.
+        # DIVERGÊNCIA 5 — desde o R-07 toda entrada leva o ScheduledPost a DONE.
         self.assertEqual(post.status, "DONE")
         self.assertIsNotNone(post.posted_at)
         self.assertEqual(post.error, "")
@@ -329,14 +346,19 @@ class MarkFactoryPostingVerifiedTests(PostingStateFixtureMixin, TestCase):
 
         self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 1)
 
-    def test_creates_log_with_EMPTY_id_when_video_id_is_blank(self):
-        """DIVERGÊNCIA 1 (parte 3) — C deduplica mas não valida id vazio, como A faz."""
+    def test_creates_no_log_when_video_id_is_blank(self):
+        """DIVERGÊNCIA 1 (parte 3) — INVERTIDO no R-07.
+
+        C deduplicava mas não validava id vazio. A regra canônica é a de A: sem id
+        externo não há o que auditar. O resto da transição acontece normalmente.
+        """
         _factory, _brand, item, post, _schedule = self.build_chain(post_status="PENDING")
 
         mark_posted(post, platform="YT", external_video_id="")
 
-        log = PostedVideoLog.objects.get(inventory_item=item)
-        self.assertEqual(log.external_video_id, "")
+        item.refresh_from_db()
+        self.assertEqual(item.status, "POSTED")
+        self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 0)
 
     def test_returns_silently_when_post_has_no_schedule(self):
         """Comportamento esquisito preservado (tasks.py:831): sem schedule, o post NÃO
@@ -448,20 +470,31 @@ class MarkPostedApiActionTests(PostingStateFixtureMixin, TestCase):
         self.assertEqual(log.external_video_id, "manual")
         self.assertTrue(log.metadata_snapshot["manual_post"])
 
-    def test_does_NOT_clear_schedule_next_retry_at(self):
-        """DIVERGÊNCIA 2 — A, C e E zeram next_retry_at; esta cópia não."""
+    def test_clears_schedule_next_retry_at(self):
+        """DIVERGÊNCIA 2 — INVERTIDO no R-07.
+
+        A marcação manual era a única que deixava next_retry_at preenchido num schedule
+        DONE. Estado sujo: o varredor de retry pode voltar a olhar para ele.
+        """
         _factory, _brand, item, _post, schedule = self.build_chain(post_status="PENDING")
-        next_retry_antes = schedule.next_retry_at
-        self.assertIsNotNone(next_retry_antes)
+        self.assertIsNotNone(schedule.next_retry_at)
 
         self.client.post(f"/api/video-inventory/{item.id}/mark-posted/", {}, format="json")
 
         schedule.refresh_from_db()
-        self.assertEqual(schedule.next_retry_at, next_retry_antes)
+        self.assertIsNone(schedule.next_retry_at)
 
-    def test_does_NOT_touch_attempt_count_nor_scheduled_for(self):
-        """DIVERGÊNCIA 3 e 4 — não atualiza attempt_count nem scheduled_for do item."""
-        _factory, _brand, item, _post, schedule = self.build_chain(
+    def test_syncs_attempt_count_and_fills_scheduled_for(self):
+        """DIVERGÊNCIAS 3 e 4 — INVERTIDO no R-07.
+
+        A marcação manual não sincronizava attempt_count nem preenchia scheduled_for.
+        Não sincronizar não preservava histórico nenhum: deixava o valor velho da última
+        sincronização automática, que é mentira. O número real está no post.
+
+        `scheduled_for` é preenchido porque estava **vazio** — a regra 4 preserva o que
+        já existe, e aqui não existia nada a preservar.
+        """
+        _factory, _brand, item, post, schedule = self.build_chain(
             post_status="PENDING", retry_count=4
         )
         item.attempt_count = 0
@@ -472,9 +505,9 @@ class MarkPostedApiActionTests(PostingStateFixtureMixin, TestCase):
 
         item.refresh_from_db()
         schedule.refresh_from_db()
-        self.assertEqual(item.attempt_count, 0)
-        self.assertIsNone(item.scheduled_for)
-        self.assertEqual(schedule.attempt_count, 0)
+        self.assertEqual(item.attempt_count, 4)
+        self.assertEqual(item.scheduled_for, post.scheduled_at)
+        self.assertEqual(schedule.attempt_count, 4)
 
     def test_rejects_item_already_posted(self):
         _factory, _brand, item, _post, _schedule = self.build_chain(item_status="POSTED")
@@ -550,8 +583,13 @@ class FixYouTubePostedStatusCommandTests(PostingStateFixtureMixin, TestCase):
         self.assertEqual(item.posted_at, ja_postado_em)
         self.assertEqual(item.scheduled_for, ja_agendado_para)
 
-    def test_does_NOT_touch_attempt_count(self):
-        """DIVERGÊNCIA 3 — nem o schedule nem o item têm attempt_count atualizado."""
+    def test_syncs_attempt_count(self):
+        """DIVERGÊNCIA 3 — INVERTIDO no R-07.
+
+        O comando de reparo também não sincronizava attempt_count. Como ele existe
+        justamente para consertar estado que ficou errado, deixar um contador velho para
+        trás era o oposto do propósito dele.
+        """
         _factory, _brand, item, _post, schedule = self.build_chain(
             post_status="DONE", external_ids={"YT": "yt-777"}, retry_count=3
         )
@@ -560,8 +598,8 @@ class FixYouTubePostedStatusCommandTests(PostingStateFixtureMixin, TestCase):
 
         item.refresh_from_db()
         schedule.refresh_from_db()
-        self.assertEqual(item.attempt_count, 0)
-        self.assertEqual(schedule.attempt_count, 0)
+        self.assertEqual(item.attempt_count, 3)
+        self.assertEqual(schedule.attempt_count, 3)
 
     def test_skips_post_without_youtube_external_id(self):
         _factory, _brand, item, _post, _schedule = self.build_chain(
@@ -597,43 +635,97 @@ class FixYouTubePostedStatusCommandTests(PostingStateFixtureMixin, TestCase):
         self.assertEqual(PostedVideoLog.objects.filter(inventory_item=item).count(), 1)
 
 
-class PostedTransitionDivergenceTests(PostingStateFixtureMixin, TestCase):
-    """Compara as cópias lado a lado — é este teste que R-07 vai usar como referência."""
+class PostedTransitionConvergenceTests(PostingStateFixtureMixin, TestCase):
+    """O ganho do R-07, travado em teste: as entradas convergem para o mesmo estado.
 
-    def test_all_five_copies_agree_on_the_core_three_fields(self):
-        """O único ponto de acordo total: schedule DONE + item POSTED + last_error limpo.
+    No R-03 esta classe se chamava ...DivergenceTests e o teste único afirmava que as
+    cópias só concordavam em **três campos**. É a inversão que dá nome ao item.
+    """
 
-        Tudo além destes três campos diverge entre as cópias — ver as DIVERGÊNCIAS 1-5
-        no docstring do módulo e nos testes acima.
-        """
+    def test_all_entry_points_produce_the_same_final_state(self):
+        retry = 2
         # A — YouTube
-        _f, _b, item_a, post_a, sched_a = self.build_chain(platforms=["YTB"])
+        _f, _b, item_a, post_a, sched_a = self.build_chain(platforms=["YTB"], retry_count=retry)
         _sync_factory_posting_schedule(post_a)
 
         # B — não-YouTube
         _f, _b, item_b, post_b, sched_b = self.build_chain(
-            platforms=["TIKTOK"], external_ids={"TIKTOK": "tt-1"}
+            platforms=["TIKTOK"], external_ids={"TIKTOK": "tt-1"}, retry_count=retry
         )
         _sync_factory_posting_schedule(post_b)
 
-        # C — verificação
-        _f, _b, item_c, post_c, sched_c = self.build_chain(post_status="PENDING")
+        # C — reconciliação
+        _f, _b, item_c, post_c, sched_c = self.build_chain(
+            post_status="PENDING", retry_count=retry
+        )
         mark_posted(post_c, platform="YT", external_video_id="vid-c")
 
         # E — management command
-        _f, _b, item_e, _post_e, sched_e = self.build_chain(
-            post_status="DONE", external_ids={"YT": "yt-e"}
+        _f, _b, item_e, post_e, sched_e = self.build_chain(
+            post_status="DONE", external_ids={"YT": "yt-e"}, retry_count=retry
         )
         call_command("fix_youtube_posted_status")
 
-        for item, schedule in (
-            (item_a, sched_a),
-            (item_b, sched_b),
-            (item_c, sched_c),
-            (item_e, sched_e),
+        for rotulo, post, item, schedule in (
+            ("A", post_a, item_a, sched_a),
+            ("B", post_b, item_b, sched_b),
+            ("C", post_c, item_c, sched_c),
+            ("E", post_e, item_e, sched_e),
         ):
-            item.refresh_from_db()
-            schedule.refresh_from_db()
-            self.assertEqual(schedule.status, "DONE")
-            self.assertEqual(item.status, "POSTED")
-            self.assertEqual(item.last_error, "")
+            with self.subTest(copia=rotulo):
+                post.refresh_from_db()
+                item.refresh_from_db()
+                schedule.refresh_from_db()
+
+                self.assertEqual(post.status, "DONE")          # divergência 5
+                self.assertEqual(post.error, "")
+                self.assertIsNotNone(post.posted_at)
+
+                self.assertEqual(schedule.status, "DONE")
+                self.assertIsNone(schedule.next_retry_at)      # divergência 2
+                self.assertEqual(schedule.attempt_count, retry)  # divergência 3
+
+                self.assertEqual(item.status, "POSTED")
+                self.assertEqual(item.last_error, "")
+                self.assertEqual(item.attempt_count, retry)    # divergência 3
+                self.assertEqual(item.posted_at, post.posted_at)  # divergência 4
+                self.assertEqual(item.scheduled_for, post.scheduled_at)
+
+                # divergência 1 — exatamente um log, nunca zero, nunca dois
+                self.assertEqual(
+                    PostedVideoLog.objects.filter(inventory_item=item).count(), 1
+                )
+
+    def test_posting_state_is_the_only_writer_of_posted_status(self):
+        """Anti-drift do D-02: uma sexta cópia começa exatamente assim.
+
+        O critério de validação do R-07, escrito no refactor.md, é que
+        `grep 'status = "POSTED"' apps/` retorne **um** site. Este teste é esse grep,
+        rodando no CI — se alguém voltar a escrever a transição à mão em vez de chamar
+        o dono, o build quebra em vez de a duplicação passar despercebida na revisão.
+
+        O padrão só casa **atribuição a atributo** (`item.status = "POSTED"`), que é
+        como as cinco cópias escreviam. `filter(status="POSTED")` é leitura e não conta.
+        """
+        atribuicao = re.compile(r'\.status\s*=\s*"POSTED"')
+        raiz = Path(__file__).resolve().parents[3] / "apps"
+        dono = raiz / "social" / "services" / "posting_state.py"
+
+        # Se o padrão parar de casar com o próprio dono, ele deixou de valer alguma coisa
+        # e este teste passaria vazio para sempre.
+        self.assertRegex(dono.read_text(encoding="utf-8"), atribuicao)
+
+        culpados = sorted(
+            caminho.relative_to(raiz).as_posix()
+            for caminho in raiz.rglob("*.py")
+            if caminho != dono
+            and "tests" not in caminho.parts
+            and atribuicao.search(caminho.read_text(encoding="utf-8"))
+        )
+
+        self.assertEqual(
+            culpados,
+            [],
+            "Transição de publicação escrita fora do posting_state — ver D-02/R-07 no "
+            f"refactor.md. Arquivos: {culpados}",
+        )
