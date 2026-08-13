@@ -830,8 +830,9 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     post_ids: batch post IDs (optional; if empty, all DONE for brand).
     Shorts (YT): do not send cover to YouTube (local generation still; saves quota).
     Long-form (YTB): send cover when cut has thumbnail.
-    Skips posts with external_ids.youtube_via_upload_post (YouTube entregue pelo Upload Post;
-    capa não deve ser enviada pela API nativa — evita quota e chamadas redundantes).
+    Skips posts with external_ids.youtube_via_upload_post: nesse caminho a capa já é
+    enviada no mesmo multipart do Upload-Post (campo ``thumbnail``), então o reenvio
+    pela API nativa seria redundante e consumiria quota desnecessariamente.
     """
     try:
         brand = Brand.objects.select_related("factory").get(id=brand_id)
@@ -2674,6 +2675,26 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 "INSTAGRAM": "instagram",
                 "YOUTUBE": "youtube",
             }
+            # Capa customizada via Upload-Post: somente para vídeos longos (YTB).
+            # Upload-Post ignora thumbnail em Shorts (YT). Sem corte ou sem arquivo, segue sem capa.
+            upload_post_thumbnail_path: str | None = None
+            if (
+                "YOUTUBE" in upload_post_platforms_to_execute
+                and "YTB" in (post.platforms or [])
+                and getattr(post, "auto_cut_corte_id", None)
+            ):
+                corte_thumb = getattr(getattr(post, "auto_cut_corte", None), "thumbnail", None)
+                if corte_thumb:
+                    try:
+                        candidate = Path(corte_thumb.path)
+                        if candidate.exists():
+                            upload_post_thumbnail_path = str(candidate)
+                    except (ValueError, OSError) as e:
+                        logger.warning(
+                            "[UploadPost] Não foi possível resolver thumbnail do corte para post %s: %s",
+                            post.id,
+                            e,
+                        )
             for attempt in range(UPLOAD_POST_RETRY_COUNT + 1):
                 try:
                     result = publish_to_upload_post(
@@ -2686,6 +2707,7 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                         timezone_name=tz_name,
                         request_id=upload_post_request_id,
                         idempotency_key=upload_post_provider_idempotency_key,
+                        thumbnail_path=upload_post_thumbnail_path,
                     )
                     if result.get("success"):
                         for key in (

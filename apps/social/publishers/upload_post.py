@@ -1,5 +1,7 @@
 """Publisher para Upload-Post.com (TikTok, X, Instagram, YouTube)."""
+import contextlib
 import logging
+import mimetypes
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -27,6 +29,9 @@ PLATFORM_MAP = {
     "INSTAGRAM": "instagram",
     "YOUTUBE": "youtube",
 }
+
+# Limite oficial do Upload-Post (e do YouTube nativo) para capa customizada.
+UPLOAD_POST_THUMBNAIL_MAX_SIZE_BYTES = 2 * 1024 * 1024  # 2MB
 
 
 def _sanitize_upload_post_title(title: str, fallback: str = "Vídeo") -> str:
@@ -64,6 +69,49 @@ def _format_scheduled_date(scheduled_at, tz_name: str) -> str | None:
     return local_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _prepare_thumbnail_upload(
+    thumbnail_path: str | Path | None,
+    platform_codes: list[str],
+) -> tuple[Path, str] | None:
+    """
+    Valida a thumbnail para envio ao Upload-Post.
+
+    Retorna (path, mime_type) quando estiver válida e o YouTube estiver entre as
+    plataformas; caso contrário, retorna ``None`` e apenas loga warnings — falha
+    de thumbnail nunca deve quebrar a publicação do vídeo.
+    """
+    if not thumbnail_path:
+        return None
+    if "youtube" not in platform_codes:
+        return None
+    try:
+        thumb_path = Path(thumbnail_path)
+    except TypeError:
+        logger.warning("[UploadPost] Thumbnail path inválido: %r", thumbnail_path)
+        return None
+    if not thumb_path.exists():
+        logger.warning("[UploadPost] Thumbnail não encontrada em %s — seguindo sem capa", thumb_path)
+        return None
+    try:
+        size_bytes = thumb_path.stat().st_size
+    except OSError as e:
+        logger.warning("[UploadPost] Falha ao ler thumbnail %s: %s — seguindo sem capa", thumb_path, e)
+        return None
+    if size_bytes > UPLOAD_POST_THUMBNAIL_MAX_SIZE_BYTES:
+        logger.warning(
+            "[UploadPost] Thumbnail %.2f MB excede limite de %.0f MB — seguindo sem capa (path=%s)",
+            size_bytes / (1024 * 1024),
+            UPLOAD_POST_THUMBNAIL_MAX_SIZE_BYTES / (1024 * 1024),
+            thumb_path,
+        )
+        return None
+    mime_type, _ = mimetypes.guess_type(str(thumb_path))
+    if not mime_type or not mime_type.startswith("image/"):
+        # Upload-Post aceita JPG/PNG/GIF/BMP. Default seguro: image/jpeg.
+        mime_type = "image/jpeg"
+    return thumb_path, mime_type
+
+
 class UploadPostPublishError(Exception):
     """Erro ao publicar via Upload-Post."""
 
@@ -97,6 +145,7 @@ def publish_to_upload_post(
     timezone_name: str = "America/Sao_Paulo",
     request_id: str | None = None,
     idempotency_key: str | None = None,
+    thumbnail_path: str | Path | None = None,
 ) -> dict:
     """
     Publica vídeo no Upload-Post para as plataformas indicadas.
@@ -107,6 +156,10 @@ def publish_to_upload_post(
     request_id: identificador estável do cliente para reconciliação do status.
     idempotency_key: chave estável para o Upload Post reaproveitar o mesmo job
     em retries após timeout/queda de conexão.
+    thumbnail_path: caminho local da capa customizada. Só é enviada quando ``YOUTUBE``
+    está em ``platforms`` e o arquivo existe e está dentro do limite de 2 MB.
+    Upload-Post ignora capa customizada em Shorts; o chamador deve passar somente
+    para vídeos longos.
     Retorna {"success": bool, "request_id": str?, "provider_request_id": str?, "error": str?}
     """
     api_key = os.getenv("UPLOAD_POST_API_KEY") or getattr(settings, "UPLOAD_POST_API_KEY", "")
@@ -136,9 +189,23 @@ def publish_to_upload_post(
     if provider_idempotency_key:
         headers["Idempotency-Key"] = provider_idempotency_key
         headers["X-Idempotency-Key"] = provider_idempotency_key
+
+    thumbnail_file = _prepare_thumbnail_upload(thumbnail_path, platform_codes)
     try:
-        with open(path, "rb") as f:
-            files = {"video": (path.name, f, "video/mp4")}
+        with contextlib.ExitStack() as stack:
+            video_fh = stack.enter_context(open(path, "rb"))
+            files: list[tuple[str, tuple[str, object, str]]] = [
+                ("video", (path.name, video_fh, "video/mp4")),
+            ]
+            if thumbnail_file is not None:
+                thumb_path_obj, thumb_mime = thumbnail_file
+                thumb_fh = stack.enter_context(open(thumb_path_obj, "rb"))
+                files.append(("thumbnail", (thumb_path_obj.name, thumb_fh, thumb_mime)))
+                logger.info(
+                    "[UploadPost] Enviando thumbnail customizada (path=%s, mime=%s)",
+                    thumb_path_obj.name,
+                    thumb_mime,
+                )
             form_data = [
                 ("user", user),
                 ("title", safe_title),
