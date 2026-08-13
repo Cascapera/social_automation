@@ -15,6 +15,24 @@ o build** e obriga quem a fez a atualizar o hash no mesmo PR.
 **Se você mudou um prompt de propósito**, o teste vai falhar dizendo qual. Rode-o, copie o
 hash novo para cá e descreva a mudança editorial na mensagem do commit. A falha não é um
 obstáculo — é o registro de que o texto enviado ao modelo mudou.
+
+## O que entra no congelamento, e o que não entra
+
+**Só entra conteúdo que vai para o modelo:** prompts, templates e os blocos de vocabulário
+que eles concatenam. É o que está exportado em `apps.auto_cuts.prompts.__all__`, e as duas
+listas são verificadas uma contra a outra em `CoberturaDoCongelamentoTests`.
+
+**Não entra dado de negócio nem configuração de cliente** — `GROK_PRICING`,
+`GROK_MODEL_ALIASES`, `LLM_PROVIDER_DEFAULTS`, `GROK_OPERATION_*`. Esses mudam por motivo
+legítimo e rotineiro: o fornecedor reajusta o preço, um modelo é descontinuado, um provedor
+novo entra. Travá-los cobraria cerimônia de revisão sem nada em troca.
+
+> **Esta regra nasceu de um erro meu, no dia seguinte ao R-18.** A primeira versão congelou
+> *toda* constante em maiúsculas, porque o baseline foi capturado com uma varredura ampla —
+> o que era certo para **provar que a mudança de casa foi pura**, e errado como **trava
+> permanente**. As duas coisas têm escopos diferentes e eu usei a mesma lista para as duas.
+> O commit `343acbc`, que só adicionava o preço do `gemini-2.5-flash`, quebrou o build por
+> isso. O teste funcionou — só estava mirando no alvo errado.
 """
 
 from __future__ import annotations
@@ -25,7 +43,6 @@ from django.test import SimpleTestCase
 
 from apps.auto_cuts import prompts
 from apps.auto_cuts.services import grok
-from apps.auto_cuts.services.grok_pricing import GROK_PRICING
 
 HASHES_CONSTANTES = {
     'ALL_THEME_CATEGORIES': 'c760dcae371fcf83',
@@ -42,13 +59,6 @@ HASHES_CONSTANTES = {
     'CTR_WORDS_PT': 'fef4ba08cc9239ca',
     'FORBIDDEN_WORDS_EN': 'fb678fc13d72509e',
     'FORBIDDEN_WORDS_PT': '7d8ff4707c6e35da',
-    'GROK_MODEL_ALIASES': '4153e18be66f3db9',
-    'GROK_OPERATION_ANALYZE_CHUNKS': 'd552206ce49eca7e',
-    'GROK_OPERATION_READY_CUTS_TITLES_FROM_JOB_NAME': '5e634ae8058928b3',
-    'GROK_OPERATION_READY_CUTS_TITLES_FROM_TRANSCRIPTS': 'f1238cd9a4ff156b',
-    'GROK_OPERATION_READY_CUT_METADATA': 'fbfb1161d1b87716',
-    'GROK_PRICING': '06846f774a00217b',
-    'LLM_PROVIDER_DEFAULTS': 'eedc346bc40211f8',
     'METADATA_SAFETY_RULES_EN': 'bf85eff6a10fc0b2',
     'METADATA_SAFETY_RULES_PT': 'd50ece86453efe7b',
     'READY_CUT_SYSTEM_PROMPT_BASE': '8d2fccb940273b6f',
@@ -81,16 +91,13 @@ def _hash(valor) -> str:
 
 
 def _constante(nome):
-    """Busca o nome onde ele mora hoje — no pacote de prompts ou ainda no grok."""
-    for modulo in (prompts, grok):
-        if hasattr(modulo, nome):
-            return getattr(modulo, nome)
-    if nome == "GROK_PRICING":
-        return GROK_PRICING
-    raise AssertionError(
-        f"{nome} sumiu do código. Se foi removido de propósito, tire a entrada de "
-        "HASHES_CONSTANTES no mesmo PR e diga por quê."
-    )
+    """Tudo o que é congelado mora no pacote de prompts — é essa a fronteira."""
+    if not hasattr(prompts, nome):
+        raise AssertionError(
+            f"{nome} não está em apps.auto_cuts.prompts. Se saiu de propósito, tire a "
+            "entrada de HASHES_CONSTANTES no mesmo PR e diga por quê."
+        )
+    return getattr(prompts, nome)
 
 
 class PromptsNaoMudaramTests(SimpleTestCase):
@@ -125,24 +132,41 @@ class PromptsNaoMudaramTests(SimpleTestCase):
 
 
 class CoberturaDoCongelamentoTests(SimpleTestCase):
-    """Prompt novo sem hash não pode passar despercebido.
+    """A lista congelada e o `__all__` do pacote têm de ser o mesmo conjunto.
 
-    Sem esta verificação, a proteção só valeria para os prompts que existiam no dia do
-    R-18: bastaria adicionar `SYSTEM_PROMPT_NOVO` para ter conteúdo indo ao modelo sem
-    nenhum registro de quando mudou.
+    Nos dois sentidos, e cada direção pega um erro diferente:
+
+    - **prompt sem hash** — bastaria adicionar `SYSTEM_PROMPT_NOVO` para ter conteúdo indo
+      ao modelo sem nenhum registro de quando mudou.
+    - **hash sem prompt** — entrada que sobrou de um prompt removido. Passa despercebida
+      para sempre, porque ninguém repara num teste que continua verde.
+
+    Manter as duas listas presas uma à outra é o que evita o congelamento virar decoração.
     """
 
-    def test_todo_prompt_publico_tem_hash_congelado(self):
-        expostos = {
+    def _prompts_expostos(self) -> set[str]:
+        return {
             nome
             for nome in getattr(prompts, "__all__", [])
             if isinstance(getattr(prompts, nome), (str, list, set, dict, tuple))
         }
-        sem_hash = sorted(expostos - set(HASHES_CONSTANTES))
+
+    def test_todo_prompt_publico_tem_hash_congelado(self):
+        sem_hash = sorted(self._prompts_expostos() - set(HASHES_CONSTANTES))
 
         self.assertEqual(
             sem_hash,
             [],
             "Prompt exportado sem hash congelado. Rode o teste, pegue o hash e adicione "
             f"em HASHES_CONSTANTES. Faltando: {sem_hash}",
+        )
+
+    def test_nenhum_hash_congelado_sobrou_sem_prompt(self):
+        orfaos = sorted(set(HASHES_CONSTANTES) - self._prompts_expostos())
+
+        self.assertEqual(
+            orfaos,
+            [],
+            "Hash congelado sem prompt correspondente em prompts.__all__ — provavelmente "
+            f"sobrou de um prompt removido. Tire a entrada. Órfãos: {orfaos}",
         )
