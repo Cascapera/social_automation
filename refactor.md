@@ -23,15 +23,27 @@ que nasça uma sexta cópia. Suíte de 288 → **365 testes**.
 > de `fix` nasceram". R-06 fez a atomicidade; R-07 fez a unificação. O que vem a seguir na
 > onda 1 é fatiamento de função: valioso, mas não é mais sangramento.
 
-Foi 1 PR nesta sessão: **#36** (R-07). Na anterior foram 4: #32, #33, #34 e #35.
+Foram 2 PRs nesta sessão: **#36** (R-07) e **#37** (R-17 lote 1). Na anterior foram 4:
+#32, #33, #34 e #35.
 
-> 🔴 **A catraca está a 0,01pp de estourar.** O CI mediu **42,01%** contra um piso de
-> **42,0** (era 42,03 antes do R-07). Uma linha nova sem teste derruba o build do próximo
-> item. **Antes de começar o R-08, gastar 30 minutos subindo a cobertura** de qualquer
-> módulo barato — `apps/social/publishers/__init__.py` está em 25%, `settings_test.py` em
-> 91%, e há 43 arquivos em 0%. Não é dívida do R-07: o número já vinha raspando desde o
-> R-04, e cada item que **remove** código bem coberto (como o R-08 vai fazer) empurra o
-> total para baixo mesmo sem piorar nada.
+O **#37** encerrou a única "dependência técnica que atravessa ondas" que o plano
+registrava — descobrindo que ela **não existia**: `YOUTUBE_CHECK_CLIENT_ENABLED` era
+código morto, não um ramo intestável. Ver **L-9**, que também levanta a dúvida sobre a
+contagem do D-08.
+
+> ⚠ **A catraca segue apertada, mas respirou.** Trajetória no CI: 42,03 antes do R-07 →
+> **42,01** depois dele (0,01pp de margem) → **42,08** depois do R-17 lote 1. A margem
+> atual é de **0,08pp** sobre o piso de 42,0.
+>
+> **Não subi o piso de propósito.** O R-08 é movimentação pura de código bem coberto: ele
+> muda o denominador sem melhorar nada, e tende a empurrar o total para baixo. Subir a
+> catraca agora garantiria build vermelho no próximo item por um motivo que não tem a ver
+> com o trabalho. Subir depois do R-08, com o número já estabilizado.
+>
+> Se apertar de novo, o jeito honesto de ganhar margem é o do R-17: cobrir ramo que estava
+> intestável, não somar teste em módulo barato. `youtube_credentials.py` (13%) e
+> `youtube_fetch.py` (8%) são os próximos candidatos naturais — ficaram testáveis agora
+> que a configuração deles responde a `override_settings`.
 
 > ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
 > (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
@@ -54,6 +66,7 @@ Foi 1 PR nesta sessão: **#36** (R-07). Na anterior foram 4: #32, #33, #34 e #35
 | **R-23** · `post.error` sobrevivia num post `DONE` | [#34](https://github.com/Cascapera/social_automation/pull/34) | mergeado · **falta deploy** |
 | **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | mergeado · **falta deploy em janela** |
 | **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | mergeado · **falta deploy** |
+| **R-17 lote 1** · `YOUTUBE_CHECK_*` em `settings` | [#37](https://github.com/Cascapera/social_automation/pull/37) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: deploy, e só depois R-08
@@ -721,10 +734,13 @@ apps/auto_cuts/                          apps/auto_cuts/
 
 ### Áreas intestáveis no design atual
 
-- **`YOUTUBE_CHECK_CLIENT_ENABLED` (`apps/social/tasks.py:65`)** — lido no import. Mudança
-  mínima que torna testável: mover para `settings.py` e ler via `settings.` no ponto de
-  uso (R-17). **Sem isso, R-04 não consegue cobrir esse ramo** — é a única dependência
-  técnica que atravessa ondas.
+- ~~**`YOUTUBE_CHECK_CLIENT_ENABLED` (`apps/social/tasks.py:65`)** — lido no import.~~
+  **A premissa estava errada, e o R-17 mostrou por quê (2026-08-13).** Não havia ramo
+  intestável: a constante era **código morto** — nada no repositório a lia. Foi removida.
+  A configuração `YOUTUBE_CHECK_*` está em `settings.py` desde o R-17 lote 1
+  ([#37](https://github.com/Cascapera/social_automation/pull/37)), e o ramo de verdade que
+  a migração destravou — `get_check_client_config()` — tem teste. **Não existe, portanto,
+  dependência técnica atravessando ondas.**
 - **Regra dentro de view (`apps/api/views.py:1189`, `:1250`)** — só testável via request
   HTTP. R-14 resolve extraindo para serviço; até lá, CT-3 testa por HTTP mesmo.
 
@@ -851,8 +867,9 @@ Risco:       baixo
 Reversão:    rollback simples
 Esforço:     1 dia
 Ganho:       destrava R-09 a R-13 — a parte mais pesada do plano
-LIMITE CONHECIDO: o ramo de YOUTUBE_CHECK_CLIENT_ENABLED (apps/social/tasks.py:65) não
-             é coberto aqui; depende de R-17. Registrar como gap explícito no arquivo.
+LIMITE CONHECIDO — ENCERRADO no R-17 (2026-08-13): o "ramo de
+             YOUTUBE_CHECK_CLIENT_ENABLED" não existia. A constante era código morto,
+             lida por ninguém. Não havia o que cobrir; foi removida.
 CONCLUÍDO em 2026-08-12: 22 testes, 9 guardas (não 6). Descobriu R-22 e R-23.
 ```
 
@@ -1187,7 +1204,14 @@ O que muda:  EXPAND-CONTRACT em 3 etapas, uma por PR:
              (a) adicionar a setting em settings.py com o MESMO default do getenv atual
              (b) migrar os leitores para settings.X — em lotes de ~6 arquivos por PR
              (c) remover os os.getenv órfãos
-             Prioridade: apps/social/tasks.py:65-68 primeiro (é o que trava R-04)
+             Prioridade: era "apps/social/tasks.py:65-68 primeiro, é o que trava R-04".
+             FEITO no lote 1 (#37) — e a justificativa caiu junto: a constante daquelas
+             linhas era código morto, não um ramo travado. Ver L-9.
+LOTE 1 CONCLUÍDO (#37): YOUTUBE_CHECK_CLIENT_ID/_SECRET/_REDIRECT_URI e
+             GOOGLE_CLIENT_ID/_SECRET, em 3 leitores. Etapas (a), (b) e (c) juntas —
+             como os 3 leitores foram migrados de uma vez, não houve janela de variável
+             órfã, então o intervalo de 1 semana entre (b) e (c) não se aplicou.
+             Restam ~52 os.getenv em ~15 arquivos para os próximos lotes.
 Não muda:    nenhum default. Toda variável de ambiente hoje suportada continua
              funcionando com o mesmo nome e o mesmo valor padrão.
 Pré-requisito: R-02
@@ -1484,6 +1508,7 @@ nada. A abordagem incremental deste plano é a correta.
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
            6 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06, R-07)
+           1 em andamento por lotes (R-17 — lote 1 mergeado, ~52 getenv restantes)
            ✅ Onda 0 fechada · ✅ D-02 fechado (R-06 + R-07)
            ▶ próximo: deploy → 48h de observação → R-08
            atualizado em 2026-08-13
@@ -1845,19 +1870,26 @@ Itens que exigem parada de produção: 0
 
 ### Onda 3 — Config, LLM e higiene  ·  ~30h
 
-- [ ] **R-17** · Centralizar configuração em settings (expand-contract, 3 PRs)
-      risco: médio · 6h · ⚠ **produção: requer cuidado** · 3 PRs de ~150 linhas
-      pré-requisito: R-02 · *antecipar a etapa (a) para `tasks.py:65-68` na onda 0*
-  - [ ] PR (a) — settings adicionadas, revisadas **variável por variável** em diff lado a lado
-  - [ ] PR (b) — leitores migrados em lotes de ~6 arquivos
-  - [ ] Teste comparando `settings.X` × `os.getenv` equivalente
-  - [ ] Implantado (a) e (b) · verificado em produção: FFmpeg presets, filas, flags YouTube
-  - [ ] ⏳ **1 semana de observação cumprida antes da etapa (c)**
-  - [ ] PR (c) — `os.getenv` órfãos removidos  ⚠ *ponto sem volta*
-  - [ ] `grep 'os.getenv' apps/` retorna 0
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] Commitado — `<hash>` (a) ____ (b) ____ (c) ____
-  - Status: não iniciado · Notas:
+- [ ] **R-17** · Centralizar configuração em settings (expand-contract, por lotes)
+      risco: médio · 6h · ⚠ **produção: requer cuidado** · PRs de ~150 linhas
+      pré-requisito: R-02
+  - **Lote 1 — `YOUTUBE_CHECK_*` + `GOOGLE_CLIENT_*`** — [#37](https://github.com/Cascapera/social_automation/pull/37)
+    - [x] Settings adicionadas, revisadas **variável por variável**
+    - [x] 3 leitores migrados (`youtube_credentials`, `youtube_oauth`, `youtube_fetch`)
+    - [x] Teste comparando `settings.X` × `os.getenv` equivalente — 9 casos
+    - [x] Etapa (c) junto: nenhum `os.getenv("YOUTUBE_CHECK_*")` órfão, com anti-drift
+          no CI. Sem janela de órfã porque os 3 leitores foram migrados de uma vez —
+          por isso o intervalo de 1 semana entre (b) e (c) não se aplicou a este lote
+    - [x] Suíte verde (365 → **374**) · Lint verde · cobertura 42,21% → **42,27%** local
+    - [x] Commitado — `c516ebb`
+    - [ ] Implantado · verificado: OAuth de factory-check funcionando
+  - **Próximos lotes** — restam ~52 `os.getenv` em ~15 arquivos
+    - [ ] Lote 2 — FFmpeg / filas Celery
+    - [ ] Lote 3 — o resto
+    - [ ] `grep 'os.getenv' apps/` retorna 0
+  - Status: **em andamento — lote 1 mergeado, aguardando deploy** · Notas: o lote 1
+    encerrou o "gap do R-04" descobrindo que ele não existia — `YOUTUBE_CHECK_CLIENT_ENABLED`
+    era **código morto**, não um ramo travado. Ver **L-9**.
 
 - [ ] **R-18** · Separar prompts do cliente em `apps/auto_cuts/prompts/`
       risco: baixo · 4h · produção: transparente · PR: ~1.240 linhas movidas / ~6 arquivos
@@ -1994,6 +2026,19 @@ código:
 - **Vale congelar features em `apps/social/` durante a onda 1** (~2 semanas), ou é
   preferível aceitar rebases frequentes? Isso muda o risco de conflito de "alto" para
   "baixo".
+
+**L-9 · Três afirmações deste documento estavam erradas sobre a mesma constante.**
+`YOUTUBE_CHECK_CLIENT_ENABLED` aparecia como "área intestável" (seção 6), como
+`LIMITE CONHECIDO` do R-04 e como a prioridade do R-17 — todas dizendo que existia um
+ramo intestável porque a flag era lida no import. **Era código morto: ninguém a lia.**
+Removida no R-17 lote 1.
+
+O erro tem causa comum e vale para o resto do plano: a análise leu a *definição* da
+constante e inferiu o *uso* pelo nome dela, sem verificar se havia leitor. É o mesmo
+formato de erro do **L-4** (duplicação medida por padrão textual, não por ferramenta), e
+sugere revisar a mesma pergunta nos outros itens de configuração: das 57 ocorrências de
+`os.getenv` contadas no D-08, **quantas alimentam algo que alguém lê?** O número de
+variáveis realmente vivas pode ser menor que o contado.
 
 **L-8 · Não executei nada além da suíte de testes.** Não subi a aplicação, não processei
 vídeo, não chamei a API do YouTube. Toda afirmação sobre comportamento em runtime vem de
