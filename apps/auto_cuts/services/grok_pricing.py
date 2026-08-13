@@ -26,7 +26,12 @@ GROK_PRICING = {
         "cached_input_per_1k": 0.00125,
         "output_per_1k": 0.0025,
     },
-    # Google — input $0.10/M, output $0.40/M
+    # Google — input $0.10/M, output $0.40/M (gemini-2.0-flash descontinuado p/ contas novas)
+    "gemini-2.5-flash": {
+        "input_per_1k": 0.0001,
+        "cached_input_per_1k": 0.0001,
+        "output_per_1k": 0.0004,
+    },
     "gemini-2.0-flash": {
         "input_per_1k": 0.0001,
         "cached_input_per_1k": 0.0001,
