@@ -23,27 +23,30 @@ que nasça uma sexta cópia. Suíte de 288 → **365 testes**.
 > de `fix` nasceram". R-06 fez a atomicidade; R-07 fez a unificação. O que vem a seguir na
 > onda 1 é fatiamento de função: valioso, mas não é mais sangramento.
 
-Foram 2 PRs nesta sessão: **#36** (R-07) e **#37** (R-17 lote 1). Na anterior foram 4:
-#32, #33, #34 e #35.
+Foram 3 PRs nesta sessão: **#36** (R-07), **#37** (R-17 lote 1) e **#38** (R-18). Na
+anterior foram 4: #32, #33, #34 e #35.
 
-O **#37** encerrou a única "dependência técnica que atravessa ondas" que o plano
-registrava — descobrindo que ela **não existia**: `YOUTUBE_CHECK_CLIENT_ENABLED` era
-código morto, não um ramo intestável. Ver **L-9**, que também levanta a dúvida sobre a
-contagem do D-08.
+Dois diagnósticos fechados hoje: **D-02** (máquina de estados duplicada) e **D-09**
+(prompts dentro do cliente HTTP). Os dois maiores arquivos do projeto encolheram —
+`grok.py` de 2.057 para **897 linhas**.
 
-> ⚠ **A catraca segue apertada, mas respirou.** Trajetória no CI: 42,03 antes do R-07 →
-> **42,01** depois dele (0,01pp de margem) → **42,08** depois do R-17 lote 1. A margem
-> atual é de **0,08pp** sobre o piso de 42,0.
+⚠ **Os dois itens de hoje acharam código morto que o plano tratava como vivo** — a flag do
+R-17 e as listas de palavras do R-18. Está registrado em **L-9**, com a pergunta que isso
+levanta sobre as outras contagens deste documento.
+
+> ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
+> depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
+> R-18. A margem sobre o piso de 42,0 é de **0,22pp**.
 >
-> **Não subi o piso de propósito.** O R-08 é movimentação pura de código bem coberto: ele
-> muda o denominador sem melhorar nada, e tende a empurrar o total para baixo. Subir a
-> catraca agora garantiria build vermelho no próximo item por um motivo que não tem a ver
-> com o trabalho. Subir depois do R-08, com o número já estabilizado.
+> **Ainda não subi o piso, de propósito.** O R-08 é movimentação pura de código bem
+> coberto: muda o denominador sem melhorar nada e tende a puxar o total para baixo. Subir
+> a catraca antes dele garantiria build vermelho por um motivo alheio ao trabalho.
+> **Subir logo depois do R-08**, com o número estabilizado.
 >
-> Se apertar de novo, o jeito honesto de ganhar margem é o do R-17: cobrir ramo que estava
-> intestável, não somar teste em módulo barato. `youtube_credentials.py` (13%) e
-> `youtube_fetch.py` (8%) são os próximos candidatos naturais — ficaram testáveis agora
-> que a configuração deles responde a `override_settings`.
+> As duas subidas vieram do jeito honesto — cobrir ramo que estava intestável, não somar
+> teste em módulo barato. Se apertar de novo, os próximos candidatos naturais são
+> `youtube_credentials.py` (13%) e `youtube_fetch.py` (8%), que ficaram testáveis agora que
+> a configuração deles responde a `override_settings`.
 
 > ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
 > (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
@@ -67,6 +70,7 @@ contagem do D-08.
 | **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | mergeado · **falta deploy em janela** |
 | **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | mergeado · **falta deploy** |
 | **R-17 lote 1** · `YOUTUBE_CHECK_*` em `settings` | [#37](https://github.com/Cascapera/social_automation/pull/37) | mergeado · **falta deploy** |
+| **R-18** · prompts fora do `grok.py` (2.057 → 897) | [#38](https://github.com/Cascapera/social_automation/pull/38) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: deploy, e só depois R-08
@@ -557,7 +561,15 @@ segunda fonte da verdade fora dele.
 
 ---
 
-### D-09 · `grok.py`: ~1.235 linhas de prompt misturadas com cliente HTTP
+### D-09 · ~~`grok.py`: ~1.235 linhas de prompt misturadas com cliente HTTP~~ — RESOLVIDO em R-18
+
+> **Fechado em 2026-08-13** ([#38](https://github.com/Cascapera/social_automation/pull/38)).
+> `grok.py` foi de **2.057 para 897 linhas**; prompts, vocabulário e tabela de preço estão
+> em `apps/auto_cuts/prompts/` e `grok_pricing.py`. O `git blame` de prompt voltou a
+> funcionar, e o teste de hash faz a mudança editorial **aparecer na revisão** em vez de se
+> esconder num diff de código — que era a segunda metade da queixa deste diagnóstico.
+
+
 
 **Onde:** `apps/auto_cuts/services/grok.py` — 2.057 linhas. A primeira função só aparece
 na **linha 1236**. Antes disso: tabela de preços (`GROK_PRICING`, linha 39), listas de
@@ -1507,9 +1519,9 @@ nada. A abordagem incremental deste plano é a correta.
 ```
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
-           6 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06, R-07)
+           7 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06, R-07, R-18)
            1 em andamento por lotes (R-17 — lote 1 mergeado, ~52 getenv restantes)
-           ✅ Onda 0 fechada · ✅ D-02 fechado (R-06 + R-07)
+           ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
            ▶ próximo: deploy → 48h de observação → R-08
            atualizado em 2026-08-13
 Itens que exigem parada de produção: 0
@@ -1891,16 +1903,26 @@ Itens que exigem parada de produção: 0
     encerrou o "gap do R-04" descobrindo que ele não existia — `YOUTUBE_CHECK_CLIENT_ENABLED`
     era **código morto**, não um ramo travado. Ver **L-9**.
 
-- [ ] **R-18** · Separar prompts do cliente em `apps/auto_cuts/prompts/`
-      risco: baixo · 4h · produção: transparente · PR: ~1.240 linhas movidas / ~6 arquivos
+- [x] **R-18** · Separar prompts do cliente em `apps/auto_cuts/prompts/`
+      risco: baixo · 4h · produção: transparente · PR: 1.184 linhas movidas / 6 arquivos
       pré-requisito: nenhum — pode rodar em paralelo desde o início
-  - [ ] Teste de **hash dos prompts montados** antes × depois — idênticos
-  - [ ] Nenhum texto de prompt reescrito
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
+  - [x] Teste de **hash dos prompts montados** antes × depois — **43 nomes, zero
+        divergência**. Baseline capturado antes de qualquer alteração, contra o arquivo
+        de 2.057 linhas
+  - [x] Nenhum texto de prompt reescrito — recorte por **AST**, não por número de linha
+  - [x] Suíte completa verde (374 → **377**) · Lint verde · cobertura 42,27% → **42,42%**
+  - [x] PR aberto e revisado — [#38](https://github.com/Cascapera/social_automation/pull/38)
+  - [ ] Implantado
   - [ ] Verificado — custo médio por análise e taxa de retry do Grok estáveis
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas: `grok.py` final = ____ linhas (era 2.057)
+  - [x] Commitado — `4a4c1a4`
+  - Status: **em andamento — aguardando deploy** · Notas: `grok.py` final = **897 linhas**
+    (era 2.057). O teste de hash **ficou permanente** em vez de ser descartado depois de
+    usar: mudança de prompt quebra o build e exige atualizar o hash no mesmo PR. É a outra
+    metade do D-09 — separar arquivos resolveu o `git blame`; isto faz a mudança editorial
+    aparecer na revisão. Verificado por mutação que pega alteração de 1 caractere.
+    ⚠ **Segunda ocorrência do L-9**: `CTR_WORDS_*` e `FORBIDDEN_WORDS_*` (~60 linhas) não
+    são lidas por ninguém. Movidas, não apagadas — são conteúdo editorial e a intenção de
+    quem escreveu não está no código. Ver item aberto abaixo.
 
 - [ ] **R-19** · Fatiar os fluxos de `auto_cuts` para `services/` (4 PRs)
       risco: médio · 2d · produção: transparente · 4 PRs de ~300-400 linhas
@@ -2035,10 +2057,22 @@ Removida no R-17 lote 1.
 
 O erro tem causa comum e vale para o resto do plano: a análise leu a *definição* da
 constante e inferiu o *uso* pelo nome dela, sem verificar se havia leitor. É o mesmo
-formato de erro do **L-4** (duplicação medida por padrão textual, não por ferramenta), e
-sugere revisar a mesma pergunta nos outros itens de configuração: das 57 ocorrências de
-`os.getenv` contadas no D-08, **quantas alimentam algo que alguém lê?** O número de
-variáveis realmente vivas pode ser menor que o contado.
+formato de erro do **L-4** (duplicação medida por padrão textual, não por ferramenta).
+
+**A dúvida se confirmou no mesmo dia.** O R-18 encontrou a segunda ocorrência:
+`CTR_WORDS_PT`, `CTR_WORDS_EN`, `FORBIDDEN_WORDS_PT` e `FORBIDDEN_WORDS_EN` — ~60 linhas
+de listas de palavras em `grok.py`, descritas no D-09 como parte do conteúdo de prompt —
+**também não são lidas por nenhum código**. Foram movidas para `prompts/vocabulary.py` em
+vez de apagadas: são conteúdo editorial e a intenção de quem as escreveu não está no
+código, diferente do booleano do R-17.
+
+> ▶ **Decisão pendente para você:** ligar `CTR_WORDS_*` / `FORBIDDEN_WORDS_*` ao pipeline
+> (elas parecem ter sido escritas para filtrar títulos e thumbnails) ou removê-las? Não
+> bloqueia nada; enquanto não sair, ficam declaradas e sinalizadas no docstring.
+
+Duas ocorrências em dois itens sugerem que a pergunta vale para o resto: das 57 ocorrências
+de `os.getenv` do D-08 e das contagens de constantes deste documento, **quantas alimentam
+algo que alguém lê?** Vale rodar a verificação antes de estimar o próximo item, não depois.
 
 **L-8 · Não executei nada além da suíte de testes.** Não subi a aplicação, não processei
 vídeo, não chamei a API do YouTube. Toda afirmação sobre comportamento em runtime vem de
