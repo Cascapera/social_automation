@@ -73,47 +73,52 @@ levanta sobre as outras contagens deste documento.
 | **R-18** · prompts fora do `grok.py` (2.057 → 897) | [#38](https://github.com/Cascapera/social_automation/pull/38) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
-### ▶ PRÓXIMO PASSO: deploy, e só depois R-08
+### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
 
-⏸ **O plano manda deixar R-06+R-07 em produção por ≥48h antes de seguir para o R-08**
-(seção 8). São os dois itens que mexeram na atomicidade e na unificação da transição de
-publicação — é o ponto de maior atenção do projeto inteiro, e o R-08 em cima deles sem
-observação nenhuma desperdiça a janela de verificação.
+✅ **Deploy feito em 2026-08-13.** O plano manda deixar R-06+R-07 em produção por **≥48h**
+antes de seguir para o R-08 (seção 8) — são os dois itens que mexeram na atomicidade e na
+unificação da transição de publicação, o ponto de maior atenção do projeto inteiro.
 
-Então a ordem é: **deploy → 48h de observação → R-08**. O R-08 já está destravado
-(pré-requisito é o R-04, que está feito) e é movimentação pura, de risco baixo.
+Contando do deploy, o R-08 libera em **2026-08-15**. Ele já está destravado do lado
+técnico (pré-requisito é o R-04, feito) e é movimentação pura, de risco baixo.
 
-> Se o deploy demorar e você quiser adiantar código, o R-05 e os itens da onda 3
-> (R-17, R-18) não tocam `apps/social/tasks.py` e não conflitam com nada em voo.
+> Enquanto a janela não fecha, o que não conflita com o R-08 é o **lote 2 do R-17**
+> (FFmpeg / filas Celery) e o **R-19** (fatiar `auto_cuts/tasks.py`, que convive bem com o
+> `prompts/` criado no R-18).
 
 ### 📌 O que fazer ao retomar
 
-1. `git pull` em `develop` (esperado: o merge da #36 ou mais novo).
-2. Ler esta seção e as 3 pendências fora do código, abaixo.
-3. Se o deploy já saiu e passaram 48h: começar o R-08 (seção 7).
+1. `git pull` em `develop` (esperado: `d7d2a59` ou mais novo).
+2. Conferir a tabela de verificação pós-deploy, abaixo — a janela vai até 2026-08-14.
+3. Se já passou 2026-08-15: começar o R-08 (seção 7).
 
-### ⚠ Duas pendências fora do código
+### ✅ Deploy feito em 2026-08-13
 
-1. **Deploy de R-01, R-21, R-22, R-23, R-06 e R-07 em produção.** Nenhum tem migração ou flag.
-   ⚠ **O R-06 pede janela de baixo tráfego de publicação** (a transação passa a segurar
-   lock em até 4 tabelas por alguns ms); os outros quatro podem ir a qualquer momento.
-   **Dois mudam comportamento observável e valem aviso antes:**
-   - **R-21** — hoje a reconciliação do YouTube aborta na primeira confirmação; depois do
-     deploy ela vai processar a fila acumulada e marcar itens como `POSTED` em lote. O
-     pico é o conserto, não um incidente. Verificar depois:
-     `publish_reconciliation_failures_total` caindo.
-   - **R-22** — posts de job sem render que hoje parecem **travados em PENDING** vão
-     passar a aparecer como **FAILED** com motivo legível. O número de FAILED sobe; é
-     diagnóstico ficando visível, não regressão.
+R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1 e R-18 estão em produção. **As
+verificações pós-deploy abaixo continuam valendo por 24h** — e o relógio de 48h para
+liberar o R-08 começou a contar a partir daqui.
 
-   - **R-07** — o ramo não-YouTube para de gerar `PostedVideoLog` duplicado e de gravar
-     log com `external_video_id` vazio. **A contagem de logs novos cai** — é a duplicata
-     sumindo, não perda de auditoria. E `attempt_count` passa a ser preenchido em itens
-     marcados manualmente ou pelo comando de reparo, que antes ficavam com valor velho.
+### ⚠ Pendências fora do código
+
+1. **Verificação pós-deploy — janela até 2026-08-14.** O que olhar, e o que cada número
+   significa. **Movimento esperado não é regressão** — três destes itens *devem* mexer nos
+   painéis:
+
+   | O quê | Esperado | Item |
+   | --- | --- | --- |
+   | `ScheduledPost` `DONE` com `VideoInventoryItem` não-`POSTED` | **0** — é a inconsistência que R-06+R-07 eliminam | R-06, R-07 |
+   | Deadlock no Postgres | **sem aumento** — a transação segura lock em até 4 tabelas por alguns ms | R-06 |
+   | `publish_reconciliation_failures_total` | **caindo** | R-21 |
+   | Itens saindo de "Aguardando Postagem" sozinhos, em lote | **pico esperado** — é a fila acumulada sendo processada, não incidente | R-21 |
+   | Posts `FAILED` com motivo legível | **sobe** — eram os travados em `PENDING`; é diagnóstico ficando visível | R-22 |
+   | `PostedVideoLog` novos no ramo não-YouTube | **cai** — é a duplicata sumindo, não perda de auditoria | R-07 |
+   | `attempt_count` em item marcado à mão | passa a ser preenchido (antes ficava com valor velho) | R-07 |
+   | `publish_duration_ms` em `/metrics` | **presente** | R-01 |
+   | OAuth de factory-check | **funcionando** — é o único fluxo que depende do `redirect_uri` migrado | R-17 |
+   | Custo médio por análise e taxa de retry do Grok | **estáveis** — nenhum byte enviado ao LLM mudou | R-18 |
 
    R-01 e R-23 são transparentes (R-23 só para de exibir erro em post que deu certo).
-   Verificação pós-deploy de R-06 e R-07, por 24h: `ScheduledPost` `DONE` com
-   `VideoInventoryItem` não-`POSTED` deve ser **0**, e sem aumento de deadlock no Postgres.
+
 2. **1 decisão de processo em aberto** (não bloqueia nada): vale congelar features em
    `apps/social/` durante o resto da onda 1, ou aceitar rebases? Está no **L-7**
    (seção 15). As 4 decisões técnicas que bloqueavam o R-07 já foram tomadas.
@@ -1519,10 +1524,11 @@ nada. A abordagem incremental deste plano é a correta.
 ```
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
-           7 mergeados aguardando deploy (R-01, R-21, R-22, R-23, R-06, R-07, R-18)
-           1 em andamento por lotes (R-17 — lote 1 mergeado, ~52 getenv restantes)
+           8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
+             (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
+           1 em andamento por lotes (R-17 — lote 1 implantado, ~52 getenv restantes)
            ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
-           ▶ próximo: deploy → 48h de observação → R-08
+           ▶ próximo: R-08, liberado a partir de 2026-08-15 (48h pos-deploy)
            atualizado em 2026-08-13
 Itens que exigem parada de produção: 0
 ```
@@ -2073,6 +2079,24 @@ código, diferente do booleano do R-17.
 Duas ocorrências em dois itens sugerem que a pergunta vale para o resto: das 57 ocorrências
 de `os.getenv` do D-08 e das contagens de constantes deste documento, **quantas alimentam
 algo que alguém lê?** Vale rodar a verificação antes de estimar o próximo item, não depois.
+
+**L-10 · Um teste de rede pode ter escopo largo demais, e isso custa.** O congelamento de
+hash do R-18 pegava *toda* constante em maiúsculas de `grok.py`. No dia seguinte, um commit
+que só adicionava o preço do `gemini-2.5-flash` **deixou o `develop` vermelho** — sem
+nenhum ganho, porque preço não é prompt.
+
+A causa: a mesma lista foi usada para dois propósitos com escopos diferentes. Para **provar
+que o R-18 foi movimentação pura**, varrer tudo era o certo — qualquer constante que mudasse
+indicaria recorte errado. Para **travar conteúdo que vai ao modelo**, tinha de ser só
+prompt. Corrigido em [#39](https://github.com/Cascapera/social_automation/pull/39): saíram
+as 7 entradas de preço, alias de modelo, base URL de provedor e rótulo de métrica; ficaram
+as 24 de conteúdo, com a fronteira presa a `prompts.__all__` e verificada nos dois sentidos.
+
+**A lição para os próximos itens:** ao converter uma verificação de refatoração em teste
+permanente, perguntar o que ela vai cobrar de quem mexer no código depois. Rede que cobra
+cerimônia de mudança legítima acaba desativada — ou pior, tolerada vermelha. Vale para os
+anti-drift que já estão no repositório (`posting_state`, `YOUTUBE_CHECK_*`): os dois são
+estreitos de propósito, mas convém reler cada um com esta pergunta antes de somar o próximo.
 
 **L-8 · Não executei nada além da suíte de testes.** Não subi a aplicação, não processei
 vídeo, não chamei a API do YouTube. Toda afirmação sobre comportamento em runtime vem de
