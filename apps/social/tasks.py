@@ -39,7 +39,6 @@ from apps.jobs.models import (
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
     Job,
-    PostedVideoLog,
     RenderOutput,
     ScheduledPost,
     VideoInventoryItem,
@@ -403,6 +402,21 @@ def _youtube_day_video_index(
     return index
 
 
+def _posted_platform_and_video_id(post: ScheduledPost) -> tuple[str, str]:
+    """Plataforma e id externo a registrar no log de publicação deste post.
+
+    A plataforma é sempre a primeira declarada no post; o id é o primeiro preenchido em
+    `external_ids`, que nem sempre é o da primeira plataforma (publicação parcial).
+    """
+    platform = (post.platforms or ["YT"])[0] if post.platforms else "YT"
+    external_video_id = ""
+    for code in post.platforms or []:
+        external_video_id = str((post.external_ids or {}).get(code) or "")
+        if external_video_id:
+            break
+    return platform, external_video_id
+
+
 def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
     schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
         "inventory_item", "factory", "brand"
@@ -410,74 +424,13 @@ def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
     if not schedule:
         return
     item = schedule.inventory_item
-    now = timezone.now()
-    is_youtube = _platforms_are_youtube_only(post.platforms)
     if post.status == "DONE":
-        if is_youtube:
-            # YouTube: successful upload means video is on channel (public or scheduled).
-            # Mark POSTED for Posted Videos list and skip re-check (saves quota).
-            schedule.status = "DONE"
-            schedule.attempt_count = int(post.retry_count or 0)
-            schedule.next_retry_at = None
-            schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-            item.status = "POSTED"
-            item.posted_at = post.posted_at or now
-            item.scheduled_for = post.scheduled_at
-            item.last_error = ""
-            item.attempt_count = int(post.retry_count or 0)
-            item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-            external_video_id = ""
-            for code in (post.platforms or []):
-                external_video_id = str((post.external_ids or {}).get(code) or "")
-                if external_video_id:
-                    break
-            if external_video_id and not PostedVideoLog.objects.filter(
-                inventory_item=item,
-                external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
-                external_video_id=external_video_id,
-            ).exists():
-                PostedVideoLog.objects.create(
-                    factory=schedule.factory,
-                    brand=schedule.brand,
-                    inventory_item=item,
-                    external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
-                    external_video_id=external_video_id,
-                    posted_at=post.posted_at or now,
-                    metadata_snapshot={
-                        "scheduled_post_id": post.id,
-                        "platforms": post.platforms or [],
-                        "external_ids": post.external_ids or {},
-                    },
-                )
-            return
-        schedule.status = "DONE"
-        schedule.attempt_count = int(post.retry_count or 0)
-        schedule.next_retry_at = None
-        schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        item.status = "POSTED"
-        item.posted_at = post.posted_at or now
-        item.scheduled_for = post.scheduled_at  # fills schedule time once YouTube confirmed
-        item.last_error = ""
-        item.attempt_count = int(post.retry_count or 0)
-        item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-        external_video_id = ""
-        for code in (post.platforms or []):
-            external_video_id = str((post.external_ids or {}).get(code) or "")
-            if external_video_id:
-                break
-        PostedVideoLog.objects.create(
-            factory=schedule.factory,
-            brand=schedule.brand,
-            inventory_item=item,
-            external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
-            external_video_id=external_video_id,
-            posted_at=post.posted_at or now,
-            metadata_snapshot={
-                "scheduled_post_id": post.id,
-                "platforms": post.platforms or [],
-                "external_ids": post.external_ids or {},
-            },
-        )
+        # Cópias A e B do D-02. Eram dois ramos — YouTube-only e demais canais — com o
+        # mesmo efeito, divergindo só em A deduplicar o PostedVideoLog e B não. Como B
+        # estava errado (log duplicado, log com id vazio), unificar em posting_state
+        # apagou a diferença em vez de escolher um lado (R-07, divergência 1).
+        platform, external_video_id = _posted_platform_and_video_id(post)
+        mark_posted(post, platform=platform, external_video_id=external_video_id)
         return
     if post.status == "FAILED":
         quota_attempts = int(getattr(post, "youtube_quota_retry_count", 0) or 0)
@@ -2116,7 +2069,7 @@ def reconcile_youtube_schedules_task():
                     post,
                     platform=platform,
                     external_video_id=video_id,
-                    metadata=verify_data,
+                    log_metadata={"youtube_verify": verify_data or {}},
                 )
                 _cleanup_local_media_if_possible(post)
                 continue
@@ -2359,7 +2312,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                         post,
                         platform=platform,
                         external_video_id=video_id,
-                        metadata={"full_scan": True, **yt_item},
+                        log_metadata={"youtube_verify": {"full_scan": True, **yt_item}},
                     )
                     summary["confirmed"] += 1
                     brand_confirmed += 1

@@ -46,6 +46,7 @@ from apps.jobs.services.subtitles import align_edited_to_original_words
 from apps.jobs.tasks import burn_subtitles_task, generate_subtitles_task, process_job
 from apps.mediahub.models import SourceVideo
 from apps.multiple_creator.models import MultipleCreatorJob
+from apps.social.services.posting_state import mark_item_posted
 from apps.social.services.youtube_description import build_youtube_description
 
 from .pagination import StandardResultsSetPagination
@@ -1467,12 +1468,6 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 posted_at = timezone.make_aware(posted_at, timezone.get_current_timezone())
         else:
             posted_at = timezone.now()
-        schedules = list(
-            FactoryPostingSchedule.objects.select_related("scheduled_post")
-            .filter(inventory_item=inventory)
-            .order_by("id")
-        )
-        scheduled_post_ids = [s.scheduled_post_id for s in schedules if getattr(s, "scheduled_post_id", None)]
         deleted_files = 0
         deleted_thumbnails = 0
         with transaction.atomic():
@@ -1489,39 +1484,19 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                     deleted_thumbnails += 1
                 except Exception:
                     pass
-            for post_id in scheduled_post_ids:
-                post = ScheduledPost.objects.filter(id=post_id).first()
-                if post:
-                    post.status = "DONE"
-                    post.posted_at = posted_at
-                    post.error = ""
-                    post.save(update_fields=["status", "posted_at", "error"])
-            for s in schedules:
-                s.status = "DONE"
-                s.save(update_fields=["status", "updated_at"])
-            inventory.status = "POSTED"
-            inventory.posted_at = posted_at
-            inventory.last_error = ""
-            inventory.save(update_fields=["status", "posted_at", "last_error", "updated_at"])
-            factory = inventory.factory
-            brand = inventory.brand
-            if brand and not PostedVideoLog.objects.filter(
-                inventory_item=inventory,
-                external_platform="MANUAL",
+            # Cópia D do D-02: a transição dos 4 modelos era escrita aqui dentro, num
+            # handler HTTP. Agora é do posting_state, o dono único (R-07). A remoção de
+            # mídia continua sendo da view — é efeito da ação, não da máquina de estados.
+            mark_item_posted(
+                inventory,
+                platform="MANUAL",
                 external_video_id="manual",
-            ).exists():
-                PostedVideoLog.objects.create(
-                    factory=factory,
-                    brand=brand,
-                    inventory_item=inventory,
-                    external_platform="MANUAL",
-                    external_video_id="manual",
-                    posted_at=posted_at,
-                    metadata_snapshot={
-                        "manual_post": True,
-                        "manual_posted_at": posted_at.isoformat(),
-                    },
-                )
+                posted_at=posted_at,
+                log_metadata={
+                    "manual_post": True,
+                    "manual_posted_at": posted_at.isoformat(),
+                },
+            )
         return Response(
             {
                 "ok": True,
