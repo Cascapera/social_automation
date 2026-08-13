@@ -25,11 +25,13 @@ O que está coberto aqui:
   2. Slot da factory expirado — antes de começar e durante a pausa da factory.
   3. Caminho feliz até `status=DONE`, com o estado final completo.
 
-⚠ GAP CONHECIDO (registrado no refactor.md, item R-04): o ramo de
-`YOUTUBE_CHECK_CLIENT_ENABLED` (`apps/social/tasks.py:65`) **não é coberto** por estes
-testes. A flag é lida no import do módulo, então não dá para exercitá-la sem
-`override_settings` funcional — o que depende do **R-17**. Ao fechar o R-17, voltar aqui e
-adicionar o caso.
+✅ ~~GAP CONHECIDO: o ramo de `YOUTUBE_CHECK_CLIENT_ENABLED`~~ — **encerrado no R-17, e não
+do jeito que o plano previa.** O gap foi registrado supondo que a flag fosse lida em algum
+ramo que os testes não alcançavam por ela estar congelada no import. Ao migrar a
+configuração para `settings`, apareceu o motivo real: **nada no repositório lia a flag**.
+Era código morto desde algum refactor anterior. Não havia ramo a cobrir — a constante foi
+removida. A configuração `YOUTUBE_CHECK_*` agora está em `settings` e tem teste próprio em
+`test_youtube_check_settings.py`.
 
 ⚠ FRONTEIRA: a reconciliação do Upload-Post (`_try_pending_upload_post_reconciliation`) já
 tem cobertura própria e mais profunda em `test_upload_post_reconciliation.py`. Aqui ela

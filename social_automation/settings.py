@@ -252,6 +252,23 @@ WHISPER_FORCE_CPU = os.getenv("WHISPER_FORCE_CPU", "1").lower() in ("1", "true",
 MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))
 
 
+# YouTube OAuth (refactor.md R-17 / D-08 — fonte única de configuração)
+# Cliente "check": credencial separada, usada só para CONSULTAR o canal (reconciliação e
+# busca de vídeos). Vazio = recurso desligado, e quem lê trata isso explicitamente.
+# Já vem com .strip() para que o ponto de uso não precise repetir a normalização — era
+# ela, copiada em 3 arquivos, que fazia a diferença entre "não configurado" e "espaço".
+YOUTUBE_CHECK_CLIENT_ID = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
+YOUTUBE_CHECK_CLIENT_SECRET = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+# Callback próprio do factory-check; NÃO reaproveitar YOUTUBE_REDIRECT_URI (é o de Contas).
+YOUTUBE_CHECK_REDIRECT_URI = (
+    (os.getenv("YOUTUBE_CHECK_REDIRECT_URI") or "").strip()
+    or "http://127.0.0.1:8000/api/youtube/factory-check-callback/"
+)
+# Fallback global de OAuth quando a brand não tem cliente próprio. None quando ausente —
+# o ponto de uso depende disso ser falsy, não string vazia.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
 # FFmpeg
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")

@@ -62,10 +62,10 @@ YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
 UPLOAD_POST_LONG_MAX_BYTES = 250 * 1024 * 1024
 BATCH_LIMIT_PER_TICK = 20
 YOUTUBE_VERIFY_GRACE_SECONDS = 600
-YOUTUBE_CHECK_CLIENT_ENABLED = bool(
-    (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
-    and (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
-)
+# YOUTUBE_CHECK_CLIENT_ENABLED vivia aqui, lido no import. O refactor.md o registrava como
+# "área intestável" e como o ramo que o R-04 não conseguiu cobrir — mas era CÓDIGO MORTO:
+# nada no repositório o lia. Removido no R-17; a configuração agora é settings.YOUTUBE_CHECK_*
+# e quem decide se o cliente de check está ligado é o próprio ponto de uso.
 SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS = 1
 
 

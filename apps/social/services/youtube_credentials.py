@@ -1,7 +1,7 @@
 """YouTube credential helpers (token refresh)."""
-import os
 from datetime import UTC
 
+from django.conf import settings
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
@@ -35,14 +35,14 @@ def get_credentials(
             or getattr(source, "youtube_client_id", "")
             or ""
         ).strip()
-    check_client_id = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
-    check_client_secret = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+    check_client_id = settings.YOUTUBE_CHECK_CLIENT_ID
+    check_client_secret = settings.YOUTUBE_CHECK_CLIENT_SECRET
     if use_check_client and check_client_id and check_client_secret:
         client_id = check_client_id
         client_secret = check_client_secret
     else:
-        client_id = source_client_id or os.getenv("GOOGLE_CLIENT_ID")
-        client_secret = source_secret or os.getenv("GOOGLE_CLIENT_SECRET")
+        client_id = source_client_id or settings.GOOGLE_CLIENT_ID
+        client_secret = source_secret or settings.GOOGLE_CLIENT_SECRET
     if not client_id or not client_secret:
         raise ValueError(
             "OAuth do YouTube não configurado para a brand "
