@@ -214,6 +214,8 @@ levanta sobre as outras contagens deste documento.
 | — · catraca em 45,0 + métricas medidas | [#54](https://github.com/Cascapera/social_automation/pull/54) | ✅ |
 | **R-08** · `services/publish_targets.py` (11 funções) | [#55](https://github.com/Cascapera/social_automation/pull/55) | mergeado · **falta deploy** |
 | **R-09** · preflight de `_run_post_to_platforms` | [#56](https://github.com/Cascapera/social_automation/pull/56) | mergeado · **falta deploy** |
+| **R-10** · publicação nativa YouTube (1.131 → 752) | [#57](https://github.com/Cascapera/social_automation/pull/57) | mergeado · **falta deploy** |
+| — · `fix()`: bloco inalcançável no laço nativo | [#58](https://github.com/Cascapera/social_automation/pull/58) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -2035,8 +2037,10 @@ Itens que exigem parada de produção: 0
     porque o ramo do Upload-Post também os usa; saem no R-11.
     ⚠ **Achado: código inalcançável dentro do laço** — ~15 linhas depois de um `continue`
     incondicional, tratando "cota excedida em todas as credenciais", caso que já é
-    resolvido antes na guarda de `available_credentials`. **Movido verbatim, sem tocar**:
-    é da família do R-22 e sai num `fix()` próprio, como o projeto convencionou.
+    resolvido antes na guarda de `available_credentials`. Movido verbatim aqui e
+    **removido em [#58](https://github.com/Cascapera/social_automation/pull/58)**, num
+    `fix()` próprio como o projeto convencionou no R-22 — com 4 testes novos provando
+    antes que o comportamento não sumia junto.
 
 - [ ] **R-11** · Fatiar (3/4): ramo Upload-Post
       risco: médio-alto · 8h · produção: transparente · PR: ~350 linhas / 3 arquivos

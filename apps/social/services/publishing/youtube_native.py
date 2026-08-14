@@ -407,22 +407,6 @@ def publish_native_platforms(
                     errors.append(error_message)
             continue
 
-            next_available_at = min(
-                [cred.quota_exceeded_until for cred in ordered_youtube_credentials if cred.quota_exceeded_until]
-            )
-            delay = max(60, int((next_available_at - timezone.now()).total_seconds()))
-            retryable_errors.append(
-                {
-                    "message": (
-                        f"{platform}: cota excedida em todas as credenciais da brand. "
-                        "Postagem pausada até o reset da cota."
-                    ),
-                    "retry_after_seconds": delay,
-                    "reason": "quotaExceeded",
-                }
-            )
-            continue
-
         try:
             result = publisher.publish(account, video_path, job_obj, scheduled_post=post)
             video_id = (result or {}).get("video_id")
