@@ -1999,15 +1999,21 @@ Itens que exigem parada de produção: 0
     `User = get_user_model()` do topo **não tinha leitor nenhum**; não foi movido para
     módulo algum (quinta ocorrência do **L-9**). ▶ Destrava o **R-16**.
 
-- [ ] **R-16** · Quebrar `serializers.py` em pacote `serializers/`
+- [x] **R-16** · Quebrar `serializers.py` em pacote `serializers/`
       risco: baixo · 2h · produção: transparente · PR: ~1.050 linhas movidas / ~6 arquivos
       pré-requisito: R-15
-  - [ ] Movimentação pura
-  - [ ] `test_serializers.py` verde **sem alteração**
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Movimentação pura — o multiset de linhas não perdeu **nenhuma**; o único acréscimo
+        são continuações de import que o ruff quebrou ao redistribuir por módulo
+  - [x] `test_serializers.py` verde **sem alteração** — o `__init__` reexporta tudo
+  - [x] Suíte completa verde (476) · Lint verde · `manage.py check` limpo · 364 rotas iguais
+  - [x] PR aberto e revisado · [ ] Implantado
+  - [x] Commitado — `6f332f0`
+  - Status: **concluído — falta deploy** · Notas: 8 módulos — `auth` (11), `factories` (63),
+    `media` (58), `jobs` (92), `auto_cuts` (135), `posting` (191), `brands` (315),
+    `multiple_creator` (127). As referências cruzadas entre serializers ficaram todas dentro
+    do próprio módulo, então não houve import novo entre módulos. `User = get_user_model()`
+    foi para `auth.py`, o único que usa — diferente do `views.py`, onde a mesma linha não
+    tinha leitor nenhum (**L-9**).
 
 - [ ] **Onda 2 concluída** — camada HTTP fina, regra de negócio em serviço
 
