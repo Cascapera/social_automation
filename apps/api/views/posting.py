@@ -28,6 +28,7 @@ from apps.jobs.services.inventory_actions import (
     remove_awaiting_item,
     retry_posting_item,
 )
+from apps.jobs.services.media_cleanup import delete_file_field
 from apps.social.services.posting_state import mark_item_posted
 from apps.social.services.youtube_description import build_youtube_description
 
@@ -125,18 +126,23 @@ class ScheduledPostViewSet(viewsets.ModelViewSet):
             # 1) apaga mídia local vinculada ao inventário (quando houver corte)
             if inventory and inventory.auto_cut_corte_id:
                 corte = inventory.auto_cut_corte
-                if corte and getattr(corte, "file", None):
-                    try:
-                        corte.file.delete(save=False)
-                        deleted_files += 1
-                    except Exception:
-                        pass
-                if corte and getattr(corte, "thumbnail", None):
-                    try:
-                        corte.thumbnail.delete(save=False)
-                        deleted_thumbnails += 1
-                    except Exception:
-                        pass
+                if corte:
+                    deleted_files += int(
+                        delete_file_field(
+                            getattr(corte, "file", None),
+                            operation="delete_scheduled_post",
+                            inventory_item_id=inventory.id,
+                            corte_id=corte.id,
+                        )
+                    )
+                    deleted_thumbnails += int(
+                        delete_file_field(
+                            getattr(corte, "thumbnail", None),
+                            operation="delete_scheduled_post",
+                            inventory_item_id=inventory.id,
+                            corte_id=corte.id,
+                        )
+                    )
 
             # 2) remove agendamento operacional e inventário
             schedule_id = schedule.id if schedule else None
@@ -314,18 +320,23 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
         deleted_thumbnails = 0
         with transaction.atomic():
             corte = getattr(inventory, "auto_cut_corte", None)
-            if corte and getattr(corte, "file", None):
-                try:
-                    corte.file.delete(save=False)
-                    deleted_files += 1
-                except Exception:
-                    pass
-            if corte and getattr(corte, "thumbnail", None):
-                try:
-                    corte.thumbnail.delete(save=False)
-                    deleted_thumbnails += 1
-                except Exception:
-                    pass
+            if corte:
+                deleted_files += int(
+                    delete_file_field(
+                        getattr(corte, "file", None),
+                        operation="mark_posted",
+                        inventory_item_id=inventory.id,
+                        corte_id=corte.id,
+                    )
+                )
+                deleted_thumbnails += int(
+                    delete_file_field(
+                        getattr(corte, "thumbnail", None),
+                        operation="mark_posted",
+                        inventory_item_id=inventory.id,
+                        corte_id=corte.id,
+                    )
+                )
             # Cópia D do D-02: a transição dos 4 modelos era escrita aqui dentro, num
             # handler HTTP. Agora é do posting_state, o dono único (R-07). A remoção de
             # mídia continua sendo da view — é efeito da ação, não da máquina de estados.

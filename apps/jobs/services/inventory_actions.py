@@ -18,6 +18,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.jobs.models import FactoryPostingSchedule, ScheduledPost, VideoInventoryItem
+from apps.jobs.services.media_cleanup import delete_file_field
 
 # Margem quando não há horário planejado válido: nem publica no mesmo instante (o worker
 # ainda precisa pegar a mensagem), nem empurra para longe.
@@ -55,18 +56,23 @@ def remove_awaiting_item(inventory: VideoInventoryItem) -> dict:
     deleted_thumbnails = 0
     with transaction.atomic():
         corte = getattr(inventory, "auto_cut_corte", None)
-        if corte and getattr(corte, "file", None):
-            try:
-                corte.file.delete(save=False)
-                deleted_files += 1
-            except Exception:
-                pass
-        if corte and getattr(corte, "thumbnail", None):
-            try:
-                corte.thumbnail.delete(save=False)
-                deleted_thumbnails += 1
-            except Exception:
-                pass
+        if corte:
+            deleted_files += int(
+                delete_file_field(
+                    getattr(corte, "file", None),
+                    operation="remove_awaiting",
+                    inventory_item_id=inventory.id,
+                    corte_id=corte.id,
+                )
+            )
+            deleted_thumbnails += int(
+                delete_file_field(
+                    getattr(corte, "thumbnail", None),
+                    operation="remove_awaiting",
+                    inventory_item_id=inventory.id,
+                    corte_id=corte.id,
+                )
+            )
 
         if scheduled_post_ids:
             ScheduledPost.objects.filter(id__in=scheduled_post_ids).delete()

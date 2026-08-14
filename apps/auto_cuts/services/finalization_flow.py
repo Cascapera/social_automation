@@ -60,6 +60,7 @@ from apps.jobs.services.ffmpeg import (
     overlay_logo,
     overlay_long_right,
 )
+from apps.jobs.services.media_cleanup import delete_file_field, unlink_path
 from apps.jobs.services.subtitles import burn_subtitles, segments_to_srt
 
 logger = logging.getLogger(__name__)
@@ -366,25 +367,15 @@ def _delete_unselected_cuts(analysis) -> None:
                 fp = Path(corte.file.path) if corte.file.name else None
             except Exception:
                 fp = None
-            try:
-                corte.file.delete(save=False)
-            except Exception:
-                pass
-            if fp and fp.exists():
-                try:
-                    fp.unlink()
-                except Exception:
-                    pass
+            delete_file_field(corte.file, operation="finalize_discard", corte_id=corte.id)
+            # Segundo passo: o arquivo em disco pode divergir do que o campo aponta.
+            unlink_path(fp, operation="finalize_discard", corte_id=corte.id)
         corte.delete()
 
     if cortes_dir.exists() and to_delete_sug_ids:
-        try:
-            for sug_id in to_delete_sug_ids:
-                for f in cortes_dir.glob(f"job_{analysis.id}_sug_{sug_id}.mp4"):
-                    if f.exists():
-                        f.unlink()
-        except Exception:
-            pass
+        for sug_id in to_delete_sug_ids:
+            for f in cortes_dir.glob(f"job_{analysis.id}_sug_{sug_id}.mp4"):
+                unlink_path(f, operation="finalize_discard_leftover", analysis_id=analysis.id)
 
 
 def _process_cut(
