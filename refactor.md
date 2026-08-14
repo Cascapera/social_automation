@@ -53,10 +53,10 @@ linhas, não por leitura.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
-1. **R-08** — libera em **2026-08-15**, 48h depois do deploy de 13/08 (o de 14/08 não
-   reinicia a contagem: o gate é sobre R-06+R-07, que subiram no primeiro). Movimentação pura,
-   risco baixo: mover `_resolve_*` e afins de `apps/social/tasks.py` para
-   `services/publish_targets.py`.
+1. ~~R-08~~ e ~~R-09~~ — **feitos em 14/08**, com o seu ok para dispensar a janela de 48h
+   (produção parada, cortes já publicados). ▶ **O próximo é o R-10**, e ele é o item de
+   **risco médio-alto** do plano: a publicação nativa no YouTube. Vale começar com a
+   cabeça fresca e com produção parada de novo.
 2. ~~Subir a catraca~~ — **feito em 14/08**: piso em **45,0** (CI mediu 46,46%). Deixei
    1,46pp de folga justamente para o R-08 poder puxar o total sem quebrar o build.
 3. Depois disso, a onda 1 continua no **R-09**. Ela ficou ainda mais urgente do que o
@@ -211,6 +211,9 @@ levanta sobre as outras contagens deste documento.
 | **R-20 PR 1** · falha de remoção de mídia vira evento | [#51](https://github.com/Cascapera/social_automation/pull/51) | mergeado · **falta deploy** |
 | **R-20 PR 2** · ZIP do `download-media` para de mentir ⚠ | [#52](https://github.com/Cascapera/social_automation/pull/52) | mergeado · **falta deploy** |
 | **R-20 cont.** · limpeza de arquivos do job (18 engolidas) | [#53](https://github.com/Cascapera/social_automation/pull/53) | mergeado · **falta deploy** |
+| — · catraca em 45,0 + métricas medidas | [#54](https://github.com/Cascapera/social_automation/pull/54) | ✅ |
+| **R-08** · `services/publish_targets.py` (11 funções) | [#55](https://github.com/Cascapera/social_automation/pull/55) | mergeado · **falta deploy** |
+| **R-09** · preflight de `_run_post_to_platforms` | [#56](https://github.com/Cascapera/social_automation/pull/56) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -1723,15 +1726,15 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 17/23 itens do checklist concluídos
-           faltam só os 6 da onda 1 encadeada: R-08 -> R-09 -> R-10 -> R-11
-           -> R-12 -> R-13 (todos tocam apps/social/tasks.py, por isso em serie)
+Progresso: 19/23 itens do checklist concluídos
+           faltam 4, todos na onda 1: R-10 -> R-11 -> R-12 -> R-13
+           (as 3 fatias restantes da funcao gigante + o emagrecimento final)
            (a contagem de "21 itens" do texto acima e anterior aos 3 achados
             dos characterization tests; o checklist tem 23)
            8 implantados em 13/08 + 10 implantados em 14/08
            3 mergeados e ainda FORA de producao: os 2 PRs do R-20 + a continuacao
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
-           ▶ próximo: R-08 (libera 15/08) · ✅ onda 2 fechada (R-14 → R-15 → R-16)
+           ▶ próximo: R-10 (fatia 2/4, risco medio-ALTO: publicacao nativa YouTube)
            suite: 288 -> 501 testes · cobertura 40,8% -> 46,59% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
