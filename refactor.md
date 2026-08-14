@@ -1531,16 +1531,15 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 19/23 itens do checklist concluídos
-           faltam 4, todos na onda 1: R-10 -> R-11 -> R-12 -> R-13
-           (as 3 fatias restantes da funcao gigante + o emagrecimento final)
+Progresso: 22/23 concluidos + R-13 na PR #61 (CI rodando quando a sessao acabou)
+           ONDA 1 FECHADA: R-08 -> R-09 -> R-10 -> R-11 -> R-12 -> R-13
            (a contagem de "21 itens" do texto acima e anterior aos 3 achados
             dos characterization tests; o checklist tem 23)
            8 implantados em 13/08 + 10 implantados em 14/08
-           3 mergeados e ainda FORA de producao: os 2 PRs do R-20 + a continuacao
+           11 mergeados e ainda FORA de producao (#51 a #61) - ver ponto de retomada
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
-           ▶ próximo: R-10 (fatia 2/4, risco medio-ALTO: publicacao nativa YouTube)
-           suite: 288 -> 501 testes · cobertura 40,8% -> 46,59% local
+           ▶ próximo: mergear a #61 e DEPLOYAR os 11 PRs que estao so em develop
+           suite: 288 -> 505 testes · cobertura 40,8% -> 47,53% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
