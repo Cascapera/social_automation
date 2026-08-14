@@ -1980,17 +1980,24 @@ Itens que exigem parada de produção: 0
     `timedelta(seconds=30)` virou `RETRY_FALLBACK_DELAY`. Cobertura do módulo novo: **87%**.
     ▶ Destrava o **R-15** (quebrar `views.py` em pacote) e o **R-20**.
 
-- [ ] **R-15** · Quebrar `views.py` em pacote `views/`
+- [x] **R-15** · Quebrar `views.py` em pacote `views/`
       risco: baixo · 3h · produção: transparente · PR: ~2.500 linhas **movidas** / ~8 arquivos
       pré-requisito: R-14
-  - [ ] **Zero edição de corpo de método** — se houve, o item foi executado errado
-  - [ ] `__init__.py` reexporta todos os nomes; `urls.py` não muda
-  - [ ] Lista de rotas registradas idêntica antes e depois
-  - [ ] `manage.py check` limpo · Suíte completa verde · Lint verde
-  - [ ] PR revisado com `--color-moved`
+  - [x] **Zero edição de corpo de método** — conferido por multiset de linhas: a única
+        diferença são imports (os que o ruff redistribuiu por módulo e 4 relativos que
+        viraram `..` por estarem um nível mais fundo)
+  - [x] `__init__.py` reexporta todos os nomes; `urls.py` não muda
+  - [x] Lista de rotas registradas idêntica antes e depois — **364 rotas**, comparadas uma
+        a uma (nome, padrão, viewset e mapa de ações)
+  - [x] `manage.py check` limpo · Suíte completa verde (476) · Lint verde
+  - [x] PR revisado com `--color-moved`
   - [ ] Implantado · smoke test das rotas principais
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Commitado — `fb887b5`
+  - Status: **concluído — falta deploy** · Notas: 9 módulos por domínio — `auth` (28),
+    `factories` (171), `brands` (329), `media` (181), `jobs` (264), `posting` (386),
+    `auto_cuts` (804), `dashboards` (160), `multiple_creator` (143). Achado: o
+    `User = get_user_model()` do topo **não tinha leitor nenhum**; não foi movido para
+    módulo algum (quinta ocorrência do **L-9**). ▶ Destrava o **R-16**.
 
 - [ ] **R-16** · Quebrar `serializers.py` em pacote `serializers/`
       risco: baixo · 2h · produção: transparente · PR: ~1.050 linhas movidas / ~6 arquivos
