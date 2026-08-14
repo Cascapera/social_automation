@@ -261,6 +261,32 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "").strip().lower()
 # Sem .lower() de propósito: era assim que os leitores comparavam, e "TRUE" não ligava.
 WHISPER_DEBUG_GPU = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
 
+# LLM (refactor.md R-17 lote 3 / D-08 — fonte única de configuração)
+# As settings guardam o valor CRU já normalizado; a precedência entre elas continua em
+# `services/grok.py:_build_llm_client`, que é onde ela sempre esteve e onde os avisos de
+# depreciação são emitidos (uma vez por chamada, como antes).
+LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or "xai").strip().lower()
+LLM_API_KEY = (os.getenv("LLM_API_KEY") or "").strip()
+# Depreciada: usada só como fallback de LLM_API_KEY, com aviso no log.
+XAI_API_KEY = (os.getenv("XAI_API_KEY") or "").strip()
+LLM_MODEL = (os.getenv("LLM_MODEL") or "").strip()
+LLM_MODEL_LIGHT = (os.getenv("LLM_MODEL_LIGHT") or "").strip()
+# Depreciada: fallback de LLM_MODEL/LLM_MODEL_LIGHT, com aviso no log.
+GROK_MODEL = (os.getenv("GROK_MODEL") or "").strip()
+LLM_BASE_URL = (os.getenv("LLM_BASE_URL") or "").strip()
+# Limites interpolados no prompt no momento da chamada. Valor inválido derruba o boot em
+# vez de fazer cada análise falhar com ValueError no meio da task — é de propósito.
+LLM_MAX_SHORTS = max(1, int(os.getenv("LLM_MAX_SHORTS", "10")))
+LLM_MAX_LONGS = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
+# Override de tabela de preço do LLM, em JSON. Vazio = usa GROK_PRICING.
+GROK_PRICING_JSON = (os.getenv("GROK_PRICING_JSON") or "").strip()
+# Depuração: salva a resposta parseada do LLM em MEDIA_ROOT/grok_responses.
+GROK_SAVE_RESPONSE_JSON = (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # Multiple-Creator: retencao do video original apos job terminal (DONE/PARTIAL/ERROR).
 # Apos esse periodo, cleanup_terminal_job_files_task remove o file (mantem a row).
 MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))

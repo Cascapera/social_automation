@@ -8,13 +8,14 @@ de vida diferente do de um cliente HTTP. O que ficou é cliente, parsing e custo
 
 import json
 import logging
-import os
 import re
 from collections.abc import Mapping
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
+
+from django.conf import settings
 
 from apps.auto_cuts.prompts import (
     ALL_THEME_CATEGORIES,
@@ -269,7 +270,7 @@ def _get_grok_pricing() -> dict[str, dict[str, float]]:
         }
         for model_name, config in GROK_PRICING.items()
     }
-    raw_override = (os.getenv("GROK_PRICING_JSON") or "").strip()
+    raw_override = settings.GROK_PRICING_JSON
     if not raw_override:
         return pricing
     try:
@@ -416,12 +417,12 @@ def _build_llm_client(light: bool = False) -> tuple:
     """
     from openai import OpenAI
 
-    provider = (os.getenv("LLM_PROVIDER") or "xai").strip().lower()
+    provider = settings.LLM_PROVIDER
 
     # API key
-    api_key = (os.getenv("LLM_API_KEY") or "").strip()
+    api_key = settings.LLM_API_KEY
     if not api_key:
-        api_key = (os.getenv("XAI_API_KEY") or "").strip()
+        api_key = settings.XAI_API_KEY
         if api_key:
             logger.warning(
                 "[LLM] XAI_API_KEY deprecated; migrar para LLM_API_KEY no .env"
@@ -431,11 +432,11 @@ def _build_llm_client(light: bool = False) -> tuple:
 
     # Model
     if light:
-        model = (os.getenv("LLM_MODEL_LIGHT") or "").strip()
+        model = settings.LLM_MODEL_LIGHT
     else:
-        model = (os.getenv("LLM_MODEL") or "").strip()
+        model = settings.LLM_MODEL
     if not model:
-        model = (os.getenv("GROK_MODEL") or "").strip()
+        model = settings.GROK_MODEL
         if model:
             logger.warning(
                 "[LLM] GROK_MODEL deprecated; migrar para LLM_MODEL/LLM_MODEL_LIGHT no .env"
@@ -444,7 +445,7 @@ def _build_llm_client(light: bool = False) -> tuple:
         model = "grok-4-1-fast"
 
     # Base URL
-    base_url = (os.getenv("LLM_BASE_URL") or "").strip()
+    base_url = settings.LLM_BASE_URL
     if not base_url:
         base_url = LLM_PROVIDER_DEFAULTS.get(provider, LLM_PROVIDER_DEFAULTS["xai"])
 
@@ -466,8 +467,8 @@ def call_grok_chat(
     # api_key explícito (legado) substitui a key resolvida pelo builder
     if api_key:
         from openai import OpenAI as _OpenAI
-        base_url = (os.getenv("LLM_BASE_URL") or "").strip() or LLM_PROVIDER_DEFAULTS.get(
-            (os.getenv("LLM_PROVIDER") or "xai").strip().lower(),
+        base_url = settings.LLM_BASE_URL or LLM_PROVIDER_DEFAULTS.get(
+            settings.LLM_PROVIDER,
             LLM_PROVIDER_DEFAULTS["xai"],
         )
         client = _OpenAI(api_key=api_key, base_url=base_url)
@@ -560,10 +561,9 @@ def _build_context_block(
 
 def _save_grok_response_json(parsed: dict, analysis_id: int | None = None) -> None:
     """Salva a resposta parseada do Grok em JSON para análise (ativar com GROK_SAVE_RESPONSE_JSON=1)."""
-    if (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().lower() not in ("1", "true", "yes"):
+    if not settings.GROK_SAVE_RESPONSE_JSON:
         return
     try:
-        from django.conf import settings
         media = Path(getattr(settings, "MEDIA_ROOT", "") or "").resolve()
         if media and media.is_dir():
             save_dir = media / "grok_responses"
@@ -645,8 +645,8 @@ def analyze_chunks_in_one_request(
     )
 
     # Limites configuráveis via env (interpolados no prompt no momento da chamada)
-    llm_max_shorts = max(1, int(os.getenv("LLM_MAX_SHORTS", "10")))
-    llm_max_longs = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
+    llm_max_shorts = settings.LLM_MAX_SHORTS
+    llm_max_longs = settings.LLM_MAX_LONGS
     if is_educational:
         if lang == "en":
             limit_block = (
