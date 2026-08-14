@@ -2213,30 +2213,30 @@ Itens que exigem parada de produção: 0
   >    algum corte — um `ffmpeg -encoders` por execução. Foi o que reprovou o CT-4 no CI,
   >    que não tem o binário. Candidato a memoizar ou mover para perto de quem usa.
 
-- [ ] **R-20** · Tornar observáveis os `except Exception: pass` mais arriscados (2 PRs)
+- [x] **R-20** · Tornar observáveis os `except Exception: pass` mais arriscados (2 PRs)
       risco: baixo · 4h · produção: transparente · 2 PRs de ~150 linhas / ~5 arquivos
       pré-requisito: R-14
-  - [x] Top 10 sites priorizados (disco / estado / resposta ao usuário) — **PR 1 feito**:
-        os 10 de **remoção de mídia em disco**, em 4 arquivos, via
-        `services/media_cleanup.py`
-  - [ ] Onde o payload da resposta muda, marcado como **mudança de comportamento** e em PR próprio
-  - [x] Teste que força a falha e verifica o evento logado — 10 testes, incluindo a falha
-        atravessando o fluxo inteiro até a resposta
+  - [x] Top 10 sites priorizados (disco / estado / resposta ao usuário) — **PR 1**: os 10
+        de **remoção de mídia em disco**, em 4 arquivos, via `services/media_cleanup.py`
+  - [x] Onde o payload da resposta muda, marcado como **mudança de comportamento** e em PR
+        próprio — **PR 2**: o ZIP do `download-media`
+  - [x] Teste que força a falha e verifica o evento logado — 18 testes nos dois PRs
   - [ ] **Avisar quem monitora**: volume de eventos de erro vai subir — é sucesso, não regressão
-  - [x] Suíte completa verde (476 → **486**) · Lint verde
-  - [x] PR 1 aberto e revisado · [ ] Implantado
-  - [x] Commitado — PR 1 `2ff5556`
-  - Status: **PR 1 de 2 feito** · Notas: os 10 sites viraram `delete_file_field` e
-    `unlink_path`, com `operation` identificando quem pediu (`remove_awaiting`,
-    `mark_posted`, `delete_scheduled_post`, `finalize_discard`, `delete_job_output`) — é o
-    que permite ler o log e saber **qual fluxo** está deixando arquivo para trás. Campo
-    vazio e caminho inexistente não logam: são o caso normal, não falha.
-    ▶ **O PR 2 é o do payload**, e o caso está localizado: em
-    `views/posting.py:download-media`, se o `zf.write` do vídeo ou da thumbnail falhar, o
-    ZIP é servido **sem o arquivo** e sem aviso — o usuário recebe um pacote que parece
-    completo. Restam ainda ~43 pontos do D-10 fora do top 10, dos quais 18 estão no
-    `_delete_auto_cut_job_files` (`views/auto_cuts.py`), que pede o mesmo tratamento em
-    lote.
+  - [x] Suíte completa verde (476 → **494**) · Lint verde
+  - [x] PR 1 e PR 2 abertos e revisados · [ ] Implantados
+  - [x] Commitado — PR 1 `2ff5556` · PR 2 `d3c953f`
+  - Status: **concluído — falta deploy** · Notas: **PR 1** — os 10 sites viraram
+    `delete_file_field` e `unlink_path`, com `operation` identificando quem pediu
+    (`remove_awaiting`, `mark_posted`, `delete_scheduled_post`, `finalize_discard`,
+    `delete_job_output`). Campo vazio e caminho inexistente não logam: são o caso normal.
+    **PR 2** — o `download-media` entregava **200 com pacote incompleto**; agora o pacote
+    parcial leva aviso dentro do ZIP e cabeçalho `X-Missing-Media`, e o pacote sem mídia
+    nenhuma responde **404**. Havia um terceiro caminho silencioso além dos dois
+    `except: pass`: o `if fp.exists()`, que pulava o arquivo quando banco e disco
+    discordavam.
+    ▶ Restam ~43 pontos do D-10 fora do top 10, dos quais **18 estão no
+    `_delete_auto_cut_job_files`** (`views/auto_cuts.py`) — mesmo tratamento, em lote, se
+    valer a pena depois.
 
 - [ ] **Onda 3 concluída** — configuração com fonte única, prompts separados, falhas visíveis
 
