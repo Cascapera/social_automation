@@ -595,7 +595,7 @@ def rerun_analysis_finalization(analysis: AutoCutAnalysis) -> dict[str, int]:
 
 
 def rerun_analysis_inventory_sync(analysis: AutoCutAnalysis) -> dict[str, int]:
-    from apps.auto_cuts.tasks import _sync_inventory_item_from_corte
+    from apps.auto_cuts.services.flow_common import _sync_inventory_item_from_corte
 
     synced = 0
     for corte in _selected_cortes(analysis):
