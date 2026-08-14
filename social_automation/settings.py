@@ -304,6 +304,22 @@ UPLOAD_POST_FACTORY_BRAND_DELAY_SEC = float(
     os.getenv("UPLOAD_POST_FACTORY_BRAND_DELAY_SEC", "0.15")
 )
 
+# yt-dlp (refactor.md R-17 lote 5 / D-08 — fonte única de configuração)
+# Todas vazias por omissão: cada uma liga um comportamento opcional do download.
+YTDLP_YOUTUBE_PLAYER_CLIENTS = (os.getenv("YTDLP_YOUTUBE_PLAYER_CLIENTS") or "").strip()
+YTDLP_JS_RUNTIMES = (os.getenv("YTDLP_JS_RUNTIMES") or "").strip()
+YTDLP_COOKIES_FILE = (os.getenv("YTDLP_COOKIES_FILE") or "").strip()
+YTDLP_COOKIES_FROM_BROWSER = (os.getenv("YTDLP_COOKIES_FROM_BROWSER") or "").strip()
+# Altura mínima desejada do vídeo. `0` desliga o filtro. Valor inválido cai em 720 em vez
+# de derrubar o boot — a tolerância é do código de origem e foi preservada aqui, porque
+# esta é preferência de qualidade, não credencial: errar o número não impede o download.
+_ytdlp_min_height_raw = (os.getenv("YTDLP_MIN_VIDEO_HEIGHT") or "").strip()
+try:
+    _ytdlp_min_height = int(_ytdlp_min_height_raw) if _ytdlp_min_height_raw else 720
+except ValueError:
+    _ytdlp_min_height = 720
+YTDLP_MIN_VIDEO_HEIGHT = max(0, _ytdlp_min_height)
+
 # Multiple-Creator: retencao do video original apos job terminal (DONE/PARTIAL/ERROR).
 # Apos esse periodo, cleanup_terminal_job_files_task remove o file (mantem a row).
 MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))

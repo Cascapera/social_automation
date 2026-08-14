@@ -2048,8 +2048,23 @@ Itens que exigem parada de produção: 0
     - [x] Suíte verde (416 → **427**) · Lint verde · cobertura 44,04% → **44,14%** local
     - [x] Commitado — `870a3f4`
     - [ ] Implantado · verificado: taxa de 429 da Upload-Post estável
-  - **Próximos lotes** — restam ~29 `os.getenv` em ~9 arquivos
-    - [ ] Lote 5 — `YTDLP_*`, `YOUTUBE_*`, `FRONTEND_URL` e o resto
+  - **Lote 5 — `YTDLP_*`** — [#46](https://github.com/Cascapera/social_automation/pull/46)
+    - [x] 5 variáveis em `settings`, leitor único (`services/youtube_download.py`)
+    - [x] `YTDLP_MIN_VIDEO_HEIGHT` normalizada no settings **com a tolerância original**
+          (valor inválido → 720, não derruba o boot). Diferente do lote 3 de propósito:
+          é preferência de qualidade, não credencial — errar o número não impede o
+          download
+    - [x] 16 testes novos. Cobertura de `youtube_download.py`: ~20% → **61%**
+    - [x] Suíte verde (427 → **443**) · Lint verde · cobertura 44,14% → **44,57%** local
+    - [x] Commitado — `244d2d6`
+    - [ ] Implantado · verificado: taxa de sucesso do download do YouTube estável
+  - **Próximos lotes** — restam ~24 `os.getenv` em ~8 arquivos
+    - [ ] Lote 6 — `GOOGLE_*` / `YOUTUBE_*` do OAuth de Contas, `FRONTEND_URL`,
+          `YOUTUBE_FULL_SCAN_MAX_PAGES` e `SOCIAL_ENCRYPTION_KEY`
+    - ⚠ **Achado do lote 5**: `youtube_oauth.py` lê `GOOGLE_CLIENT_ID`/`_SECRET` por
+      `os.getenv` **embora o lote 1 já as tenha posto em `settings`**. O anti-drift do
+      lote 1 só guardava `YOUTUBE_CHECK_*`, então a duplicata passou. É o L-9 em outra
+      forma: a migração se desfaz sozinha onde o teste não alcança
     - [ ] ⚠ **Não migrar `SystemRoot`** (`vertical_reformat.py`, 3 ocorrências): é
           ambiente do sistema operacional para achar fonte no Windows, não configuração
           da aplicação. Entra na conta do D-08 mas não no escopo do R-17
