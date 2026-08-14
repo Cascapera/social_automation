@@ -30,13 +30,13 @@ finalization_flow.py    run_finalization + _process_cut + 6 etapas de render
 flow_common.py          os helpers que os dois fluxos usam
 ```
 
-Saiu também o **R-17 lote 2**: `WHISPER_MODEL`, `WHISPER_DEVICE` e `WHISPER_DEBUG_GPU`
-migrados de `os.getenv` para `settings` nos 5 leitores — com uma surpresa que virou o
-**L-12** (a mesma variável tinha dois defaults diferentes).
+Saíram também **dois lotes do R-17**: o lote 2 (`WHISPER_*`, 5 leitores — com a surpresa
+que virou o **L-12**: a mesma variável tinha dois defaults diferentes) e o lote 3
+(`LLM_*`/`XAI_*`/`GROK_*`, 11 variáveis). Restam ~34 `os.getenv` para o lote 4.
 
 Os dois arquivos de CT-4 passaram **sem mudar nenhuma asserção** — só os alvos de `patch()`
 acompanharam o código de módulo. Era exatamente para isso que o PR (a) foi escrito antes.
-Suíte em **409 testes**, lint verde, cobertura local **44,01%**.
+Suíte em **416 testes**, lint verde, cobertura local **44,04%**.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
@@ -47,9 +47,12 @@ Suíte em **409 testes**, lint verde, cobertura local **44,01%**.
    (não o local). O piso segue em 42,0 e a margem já passou de 1,7pp.
 3. Depois disso, a onda 1 continua no **R-09**.
 
-> **3 itens esperando deploy**: R-19 (b), R-19 (c)+(d) e R-17 lote 2 — os três
-> transparentes. A verificação pós-deploy de cada um está na tabela da seção de
-> pendências.
+> **4 itens esperando deploy**: R-19 (b), R-19 (c)+(d), R-17 lote 2 e R-17 lote 3 — os
+> quatro transparentes. A verificação pós-deploy de cada um está na tabela da seção de
+> pendências. **O lote 3 tem uma pegadinha de deploy**: `LLM_MAX_SHORTS`/`_LONGS` com
+> valor inválido agora impedem o boot em vez de falhar por análise. Se o `.env` de
+> produção tiver lixo nessas duas, o deploy falha — o que é o objetivo, mas convém
+> conferir antes de subir.
 
 ### Estado do R-19 — ✅ concluído (falta deploy)
 
@@ -1620,10 +1623,10 @@ Status: em andamento
 Progresso: 5/21 itens concluídos (R-02, R-03, R-04, R-05, R-19)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
-           1 em andamento por lotes (R-17 — lotes 1 e 2 feitos, ~45 getenv restantes)
+           1 em andamento por lotes (R-17 — lotes 1, 2 e 3 feitos, ~34 getenv restantes)
            ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
            ▶ próximo: R-08 (liberado em 15/08)
-           suite: 288 -> 409 testes · cobertura 40,8% -> 44,01% local
+           suite: 288 -> 416 testes · cobertura 40,8% -> 44,04% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
@@ -2013,8 +2016,24 @@ Itens que exigem parada de produção: 0
           mede 7pp abaixo do local)
     - [x] Commitado — `2ab5a57`
     - [ ] Implantado · verificado: modelo do Whisper igual ao de antes nos dois caminhos
-  - **Próximos lotes** — restam ~45 `os.getenv` em ~13 arquivos
-    - [ ] Lote 3 — `YTDLP_*`, `LLM_*`/`GROK_*`, `UPLOAD_POST_*` e o resto
+  - **Lote 3 — `LLM_*` / `XAI_*` / `GROK_*`** — [#44](https://github.com/Cascapera/social_automation/pull/44)
+    - [x] 11 variáveis em `settings`, revisadas **variável por variável**
+    - [x] Leitor único (`services/grok.py`) migrado — sem janela de órfã
+    - [x] **A precedência continua em `grok.py`**: é lá que os avisos de depreciação de
+          `XAI_API_KEY` e `GROK_MODEL` são emitidos, uma vez por chamada. No settings o
+          aviso sairia uma vez só, no boot, onde ninguém lê
+    - [x] ⚠ **Uma mudança de comportamento, documentada**: `LLM_MAX_SHORTS`/`_LONGS`
+          usam `int()`. Lidas no settings, um valor inválido derruba o boot em vez de
+          fazer cada análise falhar no meio da task. A falha muda de lugar — para melhor
+    - [x] `test_llm_provider.py` reescrito: mesmas asserções, `override_settings` no
+          lugar do `patch.dict(os.environ)`. Ganhou 2 contraprovas de precedência que
+          antes não cabiam — inclusive a de que `LLM_MODEL` **não** cobre a chamada leve
+    - [x] Teste de equivalência + anti-drift (`test_llm_settings.py`)
+    - [x] Suíte verde (409 → **416**) · Lint verde · cobertura 44,01% → **44,04%** local
+    - [x] Commitado — `dbaaf54`
+    - [ ] Implantado · verificado: provider, modelo e custo por análise estáveis
+  - **Próximos lotes** — restam ~34 `os.getenv` em ~11 arquivos
+    - [ ] Lote 4 — `YTDLP_*`, `UPLOAD_POST_*` e o resto
     - [ ] `grep 'os.getenv' apps/` retorna 0
   - Status: **em andamento — lote 1 mergeado, aguardando deploy** · Notas: o lote 1
     encerrou o "gap do R-04" descobrindo que ele não existia — `YOUTUBE_CHECK_CLIENT_ENABLED`
