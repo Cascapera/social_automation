@@ -2034,8 +2034,25 @@ Itens que exigem parada de produção: 0
     - [x] Suíte verde (409 → **416**) · Lint verde · cobertura 44,01% → **44,04%** local
     - [x] Commitado — `dbaaf54`
     - [ ] Implantado · verificado: provider, modelo e custo por análise estáveis
-  - **Próximos lotes** — restam ~34 `os.getenv` em ~11 arquivos
-    - [ ] Lote 4 — `YTDLP_*`, `UPLOAD_POST_*` e o resto
+  - **Lote 4 — `UPLOAD_POST_*`** — [#45](https://github.com/Cascapera/social_automation/pull/45)
+    - [x] 5 variáveis em `settings`, 3 leitores migrados
+    - [x] ⚠ **A chave da API fica crua**, sem `.strip()`: o publisher usava o valor como
+          veio e só o acessor do cliente de analytics normalizava. Unificar mudaria o
+          header do publisher — item próprio
+    - [x] **Achado**: os dois leitores da chave faziam
+          `os.getenv(...) or getattr(settings, "UPLOAD_POST_API_KEY", "")`, mas essa
+          setting **nunca existiu**. O fallback era decorativo — caía sempre em `""`
+    - [x] Ramo destravado: throttle e cooldown do cliente de analytics, que eram
+          constantes de módulo. Cobertura do arquivo 19% → **23%** local
+    - [x] Teste de equivalência + anti-drift + 7 do throttle (11 no total)
+    - [x] Suíte verde (416 → **427**) · Lint verde · cobertura 44,04% → **44,14%** local
+    - [x] Commitado — `870a3f4`
+    - [ ] Implantado · verificado: taxa de 429 da Upload-Post estável
+  - **Próximos lotes** — restam ~29 `os.getenv` em ~9 arquivos
+    - [ ] Lote 5 — `YTDLP_*`, `YOUTUBE_*`, `FRONTEND_URL` e o resto
+    - [ ] ⚠ **Não migrar `SystemRoot`** (`vertical_reformat.py`, 3 ocorrências): é
+          ambiente do sistema operacional para achar fonte no Windows, não configuração
+          da aplicação. Entra na conta do D-08 mas não no escopo do R-17
     - [ ] `grep 'os.getenv' apps/` retorna 0
   - Status: **em andamento — lote 1 mergeado, aguardando deploy** · Notas: o lote 1
     encerrou o "gap do R-04" descobrindo que ele não existia — `YOUTUBE_CHECK_CLIENT_ENABLED`
