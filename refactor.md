@@ -158,10 +158,12 @@ levanta sobre as outras contagens deste documento.
 > e os 10 testes novos batem justamente em `settings.py`. Vale como lembrete para quem
 > for subir a catraca: o número é o do log do CI, não o da máquina.
 >
-> **Ainda não subi o piso, de propósito.** O R-08 é movimentação pura de código bem
-> coberto: muda o denominador sem melhorar nada e tende a puxar o total para baixo. Subir
-> a catraca antes dele garantiria build vermelho por um motivo alheio ao trabalho.
-> **Subir logo depois do R-08**, com o número estabilizado.
+> ✅ **Piso subido para 45,0 em 14/08** — antes do R-08, e não depois como estava
+> planejado. O motivo de esperar era a margem de 0,01pp que existia na época: qualquer
+> queda do R-08 deixaria o build vermelho por motivo alheio ao trabalho. Com **4,46pp**
+> de margem, o risco inverteu — o que estava desprotegido era tudo que subiu hoje.
+> O piso de 45,0 deixa **1,46pp de folga**, de propósito, para o R-08 poder puxar o
+> total para baixo sem quebrar nada.
 >
 > As duas subidas vieram do jeito honesto — cobrir ramo que estava intestável, não somar
 > teste em módulo barato. Se apertar de novo, os próximos candidatos naturais são
@@ -1592,25 +1594,63 @@ imediatamente, avise e reclassifique.** Não siga "porque já começou".
 
 ## 10. Métricas de sucesso
 
-| Métrica | Hoje | Meta | Como medir |
-| --- | --- | --- | --- |
-| Maior arquivo Python | 4.035 linhas | **< 500** | script da linha de base |
-| Maior função | 1.189 linhas | **< 150** | script da linha de base |
-| Arquivos > 500 linhas | 15 | **≤ 8** | idem |
-| Funções ≥ 80 linhas | 48 | **≤ 25** | idem |
-| Cópias da transição "POSTED" | 5 | **1** | `grep -rn 'status = "POSTED"' apps/` |
-| Transições multi-modelo sem `atomic` | 2 confirmadas | **0** | revisão de `posting_state.py` |
-| % do código medido pelo portão | ~~7,5%~~ → **100%** ✅ (R-02) | > 90% | `pyproject.toml` |
-| Cobertura real (linhas) | **40,81%** (medida em R-02) | catraca — só sobe | relatório do pytest |
-| Cobertura de `auto_cuts/tasks.py` | **7%** | **> 40%** (via R-19/CT-4) | relatório do pytest |
-| Cobertura de `api/views.py` | **21%** | **> 50%** (via R-14/CT-3) | relatório do pytest |
-| Cobertura de `social/tasks.py` | ~~41%~~ → **49%** (R-03/R-04 feitos) | **> 65%** (o resto vem com a fatiagem, R-09 a R-13) | relatório do pytest |
-| Imports dentro de função (`apps.*`) | 96 | **< 20** | `grep -rn '^\s\+from apps\.'` |
-| `os.getenv` fora de settings | 57 | **0** | `grep -rn 'os.getenv' apps/` |
-| `except Exception: pass` | 52 | **≤ 40** (top 10 tratados) | `grep -rA1 'except Exception'` |
-| Violações de ruff | 0 | **0** (manter) | `ruff check .` |
-| Tempo da suíte | 65s | **≤ 90s** | `manage.py test` |
-| Testes do frontend no CI | não | **sim** | `ci.yml` |
+**Medido em 2026-08-14** com o mesmo script rodado nos dois commits (base `3c7f0e8` de
+24/05 e `develop` de hoje), para os números serem comparáveis. As contagens de padrão
+(`os.getenv`, `except: pass`, imports em função) **excluem os arquivos de teste** — por
+isso divergem um pouco das do diagnóstico original, que usava recorte diferente:
+
+| Métrica | Base (24/05) | **Hoje** | Meta | |
+| --- | --- | --- | --- | --- |
+| Maior arquivo Python | 4.034 | **3.945** | < 500 | ⚠ |
+| Maior função | 1.189 | **1.216** | < 150 | 🔴 |
+| Arquivos > 500 linhas | 15 | **18** | ≤ 8 | 🔴 |
+| Funções ≥ 80 linhas | 48 | **50** | ≤ 25 | 🔴 |
+| Cópias da transição "POSTED" | 5 | **1** | 1 | ✅ |
+| Transições multi-modelo sem `atomic` | 2 | **0** | 0 | ✅ |
+| % do código medido pelo portão | 7,5% | **100%** | > 90% | ✅ |
+| Cobertura real (linhas, CI) | 40,81% | **46,46%** | catraca — só sobe | ✅ |
+| Cobertura de `auto_cuts/tasks.py` | 7% | **100%** (73 linhas) | > 40% | ✅ |
+| Cobertura de `api/views/` (pacote) | 21% | **~35%** | > 50% | ⚠ |
+| Cobertura de `social/tasks.py` | 41% | **47%** | > 65% | ⚠ |
+| Imports dentro de função (`apps.*`) | 97 | **72** | < 20 | ⚠ |
+| `os.getenv` fora de settings | 62 | **9** | 0 | ✅ |
+| `except Exception: pass` | 53 | **30** | ≤ 40 | ✅ |
+| Violações de ruff | 0 | **0** | 0 | ✅ |
+| Tempo da suíte | 65s | **81s** (501 testes) | ≤ 90s | ✅ |
+| Testes do frontend no CI | não | **sim** | sim | ✅ |
+
+### ⚠ As três métricas que pioraram dizem a mesma coisa
+
+**Maior função (1.189 → 1.216), funções ≥ 80 (48 → 50) e arquivos > 500 (15 → 18).**
+
+As duas primeiras são o mesmo fato: **`_run_post_to_platforms` cresceu 27 linhas durante o
+projeto**. Ela é o alvo do R-09 ao R-12, que estão atrás do R-08 — e o R-08 está atrás da
+janela de 48h. Ou seja: a função que mais precisa do trabalho é justamente a que ficou
+esperando, e enquanto isso continuou recebendo mudança. Não é regressão do refactor; é a
+medida de quanto custa a fila.
+
+A terceira é **artefato da própria técnica**: quebrar um arquivo de 2.111 linhas em três de
+~800 aumenta a contagem de "arquivos > 500". A métrica mede tamanho de arquivo, não
+concentração de responsabilidade. Ela só vai fechar quando a onda 1 dividir
+`apps/social/tasks.py`, que sozinho responde por 3.945 das linhas.
+
+> **Nenhuma das três é motivo para mudar o plano** — as três apontam para os mesmos 6 itens
+> que faltam. Mas ficam registradas porque um relatório que só mostra o que melhorou não
+> serve para decidir nada.
+
+### As que já fecharam, e o que elas provaram
+
+- **Cópias da transição "POSTED": 5 → 1.** O item que pagava o projeto. O número 5 que um
+  `grep` cru devolve hoje são: o site real, uma menção em docstring, um teste anti-drift e
+  duas linhas de fixture. Código de produção tem **um**.
+- **`os.getenv` fora de settings: 62 → 9**, e os 9 restantes são todos deliberados: 3
+  leituras de `SystemRoot` (ambiente do SO, para achar fonte no Windows), 2 de
+  `PROMETHEUS_MULTIPROC_*` (contrato do `prometheus_client` — migrar abriria divergência
+  entre o que a lib lê e o que a aplicação acha), 2 do bootstrap do Django em
+  `asgi.py`/`wsgi.py` e 2 do `settings_test`. **A meta "0" está atingida na prática.**
+- **Cobertura de `auto_cuts/tasks.py`: 7% → 100%** — mas o mérito é do R-19, não de teste
+  novo: o arquivo tem 73 linhas agora. A cobertura real do fluxo está espalhada por
+  `analysis_flow` e `finalization_flow`.
 
 ### Métricas perceptíveis (as que realmente importam)
 
