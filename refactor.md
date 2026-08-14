@@ -53,7 +53,8 @@ linhas, não por leitura.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
-1. **R-08** — libera em **2026-08-15**, 48h depois do deploy de 13/08. Movimentação pura,
+1. **R-08** — libera em **2026-08-15**, 48h depois do deploy de 13/08 (o de 14/08 não
+   reinicia a contagem: o gate é sobre R-06+R-07, que subiram no primeiro). Movimentação pura,
    risco baixo: mover `_resolve_*` e afins de `apps/social/tasks.py` para
    `services/publish_targets.py`.
 2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
@@ -146,8 +147,8 @@ levanta sobre as outras contagens deste documento.
 > R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
 > (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** (lote 3) → **43,96** (lote 4) →
 > **44,40** (lote 5) → **44,53** (lote 6) → **45,11** (R-14) → **45,34** (R-15) →
-> **45,41** (R-16) → **45,63** (R-20 PR 1) → **46,03** (R-20 PR 2). A margem sobre o
-> piso de 42,0 é de **4,03pp**.
+> **45,41** (R-16) → **45,63** (R-20 PR 1) → **46,03** (PR 2) → **46,46** (continuação).
+> A margem sobre o piso de 42,0 é de **4,46pp** — quase 3× o que ela era de manhã.
 >
 > O salto do lote 5 (+0,44pp num PR de configuração) é o R-17 pagando o que prometia:
 > `youtube_download.py` era intestável e foi de ~20% para 61%.
