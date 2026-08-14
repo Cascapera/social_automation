@@ -112,7 +112,7 @@ levanta sobre as outras contagens deste documento.
 
 > ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
 > depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
-> R-18 → **43,31** com o CT-4 (#40) → **43,51** com o R-19 (b). A margem sobre o piso de
+> R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b). A margem sobre o piso de
 > 42,0 é de **1,51pp**.
 >
 > **Ainda não subi o piso, de propósito.** O R-08 é movimentação pura de código bem
