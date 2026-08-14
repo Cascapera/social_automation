@@ -2216,14 +2216,27 @@ Itens que exigem parada de produção: 0
 - [ ] **R-20** · Tornar observáveis os `except Exception: pass` mais arriscados (2 PRs)
       risco: baixo · 4h · produção: transparente · 2 PRs de ~150 linhas / ~5 arquivos
       pré-requisito: R-14
-  - [ ] Top 10 sites priorizados (disco / estado / resposta ao usuário)
+  - [x] Top 10 sites priorizados (disco / estado / resposta ao usuário) — **PR 1 feito**:
+        os 10 de **remoção de mídia em disco**, em 4 arquivos, via
+        `services/media_cleanup.py`
   - [ ] Onde o payload da resposta muda, marcado como **mudança de comportamento** e em PR próprio
-  - [ ] Teste que força a falha e verifica o evento logado
+  - [x] Teste que força a falha e verifica o evento logado — 10 testes, incluindo a falha
+        atravessando o fluxo inteiro até a resposta
   - [ ] **Avisar quem monitora**: volume de eventos de erro vai subir — é sucesso, não regressão
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Suíte completa verde (476 → **486**) · Lint verde
+  - [x] PR 1 aberto e revisado · [ ] Implantado
+  - [x] Commitado — PR 1 `2ff5556`
+  - Status: **PR 1 de 2 feito** · Notas: os 10 sites viraram `delete_file_field` e
+    `unlink_path`, com `operation` identificando quem pediu (`remove_awaiting`,
+    `mark_posted`, `delete_scheduled_post`, `finalize_discard`, `delete_job_output`) — é o
+    que permite ler o log e saber **qual fluxo** está deixando arquivo para trás. Campo
+    vazio e caminho inexistente não logam: são o caso normal, não falha.
+    ▶ **O PR 2 é o do payload**, e o caso está localizado: em
+    `views/posting.py:download-media`, se o `zf.write` do vídeo ou da thumbnail falhar, o
+    ZIP é servido **sem o arquivo** e sem aviso — o usuário recebe um pacote que parece
+    completo. Restam ainda ~43 pontos do D-10 fora do top 10, dos quais 18 estão no
+    `_delete_auto_cut_job_files` (`views/auto_cuts.py`), que pede o mesmo tratamento em
+    lote.
 
 - [ ] **Onda 3 concluída** — configuração com fonte única, prompts separados, falhas visíveis
 
