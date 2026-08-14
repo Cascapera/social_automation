@@ -41,6 +41,13 @@ from django.core.files import File
 from django.db.utils import DatabaseError
 from django.utils import timezone
 
+from apps.auto_cuts.models import (
+    AutoCutAnalysis,
+    AutoCutCorte,
+    AutoCutReadyChunk,
+    AutoCutSuggestion,
+)
+from apps.auto_cuts.services.extract import extract_corte
 from apps.auto_cuts.services.flow_common import (
     _append_convidados,
     _queue_analysis_finalization,
@@ -53,6 +60,7 @@ from apps.auto_cuts.services.grok import (
     analyze_ready_cut_metadata,
     analyze_ready_cuts_batch_titles_from_transcripts,
 )
+from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
 from apps.auto_cuts.services.transcript import (
     chunk_transcript,
     segments_to_transcript_with_timestamps,
@@ -62,6 +70,8 @@ from apps.auto_cuts.services.video_chunks import (
     extract_chunks_to_folder,
     transcribe_single_chunk,
 )
+from apps.auto_cuts.services.youtube_download import download_youtube
+from apps.brands.models import Brand, BrandCategory
 from apps.common.metrics import (
     transcription_duration_ms,
     transcription_failures_total,
@@ -76,7 +86,7 @@ from apps.jobs.services.ffmpeg import (
     seconds_to_tc,
     tc_to_seconds,
 )
-from apps.jobs.services.subtitles import generate_subtitles
+from apps.jobs.services.subtitles import generate_subtitles, load_whisper_model
 
 logger = logging.getLogger(__name__)
 
@@ -237,8 +247,6 @@ def _filter_factory_routable_items(analysis, items: list[dict]) -> tuple[list[di
     if not factory_id:
         return list(items or []), 0, 0
 
-    from apps.brands.models import Brand, BrandCategory
-
     active_codes = set(
         BrandCategory.objects.filter(factory_id=factory_id, is_active=True)
         .values_list("code", flat=True)
@@ -276,8 +284,6 @@ def _allowed_theme_categories_for_analysis(analysis) -> list[str]:
     factory_id = getattr(base_brand, "factory_id", None) if base_brand else None
     if not factory_id:
         return list(ALL_THEME_CATEGORIES)
-    from apps.brands.models import Brand, BrandCategory
-
     active_codes = set(
         BrandCategory.objects.filter(factory_id=factory_id, is_active=True)
         .values_list("code", flat=True)
@@ -319,6 +325,8 @@ def _was_transcript_prepopulated_by_multi_creator(analysis) -> bool:
     if not getattr(analysis, "transcript_segments", None):
         return False
     try:
+        # Import adiado de propósito (R-19 d): o `except ImportError` é o contrato daqui —
+        # sem o app Multiple-Creator instalado, a resposta é "não veio de lá", não erro.
         from apps.multiple_creator.models import MultipleCreatorBrandExecution
     except ImportError:
         return False
@@ -336,8 +344,6 @@ def run_analysis(task, analysis_id: int) -> None:
     As saídas silenciosas daqui (entrega duplicada, job apagado) são de propósito: com
     `acks_late` elas são comportamento normal da fila, não excepcional.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis
-
     try:
         analysis = AutoCutAnalysis.objects.get(id=analysis_id)
     except ObjectDoesNotExist:
@@ -374,8 +380,6 @@ def run_analysis(task, analysis_id: int) -> None:
 
     # Ready cuts: batch (multiple files → one job)
     if getattr(analysis, "is_ready_cuts", False):
-        from apps.auto_cuts.models import AutoCutReadyChunk
-
         if AutoCutReadyChunk.objects.filter(analysis_id=analysis_id).exists():
             try:
                 _process_ready_cuts_batch_flow(analysis_id)
@@ -397,8 +401,6 @@ def _analyze_and_cut(analysis, analysis_id: int, *, task_id: str) -> None:
     O `except` do fim é o que transforma qualquer falha não tratada em `status="error"`
     com a mensagem crua e **re-levanta** — o Celery precisa ver a exceção.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis
-
     multi_creator_skip = _was_transcript_prepopulated_by_multi_creator(analysis)
 
     youtube_url = (analysis.youtube_url or "").strip()
@@ -566,7 +568,6 @@ def _download_youtube_source(analysis, analysis_id: int, youtube_url: str) -> bo
     if not _safe_save_analysis(analysis, ["progress_message", "progress"]):
         return False
     try:
-        from apps.auto_cuts.services.youtube_download import download_youtube
         media_root = Path(settings.MEDIA_ROOT)
         download_dir = media_root / "auto_cuts" / "sources"
         download_dir.mkdir(parents=True, exist_ok=True)
@@ -649,7 +650,6 @@ def _transcribe_into_analysis(
             boundaries = [(s, e) for _, s, e in chunk_paths]
 
             # Simple loop (no generator) — avoids crash when exiting generator on long videos
-            from apps.jobs.services.subtitles import load_whisper_model
             _whisper_model, _ = load_whisper_model(model_size=os.getenv("WHISPER_MODEL", "small").strip() or "small", device=None)
 
             for i, (chunk_path, start_sec, end_sec) in enumerate(chunk_paths):
@@ -777,8 +777,6 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
     Aplica ordenação, limites por tipo de prompt, corte de duração e o filtro de
     roteamento da factory. Devolve pares `(suggestion, formato)` na ordem de extração.
     """
-    from apps.auto_cuts.models import AutoCutSuggestion
-
     # Save suggestions and extract cuts
     AutoCutSuggestion.objects.filter(analysis=analysis).delete()
 
@@ -1013,10 +1011,6 @@ def _extract_cuts_for_suggestions(
     cortes_dir: Path,
 ) -> bool:
     """Extrai o vídeo de cada sugestão e cria o `AutoCutCorte`. False = o chamador deve sair."""
-    from apps.auto_cuts.models import AutoCutCorte
-    from apps.auto_cuts.services.extract import extract_corte
-    from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
-
     # 6. Extract video for each suggestion and create AutoCutCorte
     total_cortes = len(suggestions_created)
     for i, (sug, fmt) in enumerate(suggestions_created):
@@ -1097,8 +1091,6 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     Transcribe, call LLM for metadata (title, thumbnail), copy video without re-extract,
     generate thumbnail, and finalize.
     """
-    from apps.auto_cuts.models import AutoCutSuggestion
-
     analysis.status = "analyzing"
     analysis.progress_message = "Analisando metadata com IA..."
     analysis.progress = 20
@@ -1128,9 +1120,6 @@ def _process_ready_cuts_flow(analysis, duration_sec: float, segments: list) -> N
     cortes_dir.mkdir(parents=True, exist_ok=True)
 
     AutoCutSuggestion.objects.filter(analysis=analysis).delete()
-    AutoCutCorte = __import__("apps.auto_cuts.models", fromlist=["AutoCutCorte"]).AutoCutCorte
-    from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
-
     end_tc = seconds_to_tc(duration_sec)
     sug = AutoCutSuggestion.objects.create(
         analysis=analysis,
@@ -1226,14 +1215,6 @@ def _process_ready_cuts_batch_flow(analysis_id: int) -> None:
     Multiple files in one job: queued transcription, titles (LLM), optional long video (fade),
     then shorts; automatic finalization.
     """
-    from apps.auto_cuts.models import (
-        AutoCutAnalysis,
-        AutoCutCorte,
-        AutoCutReadyChunk,
-        AutoCutSuggestion,
-    )
-    from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
-
     analysis = AutoCutAnalysis.objects.filter(id=analysis_id).first()
     if not analysis:
         return

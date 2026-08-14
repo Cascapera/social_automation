@@ -17,7 +17,12 @@ from __future__ import annotations
 import logging
 
 from django.conf import settings
+from django.db.models import Count
 from django.db.utils import DatabaseError
+
+from apps.auto_cuts.models import AutoCutAnalysis
+from apps.brands.models import Brand, BrandAsset
+from apps.jobs.models import VideoInventoryItem
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +70,9 @@ def _mark_analysis_done(analysis) -> None:
     if not _safe_save_analysis(analysis, ["status", "progress_message", "progress", "error"]):
         return
     try:
+        # Import adiado de propósito (R-19 d): `youtube_fetch` importa `googleapiclient`
+        # no topo. Aqui dentro do try, uma instalação sem a lib perde o registro do
+        # sucesso manual e segue; no topo do módulo, derrubaria o fluxo inteiro.
         from apps.auto_cuts.services.youtube_fetch import register_manual_youtube_success
 
         register_manual_youtube_success(analysis)
@@ -103,8 +111,6 @@ def _sanitize_long_overlay_fk(analysis) -> bool:
     If long_overlay_asset_id points to deleted BrandAsset, clear FK and disable overlay.
     Avoids IntegrityError on job save (e.g. after YouTube download with file.save).
     """
-    from apps.brands.models import BrandAsset
-
     pk = getattr(analysis, "long_overlay_asset_id", None)
     if not pk:
         return False
@@ -124,7 +130,6 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
     """
     target_id = getattr(analysis, "target_brand_id", None)
     if target_id:
-        from apps.brands.models import Brand
         target = Brand.objects.filter(id=target_id).first()
         if target:
             return target
@@ -140,11 +145,6 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
 
     distribution_mode = getattr(analysis, "distribution_mode", "") or "theme"
     if distribution_mode == "distribute":
-        from django.db.models import Count
-
-        from apps.brands.models import Brand
-        from apps.jobs.models import VideoInventoryItem
-
         brands = list(Brand.objects.filter(factory_id=factory_id).values_list("id", flat=True))
         if not brands:
             return base_brand
@@ -166,8 +166,6 @@ def _resolve_target_brand_for_suggestion(analysis, suggestion):
     category = (getattr(suggestion, "theme_category", "") or "").strip()
     if not category:
         return base_brand
-    from apps.brands.models import Brand
-
     mapped = Brand.objects.filter(
         factory_id=factory_id,
         theme_category=category,
@@ -183,8 +181,6 @@ def _sync_inventory_item_from_corte(corte):
     """
     if not corte or not getattr(corte, "analysis_id", None):
         return
-    from apps.auto_cuts.models import AutoCutAnalysis
-
     analysis = AutoCutAnalysis.objects.filter(id=corte.analysis_id).first()
     if not analysis:
         return
@@ -205,8 +201,6 @@ def _sync_inventory_item_from_corte(corte):
                 getattr(suggestion, "theme_category", "") if suggestion else "",
             )
         return
-    from apps.jobs.models import VideoInventoryItem
-
     cut_type = (getattr(suggestion, "cut_type", "") or "").strip().lower()
     video_type = "SHORT" if cut_type == "short" else "LONG"
     raw_data = getattr(suggestion, "raw_data", None) or {}

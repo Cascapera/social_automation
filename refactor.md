@@ -14,51 +14,46 @@
 
 ## ⏸ PONTO DE RETOMADA — sessão de 2026-08-14
 
-**Onde paramos:** **R-19 (b) feito** — `analyze_auto_cuts_task` saiu de `tasks.py` para
-`services/analysis_flow.py`. `apps/auto_cuts/tasks.py` foi de **2.110 para 616 linhas**;
-o que resta lá é o `finalizar_auto_cut_task`, alvo do (c). Suíte em 399 testes, lint verde,
-cobertura local 43,45% → **43,75%**.
+**Onde paramos:** **o R-19 está fechado.** Os quatro PRs saíram no mesmo dia:
+(a) CT-4, (b) `analyze_auto_cuts_task`, (c) `finalizar_auto_cut_task` e (d) os imports
+dentro de função.
 
-O CT-4 passou **sem mudar nenhuma asserção** — só os 3 alvos de `patch()` acompanharam o
-código de módulo. É a evidência que o plano pedia: o PR (a) foi escrito antes justamente
-para provar isto.
+`apps/auto_cuts/tasks.py` foi de **2.111 para 73 linhas** — as duas tasks Celery e nada
+mais. O corpo virou três módulos em `services/`:
+
+```
+tasks.py                só as tasks, que delegam (o nome é contrato de fila)
+  ↓
+analysis_flow.py        run_analysis + 7 etapas + os fluxos de cortes prontos
+finalization_flow.py    run_finalization + _process_cut + 6 etapas de render
+  ↓
+flow_common.py          os helpers que os dois fluxos usam
+```
+
+Os dois arquivos de CT-4 passaram **sem mudar nenhuma asserção** — só os alvos de `patch()`
+acompanharam o código de módulo. Era exatamente para isso que o PR (a) foi escrito antes.
+Suíte em 399 testes, lint verde, cobertura local **43,76%**.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
-1. **R-08 já está liberado** (48h do deploy de 13/08 vencem em 15/08). Movimentação pura,
-   risco baixo: mover `_resolve_*` e afins de `tasks.py` para `services/publish_targets.py`.
+1. **R-08** — liberado hoje (48h do deploy de 13/08). Movimentação pura, risco baixo:
+   mover `_resolve_*` e afins de `apps/social/tasks.py` para `services/publish_targets.py`.
 2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
-   (não o local). O piso segue em 42,0 e a margem já é grande.
-3. **R-19 (c)** — extrair `finalizar_auto_cut_task` (556 linhas) para
-   `services/finalization_flow.py`. O caminho está aberto: `flow_common.py` já existe e é
-   de onde o (c) vai puxar os helpers compartilhados.
+   (não o local). O piso segue em 42,0 e a margem já passou de 1,5pp.
+3. Depois disso, a onda 1 continua no **R-09**.
 
-### Estado do R-19 (em andamento, 2 de 4 PRs)
+### Estado do R-19 — ✅ concluído (falta deploy)
 
-- ✅ **(a) CT-4** — 21 characterization tests das duas tasks gigantes. Mergeado (#40).
-- ✅ **(b)** `analyze_auto_cuts_task` extraída → `services/analysis_flow.py`
-- ⬜ **(c)** extrair `finalizar_auto_cut_task` (556 linhas) → `services/finalization_flow.py`
-- ⬜ **(d)** remover os 27 imports dentro de função
+- ✅ **(a) CT-4** — 21 characterization tests das duas tasks gigantes (#40)
+- ✅ **(b)** `analyze_auto_cuts_task` → `services/analysis_flow.py`
+- ✅ **(c)** `finalizar_auto_cut_task` → `services/finalization_flow.py`
+- ✅ **(d)** imports dentro de função removidos (3 ficaram, com o motivo no código)
 
-> **Ao começar o (c), ler o docstring do `test_finalize_task_characterization.py` antes do
-> código.** Ele registra o que a extração quebra em silêncio: falha de finalização **não**
-> vira `status="error"`, porque o recovery procura o estado `finalizing`; e `has_nvenc()`
-> roda mesmo sem nada a finalizar.
-
-**Como o (b) ficou desenhado — o (c) deve seguir o mesmo formato:**
-
-```
-tasks.py            só as tasks Celery, que delegam (o nome é contrato de fila)
-  ↓
-analysis_flow.py    run_analysis + 7 etapas com nome + os fluxos de cortes prontos
-  ↓
-flow_common.py      os helpers que análise e finalização usam
-```
-
-A única seta invertida é o enfileiramento de `finalizar_auto_cut_task` dentro de
-`_queue_analysis_finalization`, com import adiado — mesmo padrão que `recovery.py` já
-usava. Os `return` espalhados pela função original viraram sinal de interrupção das etapas
-(`False` / `None` / `_ABORTED`).
+> ⚠ **O que o R-19 preservou de propósito, e que a próxima pessoa não deve "melhorar":**
+> falha de finalização **não** vira `status="error"` — a análise fica parada em
+> `finalizing` porque o recovery procura esse estado; as mensagens de erro são contrato de
+> tela (duas delas pedem ações opostas do usuário); e cada etapa de render engole a própria
+> exceção, de modo que uma etapa que falha não aborta as seguintes.
 
 ### Achados desta sessão que não estavam no plano
 
@@ -66,6 +61,9 @@ usava. Os `return` espalhados pela função original viraram sinal de interrupç
 | --- | --- | --- |
 | `ALL_THEME_CATEGORIES` existe em duas cópias idênticas | R-19 (b) | registrado · **L-11** · PR próprio (a de `prompts/` está congelada por hash) |
 | `_mark_analysis_done` tem uma segunda cópia em `recovery.py` | R-19 (b) | registrado · **L-11** — mesma lógica, sem a guarda de linha apagada |
+| `horizontal_insert_logo` atravessa a fila e ninguém lê | R-19 (c) | terceira ocorrência do **L-9** — mantido na assinatura, sinalizado no docstring |
+| `DEFAULT_SUBTITLE_STYLE` (o alias) não tem leitor | R-19 (c) | idem — movido junto, não apagado |
+| `has_nvenc()` roda a cada finalize, mesmo sem cortes | CT-4 | continua assim; agora é 1 linha isolada em `run_finalization`, fácil de memoizar |
 
 ### Achados da sessão anterior (13/08)
 
@@ -74,7 +72,6 @@ usava. Os `return` espalhados pela função original viraram sinal de interrupç
 | `YOUTUBE_CHECK_CLIENT_ENABLED` era código morto | R-17 | removido · **L-9** |
 | `CTR_WORDS_*` / `FORBIDDEN_WORDS_*` são código morto (~60 linhas) | R-18 | movidas e sinalizadas · **decisão sua pendente** |
 | Congelamento de hash com escopo largo demais deixou `develop` vermelho | R-18 → #39 | corrigido · **L-10** |
-| `has_nvenc()` roda a cada finalize, mesmo sem cortes | CT-4 | anotado para o R-19 (c) |
 
 ### ⚠ Três coisas pendentes que dependem de você
 
@@ -1603,13 +1600,12 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
-           R-19 em andamento: (a) e (b) feitos, faltam (c) e (d)
+Progresso: 5/21 itens concluídos (R-02, R-03, R-04, R-05, R-19)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
            1 em andamento por lotes (R-17 — lote 1 implantado, ~52 getenv restantes)
            ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
-           ▶ próximo: R-08 (liberado em 15/08) e R-19 (c)
+           ▶ próximo: R-08 (liberado em 15/08)
            suite: 288 -> 399 testes · cobertura 40,8% -> 43,75% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
@@ -2012,7 +2008,7 @@ Itens que exigem parada de produção: 0
     são lidas por ninguém. Movidas, não apagadas — são conteúdo editorial e a intenção de
     quem escreveu não está no código. Ver item aberto abaixo.
 
-- [ ] **R-19** · Fatiar os fluxos de `auto_cuts` para `services/` (4 PRs)
+- [x] **R-19** · Fatiar os fluxos de `auto_cuts` para `services/` (4 PRs)
       risco: médio · 2d · produção: transparente · 4 PRs de ~300-400 linhas
       pré-requisito: R-02 (e R-18 antes, por tocar o mesmo app)
   - [x] PR (a) — CT-4 characterization, passando contra o código atual —
@@ -2023,18 +2019,26 @@ Itens que exigem parada de produção: 0
         (`services/flow_common.py`) e os fluxos de cortes prontos, que são ramos da
         análise. CT-4 passou **sem mudar nenhuma asserção** — só os 3 alvos de
         `patch()` acompanharam o código de módulo
-  - [ ] PR (c) — `finalizar_auto_cut_task` extraída
-  - [ ] PR (d) — 27 imports dentro de função removidos
-  - [ ] **Nomes de task Celery inalterados**
+  - [x] PR (c) — `finalizar_auto_cut_task` extraída para
+        `services/finalization_flow.py`. Os 20 parâmetros viram um `FinalizeOptions`
+        congelado, calculado uma vez em vez de 16 locais soltos atravessando 6 etapas
+  - [x] PR (d) — imports dentro de função removidos. **Três ficaram**, agora com o
+        motivo escrito no código: o ciclo real `services → tasks` (enfileiramento), o
+        `youtube_fetch` (importa `googleapiclient` no topo) e o `multiple_creator`
+        (o `except ImportError` é o contrato da função)
+  - [x] **Nomes de task Celery inalterados** — as duas tasks continuam em
+        `apps.auto_cuts.tasks`, só o corpo mudou de módulo
   - [ ] Vídeo real processado ponta a ponta em staging
-  - [ ] Suíte completa verde · Lint verde
+  - [x] Suíte completa verde · Lint verde
   - [ ] Implantado · verificado 48h — taxa de sucesso do pipeline de cortes estável
-  - [x] Commitado — (a) `87ae7d5` · (b) `7c76c81`+`e1eccfd` · (c) ____ (d) ____
-  - Status: **em andamento — (a) e (b) feitos** · Notas: `auto_cuts/tasks.py` em
-    **616 linhas** (era 2.111); o que resta é o `finalizar_auto_cut_task`, alvo do (c).
-    Conferência mecânica do (b): o multiset de linhas do corpo antigo contra o das
-    funções novas só difere em assinatura, plumbing e linhas de `return` — nenhuma
-    instrução de negócio, mensagem de erro ou métrica mudou.
+  - [x] Commitado — (a) `87ae7d5` · (b) `7c76c81`+`e1eccfd` · (c) `c1e26b1` · (d) `8779378`
+  - Status: **concluído — falta deploy** · Notas: `auto_cuts/tasks.py` em **73 linhas**
+    (era 2.111): as duas tasks e nada mais. O corpo virou três módulos —
+    `analysis_flow.py`, `finalization_flow.py` e `flow_common.py`.
+    Conferência mecânica nos dois PRs: o multiset de linhas do corpo antigo contra o
+    das funções novas só difere em assinatura, plumbing e linhas de `return`/`opts.` —
+    nenhuma instrução de negócio, mensagem de erro ou métrica mudou.
+    O ganho previsto era "tasks.py de 2.111 → ~300 linhas"; ficou em 73.
 
   > ⚠ **Ler o docstring dos dois arquivos de teste antes de escrever o (b) e o (c).** Eles
   > registram três armadilhas que a extração quebra em silêncio:
@@ -2181,9 +2185,20 @@ código, diferente do booleano do R-17.
 > (elas parecem ter sido escritas para filtrar títulos e thumbnails) ou removê-las? Não
 > bloqueia nada; enquanto não sair, ficam declaradas e sinalizadas no docstring.
 
-Duas ocorrências em dois itens sugerem que a pergunta vale para o resto: das 57 ocorrências
+O R-19 (c) achou mais duas, e uma delas é pior que constante morta: **`horizontal_insert_logo`
+é um parâmetro que atravessa a fila.** A `apps/api/views.py` lê o valor do request e o envia
+na mensagem Celery; o corpo da task **nunca o consultou**. Quem mexer no checkbox da tela não
+vai ver efeito nenhum, e o log não vai dizer por quê. Ficou na assinatura — removê-lo
+quebraria as mensagens já enfileiradas — mas agora está escrito no docstring. Junto veio
+`DEFAULT_SUBTITLE_STYLE`, o alias que sobrou sem leitor quando os dois estilos viraram
+`_SHORT` e `_LONG`.
+
+Quatro ocorrências em quatro itens sugerem que a pergunta vale para o resto: das 57 ocorrências
 de `os.getenv` do D-08 e das contagens de constantes deste documento, **quantas alimentam
 algo que alguém lê?** Vale rodar a verificação antes de estimar o próximo item, não depois.
+
+> ▶ **Decisão pendente para você:** o checkbox de "inserir logo" na finalização deveria
+> funcionar (e aí é bug de produção, não código morto) ou sair da tela?
 
 **L-10 · Um teste de rede pode ter escopo largo demais, e isso custa.** O congelamento de
 hash do R-18 pegava *toda* constante em maiúsculas de `grok.py`. No dia seguinte, um commit
