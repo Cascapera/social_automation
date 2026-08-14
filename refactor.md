@@ -1678,8 +1678,11 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 10/21 itens concluídos
-           (R-02, R-03, R-04, R-05, R-14, R-15, R-16, R-17, R-19, R-20)
+Progresso: 17/23 itens do checklist concluídos
+           faltam só os 6 da onda 1 encadeada: R-08 -> R-09 -> R-10 -> R-11
+           -> R-12 -> R-13 (todos tocam apps/social/tasks.py, por isso em serie)
+           (a contagem de "21 itens" do texto acima e anterior aos 3 achados
+            dos characterization tests; o checklist tem 23)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
@@ -1730,7 +1733,7 @@ Itens que exigem parada de produção: 0
 
 ### Onda 0 — Destravar e medir  ·  ~18h
 
-- [ ] **R-01** · Corrigir `_NoOpMetric.observe()` ausente
+- [x] **R-01** · Corrigir `_NoOpMetric.observe()` ausente
       risco: baixo · 30min · produção: transparente · PR: ~40 linhas / 2 arquivos
       🔧 **é correção de bug, não refatoração — PR próprio com prefixo `fix()`**
   - [x] Teste de regressão escrito (simula ImportError) e falhando antes da correção
@@ -1738,10 +1741,10 @@ Itens que exigem parada de produção: 0
   - [x] Suíte completa verde (7 erros → 0)
   - [x] Lint verde
   - [x] PR aberto e revisado — [#25](https://github.com/Cascapera/social_automation/pull/25), CI verde, mergeado
-  - [ ] Implantado em produção
+  - [x] Implantado em produção — deploy de 13/08
   - [ ] Verificado em produção — `publish_duration_ms` presente em `/metrics`
   - [x] Commitado — `eb58699` (mergeado em `develop` via `47eb3f2`)
-  - Status: **em andamento — aguardando deploy de produção** · Notas: dos 7 erros da linha de base,
+  - Status: **concluído · implantado 13/08** · Notas: dos 7 erros da linha de base,
     6 eram este bug. A correção colapsou `_NoOpChild` e `_NoOpMetric` numa classe só, com
     `labels()` retornando `self` — assim os caminhos com e sem label não podem divergir de
     novo (era essa divergência, não a falta de um método, a causa raiz). Teste anti-drift
