@@ -12,7 +12,56 @@
 
 ---
 
-## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-13
+## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-13 (noite)
+
+**Onde paramos:** `develop` em `e926ef9`, **CI verde**, suíte de 288 → **399 testes**.
+Foram **5 PRs** nesta sessão: #36 (R-07), #37 (R-17 lote 1), #38 (R-18), #39 (correção de
+escopo do hash) e #40 (CT-4). **Deploy feito em 2026-08-13** com 8 itens.
+
+### ▶ AMANHÃ, NESTA ORDEM
+
+1. **Conferir a verificação pós-deploy** — a tabela está logo abaixo, na seção de
+   pendências. A janela de 24h vence hoje/amanhã.
+2. **R-08 libera em 2026-08-15** (48h após o deploy). É movimentação pura, risco baixo:
+   mover `_resolve_*` e afins de `tasks.py` para `services/publish_targets.py`.
+3. **Se ainda não deu 15/08**, seguir no **R-19 PR (b)** — extrair `analyze_auto_cuts_task`
+   para `services/analysis_flow.py`. A rede já está pronta: o CT-4 entrou no PR #40.
+
+### Estado do R-19 (em andamento, 1 de 4 PRs)
+
+- ✅ **(a) CT-4** — 21 characterization tests das duas tasks gigantes. Mergeado (#40).
+- ⬜ **(b)** extrair `analyze_auto_cuts_task` (652 linhas) → `services/analysis_flow.py`
+- ⬜ **(c)** extrair `finalizar_auto_cut_task` (556 linhas) → `services/finalization_flow.py`
+- ⬜ **(d)** remover os 27 imports dentro de função
+
+> **Ao começar o (b) e o (c), ler o docstring dos dois arquivos de teste antes do código.**
+> Eles registram três coisas que a extração pode quebrar em silêncio: as mensagens de erro
+> são contrato de tela (e duas delas pedem ações opostas do usuário); falha de finalização
+> **não** vira `status="error"`, porque o recovery procura o estado `finalizing`; e
+> `has_nvenc()` roda mesmo sem nada a finalizar.
+
+### Achados desta sessão que não estavam no plano
+
+| O que | Onde apareceu | Situação |
+| --- | --- | --- |
+| `YOUTUBE_CHECK_CLIENT_ENABLED` era código morto | R-17 | removido · **L-9** |
+| `CTR_WORDS_*` / `FORBIDDEN_WORDS_*` são código morto (~60 linhas) | R-18 | movidas e sinalizadas · **decisão sua pendente** |
+| Congelamento de hash com escopo largo demais deixou `develop` vermelho | R-18 → #39 | corrigido · **L-10** |
+| `has_nvenc()` roda a cada finalize, mesmo sem cortes | CT-4 | anotado para o R-19 (b)/(c) |
+
+### ⚠ Três coisas pendentes que dependem de você
+
+1. **Decidir sobre `CTR_WORDS_*` / `FORBIDDEN_WORDS_*`** — ligar ao pipeline ou remover?
+   Estão em `apps/auto_cuts/prompts/vocabulary.py`, declaradas e sem leitor. Ver **L-9**.
+2. **Seu `.env.example` tem alteração local não commitada** (`# LLM_API_KEY=AIza...` para
+   vazio). Ela foi preservada nos dois `pull` desta sessão, mas continua fora do git —
+   commitar ou descartar.
+3. **A decisão de processo do L-7**: congelar features em `apps/social/` durante o resto
+   da onda 1, ou aceitar rebases?
+
+---
+
+## Registro da sessão anterior — 2026-08-13 (manhã)
 
 **Onde paramos:** ✅ **O D-02 está fechado.** As 4 decisões do L-7 foram tomadas e o R-07
 mergeado — a máquina de estados de publicação tem **um dono só**, e um teste no CI impede
@@ -70,7 +119,9 @@ levanta sobre as outras contagens deste documento.
 | **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | mergeado · **falta deploy em janela** |
 | **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | mergeado · **falta deploy** |
 | **R-17 lote 1** · `YOUTUBE_CHECK_*` em `settings` | [#37](https://github.com/Cascapera/social_automation/pull/37) | mergeado · **falta deploy** |
-| **R-18** · prompts fora do `grok.py` (2.057 → 897) | [#38](https://github.com/Cascapera/social_automation/pull/38) | mergeado · **falta deploy** |
+| **R-18** · prompts fora do `grok.py` (2.057 → 897) | [#38](https://github.com/Cascapera/social_automation/pull/38) | ✅ implantado |
+| — · escopo do congelamento de hash (L-10) | [#39](https://github.com/Cascapera/social_automation/pull/39) | ✅ concluído |
+| **R-19 (a)** · CT-4 — 21 characterization tests | [#40](https://github.com/Cascapera/social_automation/pull/40) | ✅ concluído (só teste) |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -1524,11 +1575,13 @@ nada. A abordagem incremental deste plano é a correta.
 ```
 Status: em andamento
 Progresso: 4/21 itens concluídos (R-02, R-03, R-04, R-05)
+           R-19 em andamento: PR (a) CT-4 mergeado, faltam (b), (c), (d)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
            1 em andamento por lotes (R-17 — lote 1 implantado, ~52 getenv restantes)
            ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
-           ▶ próximo: R-08, liberado a partir de 2026-08-15 (48h pos-deploy)
+           ▶ próximo: R-08 (a partir de 15/08) ou R-19 (b) ja destravado
+           suite: 288 -> 399 testes · cobertura 40,8% -> 43,7% local
            atualizado em 2026-08-13
 Itens que exigem parada de produção: 0
 ```
@@ -1933,7 +1986,9 @@ Itens que exigem parada de produção: 0
 - [ ] **R-19** · Fatiar os fluxos de `auto_cuts` para `services/` (4 PRs)
       risco: médio · 2d · produção: transparente · 4 PRs de ~300-400 linhas
       pré-requisito: R-02 (e R-18 antes, por tocar o mesmo app)
-  - [ ] PR (a) — CT-4 characterization, passando contra o código atual
+  - [x] PR (a) — CT-4 characterization, passando contra o código atual —
+        [#40](https://github.com/Cascapera/social_automation/pull/40), **21 testes**
+        (11 do `analyze`, 10 do `finalize`). Cobertura de `auto_cuts/tasks.py`: 7% → **21%**
   - [ ] PR (b) — `analyze_auto_cuts_task` extraída
   - [ ] PR (c) — `finalizar_auto_cut_task` extraída
   - [ ] PR (d) — 27 imports dentro de função removidos
@@ -1941,8 +1996,22 @@ Itens que exigem parada de produção: 0
   - [ ] Vídeo real processado ponta a ponta em staging
   - [ ] Suíte completa verde · Lint verde
   - [ ] Implantado · verificado 48h — taxa de sucesso do pipeline de cortes estável
-  - [ ] Commitado — `<hash>` (a) ____ (b) ____ (c) ____ (d) ____
-  - Status: não iniciado · Notas: `auto_cuts/tasks.py` final = ____ linhas (era 2.111)
+  - [x] Commitado — (a) `87ae7d5` · (b) ____ (c) ____ (d) ____
+  - Status: **em andamento — (a) feito, rede montada** · Notas: `auto_cuts/tasks.py` final
+    = ____ linhas (era 2.111).
+
+  > ⚠ **Ler o docstring dos dois arquivos de teste antes de escrever o (b) e o (c).** Eles
+  > registram três armadilhas que a extração quebra em silêncio:
+  >
+  > 1. **As mensagens de erro são contrato de tela.** "Nenhum vídeo encontrado (source ou
+  >    upload)" e "Arquivo de vídeo não existe no disco" pedem ações **opostas** de quem
+  >    lê — reenviar contra chamar o suporte. Unificá-las passa em `assert status == error`.
+  > 2. **Falha de finalização NÃO vira `status="error"`.** Ela deixa a análise em
+  >    `finalizing` com mensagem própria, porque `services/recovery.py` procura exatamente
+  >    esse estado. "Melhorar" para `error` quebra o recovery sem quebrar teste.
+  > 3. **`has_nvenc()` roda a cada finalize** (`tasks.py:1720`), antes de olhar se existe
+  >    algum corte — um `ffmpeg -encoders` por execução. Foi o que reprovou o CT-4 no CI,
+  >    que não tem o binário. Candidato a memoizar ou mover para perto de quem usa.
 
 - [ ] **R-20** · Tornar observáveis os `except Exception: pass` mais arriscados (2 PRs)
       risco: baixo · 4h · produção: transparente · 2 PRs de ~150 linhas / ~5 arquivos
