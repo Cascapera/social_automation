@@ -1954,17 +1954,23 @@ Itens que exigem parada de produção: 0
 
 ### Onda 2 — Camada de API  ·  ~11h
 
-- [ ] **R-14** · Extrair ações de inventário para `apps/jobs/services/inventory_actions.py`
+- [x] **R-14** · Extrair ações de inventário para `apps/jobs/services/inventory_actions.py`
       risco: baixo-médio · 6h · produção: transparente · PR: ~300 linhas / 3 arquivos
       pré-requisito: R-07
-  - [ ] CT-3 escrito **antes** do movimento e passando contra o código atual
-  - [ ] Contrato HTTP inalterado (URL, payload, status, chaves do JSON)
-  - [ ] CT-3 passa de novo depois, **sem edição**
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
-  - [ ] Verificado — sem 500 em `remove-awaiting` e `retry-posting`
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] CT-3 escrito **antes** do movimento e passando contra o código atual — 16 testes
+  - [x] Contrato HTTP inalterado (URL, payload, status, chaves do JSON)
+  - [x] CT-3 passa de novo depois, **sem edição** — `git diff` no arquivo de teste é vazio
+  - [x] Suíte completa verde (460 → **476**) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
+  - [ ] Verificado · sem 500 em `remove-awaiting` e `retry-posting`
+  - [x] Commitado — CT-3 `5616118` · movimento `bce8482`
+  - Status: **concluído — falta deploy** · Notas: `apps/api/views.py` de 2.496 para
+    **2.332** linhas; as duas views viraram 6 e 9 linhas. O serviço não sabe o que é HTTP:
+    erro de regra sai como `InventoryActionError` e a view decide o status — as 4 mensagens
+    continuam idênticas. Duas mudanças de forma, ambas cobertas: o cálculo do próximo
+    horário estava **duplicado em dois ramos do `if`** e virou `_resolve_next_try`; o
+    `timedelta(seconds=30)` virou `RETRY_FALLBACK_DELAY`. Cobertura do módulo novo: **87%**.
+    ▶ Destrava o **R-15** (quebrar `views.py` em pacote) e o **R-20**.
 
 - [ ] **R-15** · Quebrar `views.py` em pacote `views/`
       risco: baixo · 3h · produção: transparente · PR: ~2.500 linhas **movidas** / ~8 arquivos
