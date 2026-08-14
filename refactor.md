@@ -2042,16 +2042,22 @@ Itens que exigem parada de produção: 0
     `fix()` próprio como o projeto convencionou no R-22 — com 4 testes novos provando
     antes que o comportamento não sumia junto.
 
-- [ ] **R-11** · Fatiar (3/4): ramo Upload-Post
+- [x] **R-11** · Fatiar (3/4): ramo Upload-Post
       risco: médio-alto · 8h · produção: transparente · PR: ~350 linhas / 3 arquivos
-      pré-requisito: R-09 (na prática, depois de R-10 para não conflitar)
-  - [ ] Chave de idempotência gerada inalterada
-  - [ ] `test_publish_idempotency.py` e `test_upload_post_reconciliation.py` verdes **sem edição**
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
-  - [ ] Verificado 24h — `upload_post_unknown_results_total` não subiu
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+      pré-requisito: R-09
+  - [x] Chave de idempotência, plataformas enviadas e política de retry inalteradas
+  - [x] R-04 verde · `test_publish_idempotency.py` e `test_upload_post_reconciliation.py`
+        verdes **sem alteração**
+  - [x] Suíte completa verde (505) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
+  - [ ] Verificado — `upload_post_unknown_results_total` não subiu
+  - [x] Commitado — `b848986`
+  - Status: **concluído — falta deploy** · Notas: `_run_post_to_platforms` de 752 para
+    **410 linhas**; `tasks.py` de 3.302 para 2.961. **Três caminhos deste ramo encerram a
+    task inteira** (`pending_result` ×2, `replacement_result`) — eram `return` direto de
+    dentro do bloco e viraram `early_return` no objeto-resultado. Foi a única mudança de
+    forma. 10 helpers e constantes continuam em `tasks.py`, com import adiado; saem no
+    R-12/R-13.
 
 - [ ] **R-12** · Fatiar (4/4): finalização
       risco: médio · 6h · produção: transparente · PR: ~250 linhas / 3 arquivos
