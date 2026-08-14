@@ -123,7 +123,8 @@ levanta sobre as outras contagens deste documento.
 > ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
 > depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
 > R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
-> (c)+(d) → **43,77** com o R-17 lote 2. A margem sobre o piso de 42,0 é de **1,77pp**.
+> (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** com o lote 3. A margem sobre o piso
+> de 42,0 é de **1,81pp**.
 >
 > ⚠ O lote 2 subiu 0,25pp no local (43,76 → 44,01) e **não mexeu no número do CI**. É a
 > mesma divergência já registrada aqui: `settings.py` mede 84% local contra 77% no CI,
@@ -168,6 +169,7 @@ levanta sobre as outras contagens deste documento.
 | **R-19 (b)** · `analyze_auto_cuts_task` → `services/` (2.110 → 616) | [#41](https://github.com/Cascapera/social_automation/pull/41) | mergeado · **falta deploy** |
 | **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | mergeado · **falta deploy** |
 | **R-17 lote 2** · `WHISPER_*` em `settings` | [#43](https://github.com/Cascapera/social_automation/pull/43) | mergeado · **falta deploy** |
+| **R-17 lote 3** · `LLM_*`/`XAI_*`/`GROK_*` em `settings` | [#44](https://github.com/Cascapera/social_automation/pull/44) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
