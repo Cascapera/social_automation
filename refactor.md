@@ -30,13 +30,14 @@ finalization_flow.py    run_finalization + _process_cut + 6 etapas de render
 flow_common.py          os helpers que os dois fluxos usam
 ```
 
-Saíram também **dois lotes do R-17**: o lote 2 (`WHISPER_*`, 5 leitores — com a surpresa
-que virou o **L-12**: a mesma variável tinha dois defaults diferentes) e o lote 3
-(`LLM_*`/`XAI_*`/`GROK_*`, 11 variáveis). Restam ~34 `os.getenv` para o lote 4.
+**E o R-17 fechou junto**, em 5 lotes num dia (2 a 6): `WHISPER_*`, `LLM_*`/`XAI_*`/
+`GROK_*`, `UPLOAD_POST_*`, `YTDLP_*` e o bloco de OAuth/criptografia. As 57 leituras de
+`os.getenv` em 18 arquivos viraram settings; o que resta em `apps/` são 3 leituras de
+`SystemRoot`, que são ambiente do SO, não configuração.
 
 Os dois arquivos de CT-4 passaram **sem mudar nenhuma asserção** — só os alvos de `patch()`
 acompanharam o código de módulo. Era exatamente para isso que o PR (a) foi escrito antes.
-Suíte em **416 testes**, lint verde, cobertura local **44,04%**.
+Suíte em **460 testes**, lint verde, cobertura local **44,70%** (CI: 44,53%).
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
@@ -47,8 +48,8 @@ Suíte em **416 testes**, lint verde, cobertura local **44,04%**.
    (não o local). O piso segue em 42,0 e a margem já passou de 1,7pp.
 3. Depois disso, a onda 1 continua no **R-09**.
 
-> **4 itens esperando deploy**: R-19 (b), R-19 (c)+(d), R-17 lote 2 e R-17 lote 3 — os
-> quatro transparentes. A verificação pós-deploy de cada um está na tabela da seção de
+> **7 itens esperando deploy**: R-19 (b), R-19 (c)+(d) e os 5 lotes do R-17 — todos
+> transparentes. A verificação pós-deploy de cada um está na tabela da seção de
 > pendências. **O lote 3 tem uma pegadinha de deploy**: `LLM_MAX_SHORTS`/`_LONGS` com
 > valor inválido agora impedem o boot em vez de falhar por análise. Se o `.env` de
 > produção tiver lixo nessas duas, o deploy falha — o que é o objetivo, mas convém
@@ -123,8 +124,11 @@ levanta sobre as outras contagens deste documento.
 > ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
 > depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
 > R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
-> (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** com o lote 3. A margem sobre o piso
-> de 42,0 é de **1,81pp**.
+> (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** (lote 3) → **43,96** (lote 4) →
+> **44,40** (lote 5) → **44,53** (lote 6). A margem sobre o piso de 42,0 é de **2,53pp**.
+>
+> O salto do lote 5 (+0,44pp num PR de configuração) é o R-17 pagando o que prometia:
+> `youtube_download.py` era intestável e foi de ~20% para 61%.
 >
 > ⚠ O lote 2 subiu 0,25pp no local (43,76 → 44,01) e **não mexeu no número do CI**. É a
 > mesma divergência já registrada aqui: `settings.py` mede 84% local contra 77% no CI,
@@ -170,6 +174,9 @@ levanta sobre as outras contagens deste documento.
 | **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | mergeado · **falta deploy** |
 | **R-17 lote 2** · `WHISPER_*` em `settings` | [#43](https://github.com/Cascapera/social_automation/pull/43) | mergeado · **falta deploy** |
 | **R-17 lote 3** · `LLM_*`/`XAI_*`/`GROK_*` em `settings` | [#44](https://github.com/Cascapera/social_automation/pull/44) | mergeado · **falta deploy** |
+| **R-17 lote 4** · `UPLOAD_POST_*` em `settings` | [#45](https://github.com/Cascapera/social_automation/pull/45) | mergeado · **falta deploy** |
+| **R-17 lote 5** · `YTDLP_*` em `settings` | [#46](https://github.com/Cascapera/social_automation/pull/46) | mergeado · **falta deploy** |
+| **R-17 lote 6** · OAuth, cripto e o resto — **fecha o R-17** | [#47](https://github.com/Cascapera/social_automation/pull/47) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -1622,13 +1629,12 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 5/21 itens concluídos (R-02, R-03, R-04, R-05, R-19)
+Progresso: 6/21 itens concluídos (R-02, R-03, R-04, R-05, R-17, R-19)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
-           1 em andamento por lotes (R-17 — lotes 1, 2 e 3 feitos, ~34 getenv restantes)
-           ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
+           ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
            ▶ próximo: R-08 (liberado em 15/08)
-           suite: 288 -> 416 testes · cobertura 40,8% -> 44,04% local
+           suite: 288 -> 460 testes · cobertura 40,8% -> 44,70% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
