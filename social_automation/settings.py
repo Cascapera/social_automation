@@ -287,6 +287,23 @@ GROK_SAVE_RESPONSE_JSON = (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().l
     "yes",
 )
 
+# Upload-Post (refactor.md R-17 lote 4 / D-08 — fonte única de configuração)
+# ⚠ Guardada CRUA, sem `.strip()`. O publisher (`publishers/upload_post.py`) usava o valor
+# como veio e o cliente de analytics aplicava `.strip()` no seu próprio acessor. Normalizar
+# aqui mudaria o que o publisher manda no header — se for para arrumar, é item próprio.
+UPLOAD_POST_API_KEY = os.getenv("UPLOAD_POST_API_KEY") or ""
+# Throttle do cliente de analytics: intervalo mínimo entre requisições, pausa global após
+# 429/5xx (evita bloqueio de borda) e teto de espera dentro de uma única chamada.
+UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC = float(
+    os.getenv("UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC", "0.6")
+)
+UPLOAD_POST_ANALYTICS_COOLDOWN_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_COOLDOWN_SEC", "30"))
+UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC", "5"))
+# Pausa extra entre marcas no painel da factory, além do throttle do cliente HTTP.
+UPLOAD_POST_FACTORY_BRAND_DELAY_SEC = float(
+    os.getenv("UPLOAD_POST_FACTORY_BRAND_DELAY_SEC", "0.15")
+)
+
 # Multiple-Creator: retencao do video original apos job terminal (DONE/PARTIAL/ERROR).
 # Apos esse periodo, cleanup_terminal_job_files_task remove o file (mantem a row).
 MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))

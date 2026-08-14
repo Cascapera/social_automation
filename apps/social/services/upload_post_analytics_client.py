@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from typing import Any
@@ -27,12 +26,13 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_POST_API_ROOT = "https://api.upload-post.com/api"
 
-_UPLOAD_POST_MIN_INTERVAL = float(os.getenv("UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC", "0.6"))
-# Pausa global após 429/erro de conexão/5xx para evitar bloqueio de borda (Cloudflare/WAF).
-_UPLOAD_POST_COOLDOWN_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_COOLDOWN_SEC", "30"))
-# Teto de espera aceitável dentro de uma única chamada — acima disso devolvemos erro
-# imediato em vez de bloquear a request por muito tempo.
-_UPLOAD_POST_MAX_WAIT_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC", "5"))
+# Os três parâmetros de throttle são lidos de `settings` no momento do uso (R-17 lote 4).
+# Como constantes de módulo, congelavam no import e nem `override_settings` alcançava —
+# era o motivo de o cooldown deste arquivo não ter teste.
+#   MIN_INTERVAL : intervalo mínimo entre requisições
+#   COOLDOWN     : pausa global após 429/erro de conexão/5xx, contra bloqueio de borda
+#   MAX_WAIT     : teto de espera dentro de uma única chamada; acima disso devolvemos erro
+#                  imediato em vez de segurar a request
 
 _throttle_lock = threading.Lock()
 _last_request_mono: float = 0.0
@@ -45,16 +45,16 @@ def _throttle_upload_post() -> tuple[bool, float]:
 
     Retorna ``(ok, wait_needed)``:
     - ``ok=True``: caller pode prosseguir com a requisição.
-    - ``ok=False``: cooldown ativo e espera estimada seria maior que ``_UPLOAD_POST_MAX_WAIT_SEC``;
+    - ``ok=False``: cooldown ativo e espera estimada seria maior que o teto configurado;
       caller deve abortar com erro de rate limit em vez de bloquear.
     """
     global _last_request_mono
     with _throttle_lock:
         now = time.monotonic()
-        wait_interval = _UPLOAD_POST_MIN_INTERVAL - (now - _last_request_mono)
+        wait_interval = settings.UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC - (now - _last_request_mono)
         wait_cooldown = _cooldown_until_mono - now
         wait = max(wait_interval, wait_cooldown)
-        if wait > _UPLOAD_POST_MAX_WAIT_SEC:
+        if wait > settings.UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC:
             return False, wait
         if wait > 0:
             time.sleep(wait)
@@ -73,21 +73,22 @@ class _UploadPostCooldownError(Exception):
 def _trip_cooldown(reason: str) -> None:
     """Arma o cooldown global ao detectar 429/5xx/erro de conexão."""
     global _cooldown_until_mono
-    if _UPLOAD_POST_COOLDOWN_SEC <= 0:
+    cooldown_sec = settings.UPLOAD_POST_ANALYTICS_COOLDOWN_SEC
+    if cooldown_sec <= 0:
         return
     with _throttle_lock:
-        target = time.monotonic() + _UPLOAD_POST_COOLDOWN_SEC
+        target = time.monotonic() + cooldown_sec
         if target > _cooldown_until_mono:
             _cooldown_until_mono = target
             logger.warning(
                 "[UploadPostAnalytics] cooldown %.1fs ativado (%s)",
-                _UPLOAD_POST_COOLDOWN_SEC,
+                cooldown_sec,
                 reason,
             )
 
 
 def get_upload_post_api_key() -> str:
-    return (os.getenv("UPLOAD_POST_API_KEY") or getattr(settings, "UPLOAD_POST_API_KEY", "") or "").strip()
+    return (settings.UPLOAD_POST_API_KEY or "").strip()
 
 
 def _headers() -> dict[str, str]:
