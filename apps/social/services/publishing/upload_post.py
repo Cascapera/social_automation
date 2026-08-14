@@ -41,6 +41,23 @@ from apps.social.services.idempotency import (
     mark_idempotency_failed,
     mark_idempotency_success,
 )
+from apps.social.services.publishing.idempotency_keys import (
+    UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
+    UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES,
+    UPLOAD_POST_RETRY_COUNT,
+    UPLOAD_POST_RETRY_DELAY_SEC,
+    _apply_idempotency_result,
+    _build_idempotency_retryable_error,
+    _build_publish_idempotency_key,
+    _build_upload_post_provider_keys,
+    _logical_upload_post_platform,
+    _upload_post_pending_idempotency_without_provider_ids,
+    _upload_post_retry_limit_for_error,
+)
+from apps.social.services.publishing.reconciliation import (
+    _schedule_upload_post_unknown_reconciliation,
+)
+from apps.social.services.publishing.slots import _replace_ambiguous_short_slot
 
 logger = logging.getLogger(__name__)
 
@@ -73,23 +90,6 @@ def publish_via_upload_post(
     upload_post_youtube_ok: bool,
 ) -> UploadPostResult:
     """Envia ao Upload-Post e trata retry, idempotência e resultado indefinido."""
-    # Import adiado: estes helpers ainda moram em `tasks.py`. Saem no R-12/R-13.
-    from apps.social.tasks import (
-        UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
-        UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES,
-        UPLOAD_POST_RETRY_COUNT,
-        UPLOAD_POST_RETRY_DELAY_SEC,
-        _apply_idempotency_result,
-        _build_idempotency_retryable_error,
-        _build_publish_idempotency_key,
-        _build_upload_post_provider_keys,
-        _logical_upload_post_platform,
-        _replace_ambiguous_short_slot,
-        _schedule_upload_post_unknown_reconciliation,
-        _upload_post_pending_idempotency_without_provider_ids,
-        _upload_post_retry_limit_for_error,
-    )
-
     resultado = UploadPostResult(upload_post_youtube_ok=upload_post_youtube_ok)
     warnings = resultado.warnings
     retryable_errors = resultado.retryable_errors

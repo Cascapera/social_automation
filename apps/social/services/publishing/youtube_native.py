@@ -47,6 +47,11 @@ from apps.social.services.idempotency import (
     mark_idempotency_success,
 )
 from apps.social.services.publish_targets import _list_ordered_youtube_credentials
+from apps.social.services.publishing.idempotency_keys import (
+    _apply_idempotency_result,
+    _build_idempotency_retryable_error,
+    _build_publish_idempotency_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +82,6 @@ def publish_native_platforms(
     upload_post_client_request_id_key: str,
 ) -> NativePublishResult:
     """Publica nas plataformas nativas do post. Não levanta: erro vira item da lista."""
-    # Import adiado: os 3 helpers de idempotência ainda moram em `tasks.py` e são usados
-    # também pelo ramo do Upload-Post. Saem no R-11, e aí o import sobe para o topo.
-    from apps.social.tasks import (
-        _apply_idempotency_result,
-        _build_idempotency_retryable_error,
-        _build_publish_idempotency_key,
-    )
-
     resultado = NativePublishResult()
     errors = resultado.errors
     warnings = resultado.warnings

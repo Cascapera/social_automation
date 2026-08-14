@@ -365,7 +365,7 @@ class RunPostToPlatformsEarlyExitTests(RunPostToPlatformsFixtureMixin, TestCase)
             return None
 
         with patch(
-            "apps.social.tasks._try_pending_upload_post_reconciliation",
+            "apps.social.services.publishing.preflight._try_pending_upload_post_reconciliation",
             side_effect=_outro_worker_reivindica,
         ):
             result, mock_up, _ = self._run(post.id)

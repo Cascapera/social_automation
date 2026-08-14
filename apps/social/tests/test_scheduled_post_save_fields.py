@@ -125,6 +125,10 @@ class FirstCommentFlagPersistsTests(TestCase):
     def _run_task(self):
         with (
             patch("apps.social.services.youtube_credentials.get_credentials", return_value=MagicMock()),
+            # O R-13 subiu o import de `get_credentials` em tasks.py para o topo do
+            # módulo, então o nome passou a ser resolvido no import e não na chamada:
+            # patchar só a origem deixa de alcançar a task.
+            patch("apps.social.tasks.get_credentials", return_value=MagicMock()),
             patch("googleapiclient.discovery.build", return_value=MagicMock()),
             patch(
                 "apps.social.publishers.youtube.YouTubePublisher._post_pinned_first_comment"

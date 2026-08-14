@@ -30,6 +30,10 @@ from typing import Any
 from apps.jobs.logging_utils import Timer, resolve_scheduled_post_correlation_id
 from apps.jobs.models import RenderOutput, ScheduledPost
 from apps.social.services.publish_targets import _resolve_post_target_brand
+from apps.social.services.publishing.reconciliation import (
+    _try_pending_upload_post_reconciliation,
+)
+from apps.social.services.publishing.slots import _fail_expired_factory_slot
 
 
 @dataclass(frozen=True)
@@ -54,13 +58,6 @@ class EarlyExit:
 
 def preflight(scheduled_post_id: int) -> PreflightOk | EarlyExit:
     """Carrega, valida e reivindica o post. Devolve o contexto pronto ou a saída antecipada."""
-    # Import adiado: `tasks.py` importa este módulo, e estas duas funções ainda moram lá.
-    # Elas saem de lá no R-10/R-12, e aí o import sobe para o topo.
-    from apps.social.tasks import (
-        _fail_expired_factory_slot,
-        _try_pending_upload_post_reconciliation,
-    )
-
     timer = Timer()
 
     try:

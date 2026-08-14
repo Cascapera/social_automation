@@ -794,7 +794,7 @@ class UploadPostReconciliationTests(TestCase):
         mock_up.assert_not_called()
         mock_native.assert_not_called()
 
-    @patch("apps.social.tasks._native_youtube_fallback_available", return_value=False)
+    @patch("apps.social.services.publishing.reconciliation._native_youtube_fallback_available", return_value=False)
     @patch("apps.social.publishers.upload_post.publish_to_upload_post")
     def test_no_provider_id_after_controlled_resend_fails_without_native_fallback(
         self,
