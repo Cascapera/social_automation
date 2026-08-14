@@ -1996,16 +1996,24 @@ Itens que exigem parada de produção: 0
     verificação percorre `_list_ordered_youtube_credentials` para tentar canal por canal.
     ▶ Destrava **R-09 a R-12**.
 
-- [ ] **R-09** · Fatiar `_run_post_to_platforms` (1/4): preflight
+- [x] **R-09** · Fatiar `_run_post_to_platforms` (1/4): preflight
       risco: médio · 6h · produção: transparente · PR: ~250 linhas / 3 arquivos
       pré-requisito: R-04, R-08
-  - [ ] Cada saída antecipada devolve o mesmo dict de hoje
-  - [ ] R-04 verde **sem nenhuma alteração nos testes**
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
+  - [x] Cada saída antecipada devolve o mesmo dict de hoje — as 9 linhas `return {...}`
+        viraram `return EarlyExit({...})` com o mesmo conteúdo, e a conferência mecânica
+        não mostra nenhuma outra diferença de lógica
+  - [x] R-04 verde **sem nenhuma alteração nos testes** — `git diff` nos diretórios de
+        teste é vazio
+  - [x] Suíte completa verde (501) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
   - [ ] Verificado — `publish_attempts_total` / `publish_failures_total` estáveis
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Commitado — `a801441`
+  - Status: **concluído — falta deploy** · Notas: `_run_post_to_platforms` de 1.216 para
+    **1.131 linhas**; `tasks.py` de 3.765 para 3.680. `preflight(post_id)` devolve
+    `PreflightOk` (post, brand, job, video_path, correlation_id, tentativa e timer já
+    resolvidos) ou `EarlyExit` (o dict exato). Um import adiado ficou:
+    `_fail_expired_factory_slot` e `_try_pending_upload_post_reconciliation` ainda moram em
+    `tasks.py` e saem no R-10/R-12 — está comentado no código.
 
 - [ ] **R-10** · Fatiar (2/4): publicação nativa YouTube
       risco: médio-alto · 8h · produção: transparente · PR: ~350 linhas / 3 arquivos

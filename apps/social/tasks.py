@@ -32,7 +32,6 @@ from apps.jobs.logging_utils import (
     Timer,
     log_event,
     new_correlation_id,
-    resolve_scheduled_post_correlation_id,
 )
 from apps.jobs.models import (
     DailyPostingPlanItem,
@@ -65,6 +64,7 @@ from apps.social.services.publish_targets import (
     _should_remove_missing_by_verify_error,
     _youtube_verify_exists_with_credential_fallback,
 )
+from apps.social.services.publishing.preflight import EarlyExit, preflight
 
 logger = logging.getLogger(__name__)
 YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
@@ -2163,103 +2163,18 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     Posting logic (direct call or via task).
     Do not call post_to_platforms_task.apply() from inside another task (deadlock).
     """
-    _timer = Timer()
+    resultado = preflight(scheduled_post_id)
+    if isinstance(resultado, EarlyExit):
+        return resultado.payload
 
-    try:
-        post = ScheduledPost.objects.select_related(
-            "job",
-            "job__brand",
-            "social_account",
-            "auto_cut_corte",
-            "auto_cut_corte__analysis",
-            "auto_cut_corte__suggestion",
-            "factory_schedule",
-        ).get(id=scheduled_post_id)
-    except ScheduledPost.DoesNotExist:
-        return {"error": "ScheduledPost não encontrado"}
-
-    correlation_id = resolve_scheduled_post_correlation_id(post)
-
-    if post.status != "PENDING":
-        return {"skipped": "status não é PENDING"}
-
-    current_attempt = int(post.retry_count or 0) + 1
-    brand = None
-    video_path = ""
-    job_obj = post.job
-
-    if post.job_id:
-        brand = post.job.brand
-        if not brand:
-            post.status = "FAILED"
-            post.error = "Job sem marca"
-            post.save(update_fields=["status", "error"])
-            return {"error": "Job sem marca"}
-        # Reverse OneToOne: the attribute access itself raises when the job has no
-        # RenderOutput at all, so the guard below would never run (R-22).
-        try:
-            output = post.job.output
-        except RenderOutput.DoesNotExist:
-            output = None
-        if not output or not output.file:
-            post.status = "FAILED"
-            post.error = "Job sem vídeo final"
-            post.save(update_fields=["status", "error"])
-            return {"error": "Job sem vídeo final"}
-        video_path = output.file.path
-    elif post.auto_cut_corte_id:
-        corte = post.auto_cut_corte
-        brand = corte.analysis.brand if corte and corte.analysis_id else None
-        if not brand:
-            post.status = "FAILED"
-            post.error = "AutoCut sem marca"
-            post.save(update_fields=["status", "error"])
-            return {"error": "AutoCut sem marca"}
-        if not corte.file:
-            post.status = "FAILED"
-            post.error = "AutoCut sem vídeo finalizado"
-            post.save(update_fields=["status", "error"])
-            return {"error": "AutoCut sem vídeo finalizado"}
-        video_path = corte.file.path
-    else:
-        post.status = "FAILED"
-        post.error = "ScheduledPost sem origem (job/corte)"
-        post.save(update_fields=["status", "error"])
-        return {"error": "ScheduledPost sem origem"}
-
-    # In factory context, prefer schedule destination brand for account/credential.
-    target_brand = _resolve_post_target_brand(post)
-    if target_brand:
-        brand = target_brand
-
+    post = resultado.post
+    brand = resultado.brand
+    job_obj = resultado.job
+    video_path = resultado.video_path
+    correlation_id = resultado.correlation_id
+    current_attempt = resultado.current_attempt
+    _timer = resultado.timer
     _brand_id = brand.id if brand else None
-
-    expired_result = _fail_expired_factory_slot(
-        post,
-        correlation_id=correlation_id,
-        brand_id=_brand_id,
-        current_attempt=current_attempt,
-        duration_ms=_timer.elapsed_ms(),
-        reason="O horário do slot já passou antes de iniciar uma nova tentativa de publicação.",
-    )
-    if expired_result is not None:
-        return expired_result
-
-    early_reconcile = _try_pending_upload_post_reconciliation(
-        post,
-        brand,
-        correlation_id=correlation_id,
-        brand_id=_brand_id,
-        current_attempt=current_attempt,
-        _timer=_timer,
-    )
-    if early_reconcile is not None:
-        return early_reconcile
-
-    claimed = ScheduledPost.objects.filter(id=post.id, status="PENDING").update(status="POSTING")
-    if not claimed:
-        return {"skipped": "status não é PENDING"}
-    post.status = "POSTING"
     # Upload Post targets (TIKTOK, X, INSTAGRAM, YOUTUBE) — same list later passed to the API.
     upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
     _post_platforms = list(post.platforms or [])
