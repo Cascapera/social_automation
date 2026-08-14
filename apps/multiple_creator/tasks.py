@@ -18,13 +18,13 @@ from django.core.files import File
 from django.db import transaction
 from django.utils import timezone
 
+from apps.auto_cuts.services.analysis_flow import CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
 from apps.auto_cuts.services.transcript import segments_to_transcript_with_timestamps
 from apps.auto_cuts.services.video_chunks import (
     cleanup_cortes_processo,
     extract_chunks_to_folder,
     transcribe_single_chunk,
 )
-from apps.auto_cuts.tasks import CHUNKED_TRANSCRIPTION_THRESHOLD_SEC
 from apps.common.metrics import (
     multiple_creator_transcription_savings_ms,
     transcription_duration_ms,
