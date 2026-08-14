@@ -109,8 +109,8 @@ levanta sobre as outras contagens deste documento.
 
 > ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
 > depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
-> R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b). A margem sobre o piso de
-> 42,0 é de **1,51pp**.
+> R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
+> (c)+(d). A margem sobre o piso de 42,0 é de **1,77pp**.
 >
 > **Ainda não subi o piso, de propósito.** O R-08 é movimentação pura de código bem
 > coberto: muda o denominador sem melhorar nada e tende a puxar o total para baixo. Subir
@@ -148,6 +148,7 @@ levanta sobre as outras contagens deste documento.
 | — · escopo do congelamento de hash (L-10) | [#39](https://github.com/Cascapera/social_automation/pull/39) | ✅ concluído |
 | **R-19 (a)** · CT-4 — 21 characterization tests | [#40](https://github.com/Cascapera/social_automation/pull/40) | ✅ concluído (só teste) |
 | **R-19 (b)** · `analyze_auto_cuts_task` → `services/` (2.110 → 616) | [#41](https://github.com/Cascapera/social_automation/pull/41) | mergeado · **falta deploy** |
+| **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
