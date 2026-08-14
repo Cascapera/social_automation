@@ -1980,14 +1980,21 @@ Itens que exigem parada de produção: 0
     não-YouTube — é a duplicata sumindo, não perda de auditoria.
   - ⏸ **Deixar R-06+R-07 em produção por ≥48h antes de seguir para R-08.**
 
-- [ ] **R-08** · Extrair `services/publish_targets.py`
+- [x] **R-08** · Extrair `services/publish_targets.py`
       risco: baixo · 3h · produção: transparente · PR: ~200 linhas movidas / 2 arquivos
       pré-requisito: R-04
-  - [ ] Diff revisado como **movimentação pura** (nenhum corpo de função editado)
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Diff revisado como **movimentação pura** — multiset de linhas não perdeu nada; a
+        única diferença são 3 imports de `BrandSocialAccount` dentro de função que saíram,
+        porque o nome agora está no topo do módulo (mesma direção do R-19 d)
+  - [x] Suíte completa verde (501) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
+  - [x] Commitado — `2f34487`
+  - Status: **concluído — falta deploy** · Notas: `apps/social/tasks.py` de 3.945 para
+    **3.765** linhas. Foram 11 funções, não 8 como o diagnóstico contava — o intervalo
+    114-303 cresceu desde a medição. As duas famílias do intervalo (resolução de destino e
+    verificação de existência no YouTube) vieram juntas porque estão acopladas: a
+    verificação percorre `_list_ordered_youtube_credentials` para tentar canal por canal.
+    ▶ Destrava **R-09 a R-12**.
 
 - [ ] **R-09** · Fatiar `_run_post_to_platforms` (1/4): preflight
       risco: médio · 6h · produção: transparente · PR: ~250 linhas / 3 arquivos
