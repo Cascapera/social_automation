@@ -3,6 +3,7 @@
 Movido de `apps/api/views.py` no R-15 — movimentação pura.
 """
 
+import logging
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -22,9 +23,15 @@ from apps.brands.models import (
     BrandAsset,
     BrandSocialAccount,
 )
+from apps.jobs.logging_utils import log_event
 from apps.jobs.models import (
     ScheduledPost,
     VideoInventoryItem,
+)
+from apps.jobs.services.media_cleanup import (
+    delete_media_pair,
+    rmtree_path,
+    unlink_path,
 )
 
 from ..pagination import StandardResultsSetPagination
@@ -33,95 +40,60 @@ from ..serializers import (
     AutoCutCorteSerializer,
 )
 
+logger = logging.getLogger(__name__)
+
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def _delete_auto_cut_job_files(analysis):
-    """Remove vídeo original, chunks e arquivos de cortes do job."""
-    import shutil
+    """Remove vídeo original, chunks e arquivos de cortes do job.
+
+    Tolerante a falha em cada passo: apagar o job não pode parar porque um arquivo resistiu.
+    O que mudou no R-20 é que a falha deixou de ser silenciosa — cada uma vira
+    `media_delete_failed` com o `operation` e o id do job (D-10).
+    """
+    from apps.auto_cuts.models import AutoCutReadyChunk
 
     media_root = Path(settings.MEDIA_ROOT)
-    # Arquivos do lote de cortes prontos (vários vídeos)
-    try:
-        from apps.auto_cuts.models import AutoCutReadyChunk
+    contexto = {"analysis_id": analysis.id}
 
+    # Arquivos do lote de cortes prontos (vários vídeos). A consulta em si fica protegida:
+    # falhar aqui não pode impedir a limpeza do resto, e antes do R-20 ela era engolida.
+    try:
         for ch in AutoCutReadyChunk.objects.filter(analysis=analysis):
-            if ch.file:
-                try:
-                    fp = Path(ch.file.path) if ch.file.name else None
-                except Exception:
-                    fp = None
-                try:
-                    ch.file.delete(save=False)
-                except Exception:
-                    pass
-                if fp and fp.exists():
-                    try:
-                        fp.unlink()
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+            delete_media_pair(ch.file, operation="delete_job_ready_chunk", **contexto)
+    except Exception as e:
+        log_event(
+            logger,
+            event="media_delete_failed",
+            status="error",
+            error=str(e),
+            operation="delete_job_ready_chunk_query",
+            **contexto,
+        )
+
     # Vídeo original (upload)
-    if analysis.file:
-        try:
-            fp = Path(analysis.file.path) if analysis.file.name else None
-        except Exception:
-            fp = None
-        try:
-            analysis.file.delete(save=False)
-        except Exception:
-            pass
-        if fp and fp.exists():
-            try:
-                fp.unlink()
-            except Exception:
-                pass
+    delete_media_pair(analysis.file, operation="delete_job_source", **contexto)
+
     # Cortes: deleta via Django e também por path/glob (evita arquivos órfãos)
-    cortes_dir = media_root / "auto_cuts" / "cortes"
     for corte in AutoCutCorte.objects.filter(analysis=analysis):
-        if corte.file:
-            try:
-                fp = Path(corte.file.path) if corte.file.name else None
-            except Exception:
-                fp = None
-            try:
-                corte.file.delete(save=False)
-            except Exception:
-                pass
-            if fp and fp.exists():
-                try:
-                    fp.unlink()
-                except Exception:
-                    pass
-        if corte.thumbnail:
-            try:
-                tfp = Path(corte.thumbnail.path) if corte.thumbnail.name else None
-            except Exception:
-                tfp = None
-            try:
-                corte.thumbnail.delete(save=False)
-            except Exception:
-                pass
-            if tfp and tfp.exists():
-                try:
-                    tfp.unlink()
-                except Exception:
-                    pass
-    # Remove por padrão job_X_sug_Y (caso path diverga ou delete do Django falhe)
+        delete_media_pair(corte.file, operation="delete_job_cut", corte_id=corte.id, **contexto)
+        delete_media_pair(
+            corte.thumbnail, operation="delete_job_thumbnail", corte_id=corte.id, **contexto
+        )
+
+    # Remove por padrão job_X_sug_Y (caso path diverja ou o delete do Django falhe)
+    cortes_dir = media_root / "auto_cuts" / "cortes"
     if cortes_dir.exists():
-        try:
-            for f in cortes_dir.glob(f"job_{analysis.id}_sug_*.mp4"):
-                f.unlink()
-        except Exception:
-            pass
+        for f in cortes_dir.glob(f"job_{analysis.id}_sug_*.mp4"):
+            unlink_path(f, operation="delete_job_cut_leftover", **contexto)
+
     # Chunks em processamento (cortes_processo)
-    chunks_dir = media_root / "cortes_processo" / str(analysis.id)
-    if chunks_dir.exists():
-        try:
-            shutil.rmtree(chunks_dir)
-        except Exception:
-            pass
+    rmtree_path(
+        media_root / "cortes_processo" / str(analysis.id),
+        operation="delete_job_chunks_dir",
+        **contexto,
+    )
 
 
 class AutoCutAnalysisViewSet(viewsets.ModelViewSet):

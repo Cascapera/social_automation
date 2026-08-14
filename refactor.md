@@ -204,6 +204,7 @@ levanta sobre as outras contagens deste documento.
 | **R-16** · `serializers.py` → pacote `serializers/` (8 módulos) | [#50](https://github.com/Cascapera/social_automation/pull/50) | ✅ **implantado 14/08** |
 | **R-20 PR 1** · falha de remoção de mídia vira evento | [#51](https://github.com/Cascapera/social_automation/pull/51) | mergeado · **falta deploy** |
 | **R-20 PR 2** · ZIP do `download-media` para de mentir ⚠ | [#52](https://github.com/Cascapera/social_automation/pull/52) | mergeado · **falta deploy** |
+| **R-20 cont.** · limpeza de arquivos do job (18 engolidas) | [#53](https://github.com/Cascapera/social_automation/pull/53) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -1684,10 +1685,10 @@ Progresso: 17/23 itens do checklist concluídos
            (a contagem de "21 itens" do texto acima e anterior aos 3 achados
             dos characterization tests; o checklist tem 23)
            8 implantados em 13/08 + 10 implantados em 14/08
-           2 mergeados e ainda FORA de producao: R-20 PR 1 e PR 2
+           3 mergeados e ainda FORA de producao: os 2 PRs do R-20 + a continuacao
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
            ▶ próximo: R-08 (libera 15/08) · ✅ onda 2 fechada (R-14 → R-15 → R-16)
-           suite: 288 -> 494 testes · cobertura 40,8% -> 46,16% local (CI 46,03%)
+           suite: 288 -> 501 testes · cobertura 40,8% -> 46,59% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
@@ -2258,9 +2259,12 @@ Itens que exigem parada de produção: 0
     nenhuma responde **404**. Havia um terceiro caminho silencioso além dos dois
     `except: pass`: o `if fp.exists()`, que pulava o arquivo quando banco e disco
     discordavam.
-    ▶ Restam ~43 pontos do D-10 fora do top 10, dos quais **18 estão no
-    `_delete_auto_cut_job_files`** (`views/auto_cuts.py`) — mesmo tratamento, em lote, se
-    valer a pena depois.
+    **Continuação (#53)** — o `_delete_auto_cut_job_files` era a maior concentração do
+    D-10: **18 num arquivo só**. Foi de 86 para 49 linhas com os helpers do PR 1 mais
+    `resolve_media_path`, `delete_media_pair` e `rmtree_path`. Ganhou 7 testes, que não
+    existiam. **Pontos que engolem sem log no repositório: 53 → 30.**
+    ▶ Dos 30 que restam, **12 estão em `apps/social/tasks.py`** — o arquivo da onda 1
+    (R-08 a R-13). Faz sentido tratá-los junto com o fatiamento, não antes.
 
 - [ ] **Onda 3 concluída** — configuração com fonte única, prompts separados, falhas visíveis
 
