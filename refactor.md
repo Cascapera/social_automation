@@ -2075,17 +2075,29 @@ Itens que exigem parada de produção: 0
     O ganho previsto no plano era "cai para ~120 linhas de orquestração legível"; ficou em
     192, e o que sobra é orquestração de verdade.
 
-- [ ] **R-13** · Emagrecer `apps/social/tasks.py` para orquestração fina
+- [x] **R-13** · Emagrecer `apps/social/tasks.py` para orquestração fina
       risco: médio · 4h · produção: transparente · PR: ~300 linhas movidas / ~6 arquivos
       pré-requisito: R-12
-  - [ ] **Nomes de task Celery inalterados** (contrato de fila)
-  - [ ] `config/celery.py` e `CELERY_TASK_ROUTES` resolvem todas as tasks
-  - [ ] Os 18 imports dentro de função removidos
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
-  - [ ] Verificado 30min — nenhuma `unregistered task` na fila `publish`
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas: `tasks.py` final = ____ linhas (era 4.035)
+  - [x] Auxiliares movidos para `services/publishing/` — 3 módulos novos
+  - [x] **Imports dentro de função: 18 → 0** em `tasks.py`
+  - [x] **Nomes de task inalterados** — as 19 tasks continuam registradas com o mesmo nome
+        e as 15 rotas de `CELERY_TASK_ROUTES` resolvem todas (verificado com o app Celery
+        carregado, não por leitura)
+  - [x] Suíte completa verde (505) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
+  - [ ] Verificado — nenhuma task no beat com "unregistered task"; fila `publish` nos
+        primeiros 30 min
+  - [x] Commitado — `cb5ac22`
+  - Status: **concluído — falta deploy** · Notas: `apps/social/tasks.py` de **4.034 para
+    1.512 linhas**. O ganho previsto era "~250"; ficou em 1.512 porque o que sobrou são as
+    **9 tasks Celery com seus corpos de orquestração** — `reconcile_youtube_full_scan_task`
+    (212), `cleanup_posted_media_task` (191) e `reconcile_youtube_schedules_task` (126) são
+    tasks inteiras, não helpers. Fatiá-las é item novo, não este.
+    Sobrou **um** import adiado no fluxo, de propósito: `upload_thumbnails_after_batch_task`
+    é task Celery e mora em `tasks.py` por contrato de fila.
+    ⚠ Um alvo de patch precisou ser **acrescentado** em vez de trocado: com o import no
+    topo, o nome é resolvido no import e não na chamada, então patchar só a origem deixou
+    de alcançar a task. Está comentado no teste — é a pegadinha de subir import.
 
 - [ ] **Onda 1 concluída** — máquina de estados com dono único e atômica, god module desfeito
       ✅ **Ponto de parada seguro.** Se o projeto parar aqui, já se pagou.
