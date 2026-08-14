@@ -57,9 +57,12 @@ linhas, não por leitura.
    reinicia a contagem: o gate é sobre R-06+R-07, que subiram no primeiro). Movimentação pura,
    risco baixo: mover `_resolve_*` e afins de `apps/social/tasks.py` para
    `services/publish_targets.py`.
-2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
-   (não o local). O piso segue em 42,0 e a margem já passou de 3,4pp.
-3. Depois disso, a onda 1 continua no **R-09**.
+2. ~~Subir a catraca~~ — **feito em 14/08**: piso em **45,0** (CI mediu 46,46%). Deixei
+   1,46pp de folga justamente para o R-08 poder puxar o total sem quebrar o build.
+3. Depois disso, a onda 1 continua no **R-09**. Ela ficou ainda mais urgente do que o
+   plano previa: a medição de 14/08 mostrou que **`_run_post_to_platforms` cresceu 27
+   linhas** desde o início do projeto (1.189 → 1.216). A função que mais precisa do
+   trabalho é a que está esperando na fila — ver a seção 10.
 4. A onda 2 acabou e o **R-20** também. Fora da onda 1, o que resta são itens não
    iniciados de menor prioridade — e ~43 pontos do D-10 além do top 10 já tratado.
 
