@@ -1683,11 +1683,11 @@ Progresso: 17/23 itens do checklist concluídos
            -> R-12 -> R-13 (todos tocam apps/social/tasks.py, por isso em serie)
            (a contagem de "21 itens" do texto acima e anterior aos 3 achados
             dos characterization tests; o checklist tem 23)
-           8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
-             (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
+           8 implantados em 13/08 + 10 implantados em 14/08
+           2 mergeados e ainda FORA de producao: R-20 PR 1 e PR 2
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
            ▶ próximo: R-08 (libera 15/08) · ✅ onda 2 fechada (R-14 → R-15 → R-16)
-           suite: 288 -> 476 testes · cobertura 40,8% -> 45,28% local
+           suite: 288 -> 494 testes · cobertura 40,8% -> 46,16% local (CI 46,03%)
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
