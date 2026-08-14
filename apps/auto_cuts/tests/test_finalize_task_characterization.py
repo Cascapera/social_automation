@@ -1,6 +1,6 @@
 """Characterization tests de `finalizar_auto_cut_task` (refactor.md CT-4 / R-19, D-11).
 
-`finalizar_auto_cut_task` tem **556 linhas** (`apps/auto_cuts/tasks.py:1555`) e recebe
+`finalizar_auto_cut_task` tem **556 linhas** (`apps/auto_cuts/tasks.py`) e recebe
 **20 parâmetros**. O R-19 vai extraí-la para `services/finalization_flow.py`; estes testes
 são a rede que o plano exige antes disso.
 
@@ -38,7 +38,7 @@ from apps.brands.models import Brand, Factory
 class FinalizeTestCase(TestCase):
     """Base de todos os testes daqui: sem subprocesso de ffmpeg.
 
-    `finalizar_auto_cut_task` chama `has_nvenc()` na linha 1720 — **antes** de olhar se
+    `finalizar_auto_cut_task` chama `has_nvenc()` logo no começo — **antes** de olhar se
     existe algum corte para finalizar. É um `ffmpeg -hide_banner -encoders` por execução,
     só para decidir entre NVENC e CPU. Onde não há ffmpeg no PATH, `run_cmd` deixa o
     `FileNotFoundError` subir e a task inteira morre — foi assim que o CI, que não tem o

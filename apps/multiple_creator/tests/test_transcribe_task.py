@@ -11,7 +11,7 @@ from rest_framework import status as drf_status
 from rest_framework.test import APIClient
 
 from apps.auto_cuts.models import AutoCutAnalysis
-from apps.auto_cuts.tasks import _was_transcript_prepopulated_by_multi_creator
+from apps.auto_cuts.services.analysis_flow import _was_transcript_prepopulated_by_multi_creator
 from apps.brands.models import Brand, Factory
 from apps.mediahub.models import SourceVideo
 from apps.multiple_creator.models import (

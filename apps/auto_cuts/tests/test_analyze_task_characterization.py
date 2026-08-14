@@ -1,8 +1,13 @@
 """Characterization tests de `analyze_auto_cuts_task` (refactor.md CT-4 / R-19, D-11).
 
-`analyze_auto_cuts_task` tem **652 linhas** (`apps/auto_cuts/tasks.py:886`) e é a segunda
-maior função do projeto. O R-19 vai extraí-la para `services/analysis_flow.py`, e o plano
-é explícito sobre a ordem: caracterizar primeiro, fatiar depois.
+`analyze_auto_cuts_task` tinha **652 linhas** dentro de `apps/auto_cuts/tasks.py`. Estes
+testes foram escritos ANTES da extração (R-19 PR a) e passaram sem alteração de asserção
+DEPOIS dela (PR b) — é essa a evidência de que a movimentação preservou comportamento.
+O corpo agora mora em `apps/auto_cuts/services/analysis_flow.py`; a task Celery continua
+em `tasks.py`, porque o nome dela é contrato de fila.
+
+Só os alvos de `patch()` mudaram de módulo junto com o código, o que é mecânico: o que
+cada teste afirma continua idêntico.
 
 O escopo que o CT-4 pede é **só as fronteiras** — entrada, estado final da análise e tasks
 enfileiradas. Não o miolo: transcrição, chamada ao LLM e extração de corte dependem de
@@ -177,7 +182,7 @@ class DelegacaoReadyCutsTests(AnalyzeTaskFixtureMixin, TestCase):
             analysis=analysis, order_index=0, file="auto_cuts/ready_chunks/a.mp4"
         )
 
-        with patch("apps.auto_cuts.tasks._process_ready_cuts_batch_flow") as fluxo:
+        with patch("apps.auto_cuts.services.analysis_flow._process_ready_cuts_batch_flow") as fluxo:
             analyze_auto_cuts_task.run(analysis.id)
 
         fluxo.assert_called_once_with(analysis.id)
@@ -197,7 +202,7 @@ class DelegacaoReadyCutsTests(AnalyzeTaskFixtureMixin, TestCase):
         )
 
         with patch(
-            "apps.auto_cuts.tasks._process_ready_cuts_batch_flow",
+            "apps.auto_cuts.services.analysis_flow._process_ready_cuts_batch_flow",
             side_effect=RuntimeError("ffmpeg morreu"),
         ):
             analyze_auto_cuts_task.run(analysis.id)  # não levanta
@@ -210,7 +215,7 @@ class DelegacaoReadyCutsTests(AnalyzeTaskFixtureMixin, TestCase):
         """`is_ready_cuts` sozinho não basta — o lote só existe se houver chunk."""
         _f, _b, analysis = self.build_analysis(status="pending", is_ready_cuts=True)
 
-        with patch("apps.auto_cuts.tasks._process_ready_cuts_batch_flow") as fluxo:
+        with patch("apps.auto_cuts.services.analysis_flow._process_ready_cuts_batch_flow") as fluxo:
             analyze_auto_cuts_task.run(analysis.id)
 
         fluxo.assert_not_called()
