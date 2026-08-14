@@ -7,7 +7,6 @@ Esta fase entrega apenas a transcricao unica do submit. O fanout por brand
 from __future__ import annotations
 
 import logging
-import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -94,7 +93,7 @@ def _transcribe_video(video_path: Path, language: str = "pt", progress_callback=
         from apps.jobs.services.subtitles import load_whisper_model
 
         whisper_model, _ = load_whisper_model(
-            model_size=os.getenv("WHISPER_MODEL", "small").strip() or "small",
+            model_size=settings.WHISPER_MODEL_CHUNKED,
             device=None,
         )
         all_segments: list[dict] = []

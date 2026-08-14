@@ -30,7 +30,6 @@ Nada aqui importa `tasks.py` no topo do módulo: a dependência é `tasks.py →
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -650,7 +649,7 @@ def _transcribe_into_analysis(
             boundaries = [(s, e) for _, s, e in chunk_paths]
 
             # Simple loop (no generator) — avoids crash when exiting generator on long videos
-            _whisper_model, _ = load_whisper_model(model_size=os.getenv("WHISPER_MODEL", "small").strip() or "small", device=None)
+            _whisper_model, _ = load_whisper_model(model_size=settings.WHISPER_MODEL_CHUNKED, device=None)
 
             for i, (chunk_path, start_sec, end_sec) in enumerate(chunk_paths):
                 analysis.progress_message = f"Transcrevendo bloco {i + 1}/{total_chunks}..."

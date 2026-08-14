@@ -1,7 +1,6 @@
 """Subtitle generation and burn-in with Whisper and FFmpeg."""
 
 import logging
-import os
 import re
 import traceback
 from pathlib import Path
@@ -101,18 +100,18 @@ def load_whisper_model(
     Returns (model, model_size). model_size: None = WHISPER_MODEL from .env.
     """
     if model_size is None:
-        model_size = os.getenv("WHISPER_MODEL", "large-v3").strip() or "large-v3"
+        model_size = settings.WHISPER_MODEL_FULL
     logger.info("Whisper: importing faster_whisper...")
     from faster_whisper import WhisperModel
 
-    env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    env_device = settings.WHISPER_DEVICE
     settings_force_cpu = getattr(settings, "WHISPER_FORCE_CPU", False)
     force_cpu = (
         device == "cpu"
         or env_device == "cpu"
         or (settings_force_cpu and device != "cuda")
     )
-    debug_gpu = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
+    debug_gpu = settings.WHISPER_DEBUG_GPU
     target_device = "cpu" if force_cpu else "cuda"
 
     def _load(dev: str, compute: str):
@@ -166,18 +165,18 @@ def generate_subtitles(
         return result
 
     if model_size is None:
-        model_size = os.getenv("WHISPER_MODEL", "large-v3").strip() or "large-v3"
+        model_size = settings.WHISPER_MODEL_FULL
     logger.info("Whisper: importing faster_whisper...")
     from faster_whisper import WhisperModel
 
-    env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    env_device = settings.WHISPER_DEVICE
     settings_force_cpu = getattr(settings, "WHISPER_FORCE_CPU", False)
     force_cpu = (
         device == "cpu"
         or env_device == "cpu"
         or (settings_force_cpu and device != "cuda")
     )
-    debug_gpu = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
+    debug_gpu = settings.WHISPER_DEBUG_GPU
     target_device = "cpu" if force_cpu else "cuda"
 
     def _load(dev: str, compute: str):

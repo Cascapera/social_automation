@@ -30,9 +30,13 @@ finalization_flow.py    run_finalization + _process_cut + 6 etapas de render
 flow_common.py          os helpers que os dois fluxos usam
 ```
 
+Saiu também o **R-17 lote 2**: `WHISPER_MODEL`, `WHISPER_DEVICE` e `WHISPER_DEBUG_GPU`
+migrados de `os.getenv` para `settings` nos 5 leitores — com uma surpresa que virou o
+**L-12** (a mesma variável tinha dois defaults diferentes).
+
 Os dois arquivos de CT-4 passaram **sem mudar nenhuma asserção** — só os alvos de `patch()`
 acompanharam o código de módulo. Era exatamente para isso que o PR (a) foi escrito antes.
-Suíte em 399 testes, lint verde, cobertura local **43,76%**.
+Suíte em **409 testes**, lint verde, cobertura local **44,01%**.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
@@ -64,6 +68,7 @@ Suíte em 399 testes, lint verde, cobertura local **43,76%**.
 | `horizontal_insert_logo` atravessa a fila e ninguém lê | R-19 (c) | terceira ocorrência do **L-9** — mantido na assinatura, sinalizado no docstring |
 | `DEFAULT_SUBTITLE_STYLE` (o alias) não tem leitor | R-19 (c) | idem — movido junto, não apagado |
 | `has_nvenc()` roda a cada finalize, mesmo sem cortes | CT-4 | continua assim; agora é 1 linha isolada em `run_finalization`, fácil de memoizar |
+| `WHISPER_MODEL` era lida com **dois defaults diferentes** (`small` × `large-v3`) | R-17 lote 2 | preservados nos dois caminhos · **L-12** · unificar é decisão sua |
 
 ### Achados da sessão anterior (13/08)
 
@@ -1604,10 +1609,10 @@ Status: em andamento
 Progresso: 5/21 itens concluídos (R-02, R-03, R-04, R-05, R-19)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
-           1 em andamento por lotes (R-17 — lote 1 implantado, ~52 getenv restantes)
+           1 em andamento por lotes (R-17 — lotes 1 e 2 feitos, ~45 getenv restantes)
            ✅ Onda 0 fechada · ✅ D-02 fechado (R-06+R-07) · ✅ D-09 fechado (R-18)
            ▶ próximo: R-08 (liberado em 15/08)
-           suite: 288 -> 399 testes · cobertura 40,8% -> 43,75% local
+           suite: 288 -> 409 testes · cobertura 40,8% -> 44,01% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
@@ -1980,9 +1985,23 @@ Itens que exigem parada de produção: 0
     - [x] Suíte verde (365 → **374**) · Lint verde · cobertura 42,21% → **42,27%** local
     - [x] Commitado — `c516ebb`
     - [ ] Implantado · verificado: OAuth de factory-check funcionando
-  - **Próximos lotes** — restam ~52 `os.getenv` em ~15 arquivos
-    - [ ] Lote 2 — FFmpeg / filas Celery
-    - [ ] Lote 3 — o resto
+  - **Lote 2 — `WHISPER_*`** — [#43](https://github.com/Cascapera/social_automation/pull/43)
+    - [x] `WHISPER_MODEL`, `WHISPER_DEVICE` e `WHISPER_DEBUG_GPU` em `settings`,
+          revisadas **variável por variável**
+    - [x] 5 leitores migrados (`subtitles` ×2, `jobs/tasks`, `analysis_flow`,
+          `video_chunks`, `multiple_creator/tasks`)
+    - [x] ⚠ **`WHISPER_MODEL` tinha dois defaults** — `small` na transcrição fatiada,
+          `large-v3` na de passada única. Viraram duas settings sobre a mesma env var,
+          em vez de uma só que apagaria a diferença em produção. Ver **L-12**
+    - [x] Teste comparando `settings.X` × `os.getenv` equivalente — 10 casos, com o
+          anti-drift verificado por mutação
+    - [x] Etapa (c) junto: nenhum `os.getenv("WHISPER_*")` órfão. Sem janela de órfã
+          porque os 5 leitores foram migrados de uma vez
+    - [x] Suíte verde (399 → **409**) · Lint verde · cobertura 43,76% → **44,01%** local
+    - [x] Commitado — `2ab5a57`
+    - [ ] Implantado · verificado: modelo do Whisper igual ao de antes nos dois caminhos
+  - **Próximos lotes** — restam ~45 `os.getenv` em ~13 arquivos
+    - [ ] Lote 3 — `YTDLP_*`, `LLM_*`/`GROK_*`, `UPLOAD_POST_*` e o resto
     - [ ] `grep 'os.getenv' apps/` retorna 0
   - Status: **em andamento — lote 1 mergeado, aguardando deploy** · Notas: o lote 1
     encerrou o "gap do R-04" descobrindo que ele não existia — `YOUTUBE_CHECK_CLIENT_ENABLED`
@@ -2235,6 +2254,26 @@ estado "análise concluída" tem dois donos, e quem mudar um lado não vê o out
 
 Ficam registradas aqui em vez de corrigidas junto: o R-19 (b) é movimentação pura por
 contrato, e unificar as duas mudaria comportamento no caminho da `recovery`.
+
+**L-12 · A mesma variável de ambiente com dois defaults diferentes.** No R-17 lote 2,
+`WHISPER_MODEL` era lida em 5 lugares — três com default `small`, dois com `large-v3`.
+Ninguém decidiu isso: cada leitor escolheu o seu quando precisou, e a diferença nunca
+apareceu numa revisão porque cada ocorrência isolada parece razoável.
+
+O detalhe que importa: **com a variável definida no ambiente, os dois caminhos concordam.**
+A divergência só aparece quando ela está ausente — que é o caso de qualquer máquina que
+não tenha o `.env` completo. Ou seja, o comportamento muda entre ambientes por omissão,
+não por configuração.
+
+A migração preservou os dois defaults, em duas settings sobre a mesma env var. A
+alternativa — uma setting só — teria efeito silencioso em produção: vídeo longo passaria a
+carregar um modelo 10× maior em cada bloco, ou o curto perderia qualidade. **Refatoração
+não é o momento de escolher entre `small` e `large-v3`**; o momento é uma decisão de
+qualidade × custo, com o número do tempo de transcrição na mão.
+
+A lição vale para o lote 3: antes de unificar uma leitura repetida, comparar os defaults
+de todas as ocorrências. Se divergirem, a unificação vira mudança de comportamento
+disfarçada de limpeza.
 
 **L-8 · Não executei nada além da suíte de testes.** Não subi a aplicação, não processei
 vídeo, não chamei a API do YouTube. Toda afirmação sobre comportamento em runtime vem de
