@@ -59,9 +59,13 @@ linhas, não por leitura.
 2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
    (não o local). O piso segue em 42,0 e a margem já passou de 3,4pp.
 3. Depois disso, a onda 1 continua no **R-09**.
-4. A onda 2 acabou. O que sobra fora da onda 1 é o **R-20** (`except Exception: pass`
-   observáveis), que dependia do R-14 e agora está destravado.
+4. A onda 2 acabou e o **R-20** também. Fora da onda 1, o que resta são itens não
+   iniciados de menor prioridade — e ~43 pontos do D-10 além do top 10 já tratado.
 
+> ⚠ **Depois do deploy saíram mais 2 PRs**: o R-20 (PR 1 e PR 2), que **não estão em
+> produção**. O PR 2 tem mudança de comportamento observável no `download-media` —
+> ver o alerta na seção de deploy antes de subir.
+>
 > ✅ **Os 10 itens do dia foram implantados em 14/08.** A tabela do que olhar nas
 > primeiras 48h está na seção de deploy, logo abaixo. Diferente do deploy de 13/08,
 > aqui **nenhum item muda comportamento de propósito** — qualquer movimento nos painéis
@@ -142,7 +146,8 @@ levanta sobre as outras contagens deste documento.
 > R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
 > (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** (lote 3) → **43,96** (lote 4) →
 > **44,40** (lote 5) → **44,53** (lote 6) → **45,11** (R-14) → **45,34** (R-15) →
-> **45,41** (R-16). A margem sobre o piso de 42,0 é de **3,41pp**.
+> **45,41** (R-16) → **45,63** (R-20 PR 1) → **46,03** (R-20 PR 2). A margem sobre o
+> piso de 42,0 é de **4,03pp**.
 >
 > O salto do lote 5 (+0,44pp num PR de configuração) é o R-17 pagando o que prometia:
 > `youtube_download.py` era intestável e foi de ~20% para 61%.
@@ -197,6 +202,8 @@ levanta sobre as outras contagens deste documento.
 | **R-14** · ações de inventário → `services/` (CT-3 + movimento) | [#48](https://github.com/Cascapera/social_automation/pull/48) | ✅ **implantado 14/08** |
 | **R-15** · `views.py` → pacote `views/` (9 módulos) | [#49](https://github.com/Cascapera/social_automation/pull/49) | ✅ **implantado 14/08** |
 | **R-16** · `serializers.py` → pacote `serializers/` (8 módulos) | [#50](https://github.com/Cascapera/social_automation/pull/50) | ✅ **implantado 14/08** |
+| **R-20 PR 1** · falha de remoção de mídia vira evento | [#51](https://github.com/Cascapera/social_automation/pull/51) | mergeado · **falta deploy** |
+| **R-20 PR 2** · ZIP do `download-media` para de mentir ⚠ | [#52](https://github.com/Cascapera/social_automation/pull/52) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -232,6 +239,19 @@ de propósito, então **qualquer movimento é sinal de problema**, ao contrário
 > **O boot é o primeiro teste.** O lote 3 do R-17 fez `LLM_MAX_SHORTS`/`_LONGS` inválidos
 > derrubarem a inicialização em vez de falharem por análise. Se a aplicação subiu, essas
 > duas variáveis estão bem formadas no `.env` de produção.
+
+### ⚠ Ainda fora de produção: o R-20 (PRs #51 e #52)
+
+Mergeados **depois** do deploy de 14/08. Dois avisos para quando subirem:
+
+1. **Avisar quem monitora.** `media_delete_failed`, `download_media_missing` e
+   `download_media_failed` **passam a aparecer**. Volume subindo é diagnóstico ficando
+   visível — os erros já aconteciam, só não eram registrados. Se o volume vier alto,
+   é medida do problema que já existia.
+2. **Mudança de comportamento no `download-media`** (PR #52): pacote sem mídia nenhuma
+   passa a responder **404** em vez de 200 com um ZIP só de texto; pacote parcial vai
+   com aviso dentro e cabeçalho `X-Missing-Media`. Se preferir manter o 200, é trocar
+   um `return` — decisão sua, antes do deploy.
 
 ### ⚠ Pendências fora do código
 
@@ -1658,7 +1678,8 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 9/21 itens concluídos (R-02, R-03, R-04, R-05, R-14, R-15, R-16, R-17, R-19)
+Progresso: 10/21 itens concluídos
+           (R-02, R-03, R-04, R-05, R-14, R-15, R-16, R-17, R-19, R-20)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
