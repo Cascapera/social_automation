@@ -2018,16 +2018,25 @@ Itens que exigem parada de produção: 0
     `_fail_expired_factory_slot` e `_try_pending_upload_post_reconciliation` ainda moram em
     `tasks.py` e saem no R-10/R-12 — está comentado no código.
 
-- [ ] **R-10** · Fatiar (2/4): publicação nativa YouTube
+- [x] **R-10** · Fatiar (2/4): publicação nativa YouTube
       risco: médio-alto · 8h · produção: transparente · PR: ~350 linhas / 3 arquivos
       pré-requisito: R-09
-  - [ ] Payload ao YouTube e `external_ids` inalterados
-  - [ ] R-04 verde · testes de `publishers/youtube.py` verdes
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
+  - [x] Payload ao YouTube e `external_ids` inalterados — o multiset de linhas **não perdeu
+        nada**; as duas únicas linhas novas são a atribuição do resultado e o `return`
+  - [x] R-04 verde · testes de `publishers/youtube.py` verdes · **nenhum teste alterado**
+  - [x] Suíte completa verde (501) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
   - [ ] Verificado 24h — taxa de sucesso de publicação no YouTube estável
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas:
+  - [x] Commitado — `622e319`
+  - Status: **concluído — falta deploy** · Notas: `_run_post_to_platforms` de 1.131 para
+    **752 linhas** (era 1.216 no começo do dia); `tasks.py` de 3.680 para 3.302.
+    `external_ids` é mutado no lugar de propósito — é o mesmo dicionário que o ramo do
+    Upload-Post preencheu antes. Os 3 helpers de idempotência continuam em `tasks.py`
+    porque o ramo do Upload-Post também os usa; saem no R-11.
+    ⚠ **Achado: código inalcançável dentro do laço** — ~15 linhas depois de um `continue`
+    incondicional, tratando "cota excedida em todas as credenciais", caso que já é
+    resolvido antes na guarda de `available_credentials`. **Movido verbatim, sem tocar**:
+    é da família do R-22 e sai num `fix()` próprio, como o projeto convencionou.
 
 - [ ] **R-11** · Fatiar (3/4): ramo Upload-Post
       risco: médio-alto · 8h · produção: transparente · PR: ~350 linhas / 3 arquivos
