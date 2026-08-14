@@ -12,258 +12,61 @@
 
 ---
 
-## ⏸ PONTO DE RETOMADA — sessão de 2026-08-14
+## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-14 (noite)
 
-**Onde paramos:** **o R-19 está fechado.** Os quatro PRs saíram no mesmo dia:
-(a) CT-4, (b) `analyze_auto_cuts_task`, (c) `finalizar_auto_cut_task` e (d) os imports
-dentro de função.
+### ⚠ PRIMEIRA COISA AO VOLTAR
 
-`apps/auto_cuts/tasks.py` foi de **2.111 para 73 linhas** — as duas tasks Celery e nada
-mais. O corpo virou três módulos em `services/`:
+**A PR [#61](https://github.com/Cascapera/social_automation/pull/61) (R-13) ficou ABERTA,
+com o CI do backend ainda rodando.** Foi onde a sessão parou.
+
+1. `gh pr checks 61` — se verde, `gh pr merge 61 --merge --delete-branch`.
+2. `git checkout develop && git pull`.
+3. Se estiver vermelha: o R-13 mexeu em muita coisa; o commit é `cb5ac22` e o que ele faz
+   está detalhado no checklist do item.
+
+### O que aconteceu nesta sessão
+
+**O plano de refatoração chegou ao fim: 22 de 23 itens concluídos**, e o 23º (R-13) está
+mergeando. Foram **21 PRs** num dia — #41 a #61.
+
+A onda 1, que estava parada desde maio, saiu inteira: R-08 → R-09 → R-10 → R-11 → R-12 →
+R-13. E com ela o número que o projeto perseguia desde o começo:
 
 ```
-tasks.py                só as tasks, que delegam (o nome é contrato de fila)
-  ↓
-analysis_flow.py        run_analysis + 7 etapas + os fluxos de cortes prontos
-finalization_flow.py    run_finalization + _process_cut + 6 etapas de render
-  ↓
-flow_common.py          os helpers que os dois fluxos usam
+_run_post_to_platforms   1.216 -> 192 linhas   (era a maior função do projeto)
+apps/social/tasks.py     4.034 -> 1.512 linhas (era o maior arquivo)
+apps/auto_cuts/tasks.py  2.111 ->    73 linhas
+apps/api/views.py        2.522 -> pacote de 9 módulos
 ```
 
-**E o R-17 fechou junto**, em 5 lotes num dia (2 a 6): `WHISPER_*`, `LLM_*`/`XAI_*`/
-`GROK_*`, `UPLOAD_POST_*`, `YTDLP_*` e o bloco de OAuth/criptografia. As 57 leituras de
-`os.getenv` em 18 arquivos viraram settings; o que resta em `apps/` são 3 leituras de
-`SystemRoot`, que são ambiente do SO, não configuração.
+Suíte: **288 → 505 testes**. Cobertura no CI: **42,03% → ~47%**. Catraca subida para 45,0.
 
-Os dois arquivos de CT-4 passaram **sem mudar nenhuma asserção** — só os alvos de `patch()`
-acompanharam o código de módulo. Era exatamente para isso que o PR (a) foi escrito antes.
-Suíte em **476 testes**, lint verde, cobertura local **45,51%** (CI: 45,41%).
+### ⚠ 11 PRs mergeados que NÃO estão em produção
 
-**A onda 2 fechou inteira**, na sequência que o plano define (R-14 → R-15 → R-16):
+O deploy de 14/08 levou 10 itens. **Tudo que veio depois dele está só em `develop`:**
 
-- **R-14** tirou as duas ações de inventário de dentro dos handlers HTTP. `views.py` foi
-  de 2.496 para 2.332 linhas e as ações passaram a ser chamáveis de task e de comando.
-- **R-15** quebrou `views.py` em 9 módulos por domínio. As **364 rotas** foram comparadas
-  uma a uma, antes e depois.
-- **R-16** fez o mesmo com `serializers.py`, em 8 módulos. `test_serializers.py` passou
-  sem alteração.
-
-Nos dois últimos, **nenhuma linha de corpo foi editada** — conferido por multiset de
-linhas, não por leitura.
-
-### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
-
-1. ~~R-08~~ e ~~R-09~~ — **feitos em 14/08**, com o seu ok para dispensar a janela de 48h
-   (produção parada, cortes já publicados). ▶ **O próximo é o R-10**, e ele é o item de
-   **risco médio-alto** do plano: a publicação nativa no YouTube. Vale começar com a
-   cabeça fresca e com produção parada de novo.
-2. ~~Subir a catraca~~ — **feito em 14/08**: piso em **45,0** (CI mediu 46,46%). Deixei
-   1,46pp de folga justamente para o R-08 poder puxar o total sem quebrar o build.
-3. Depois disso, a onda 1 continua no **R-09**. Ela ficou ainda mais urgente do que o
-   plano previa: a medição de 14/08 mostrou que **`_run_post_to_platforms` cresceu 27
-   linhas** desde o início do projeto (1.189 → 1.216). A função que mais precisa do
-   trabalho é a que está esperando na fila — ver a seção 10.
-4. A onda 2 acabou e o **R-20** também. Fora da onda 1, o que resta são itens não
-   iniciados de menor prioridade — e ~43 pontos do D-10 além do top 10 já tratado.
-
-> ⚠ **Depois do deploy saíram mais 2 PRs**: o R-20 (PR 1 e PR 2), que **não estão em
-> produção**. O PR 2 tem mudança de comportamento observável no `download-media` —
-> ver o alerta na seção de deploy antes de subir.
->
-> ✅ **Os 10 itens do dia foram implantados em 14/08.** A tabela do que olhar nas
-> primeiras 48h está na seção de deploy, logo abaixo. Diferente do deploy de 13/08,
-> aqui **nenhum item muda comportamento de propósito** — qualquer movimento nos painéis
-> é sinal de problema, não de sucesso. A verificação pós-deploy de cada um está na tabela da seção de
-> pendências. **O lote 3 tem uma pegadinha de deploy**: `LLM_MAX_SHORTS`/`_LONGS` com
-> valor inválido agora impedem o boot em vez de falhar por análise. Se o `.env` de
-> produção tiver lixo nessas duas, o deploy falha — o que é o objetivo, mas convém
-> conferir antes de subir.
-
-### Estado do R-19 — ✅ concluído e implantado (14/08)
-
-- ✅ **(a) CT-4** — 21 characterization tests das duas tasks gigantes (#40)
-- ✅ **(b)** `analyze_auto_cuts_task` → `services/analysis_flow.py`
-- ✅ **(c)** `finalizar_auto_cut_task` → `services/finalization_flow.py`
-- ✅ **(d)** imports dentro de função removidos (3 ficaram, com o motivo no código)
-
-> ⚠ **O que o R-19 preservou de propósito, e que a próxima pessoa não deve "melhorar":**
-> falha de finalização **não** vira `status="error"` — a análise fica parada em
-> `finalizing` porque o recovery procura esse estado; as mensagens de erro são contrato de
-> tela (duas delas pedem ações opostas do usuário); e cada etapa de render engole a própria
-> exceção, de modo que uma etapa que falha não aborta as seguintes.
-
-### Achados desta sessão que não estavam no plano
-
-| O que | Onde apareceu | Situação |
+| PR | O que é | Atenção no deploy |
 | --- | --- | --- |
-| `ALL_THEME_CATEGORIES` existe em duas cópias idênticas | R-19 (b) | registrado · **L-11** · PR próprio (a de `prompts/` está congelada por hash) |
-| `_mark_analysis_done` tem uma segunda cópia em `recovery.py` | R-19 (b) | registrado · **L-11** — mesma lógica, sem a guarda de linha apagada |
-| `horizontal_insert_logo` atravessa a fila e ninguém lê | R-19 (c) | terceira ocorrência do **L-9** — mantido na assinatura, sinalizado no docstring |
-| `DEFAULT_SUBTITLE_STYLE` (o alias) não tem leitor | R-19 (c) | idem — movido junto, não apagado |
-| `has_nvenc()` roda a cada finalize, mesmo sem cortes | CT-4 | continua assim; agora é 1 linha isolada em `run_finalization`, fácil de memoizar |
-| `WHISPER_MODEL` era lida com **dois defaults diferentes** (`small` × `large-v3`) | R-17 lote 2 | preservados nos dois caminhos · **L-12** · unificar é decisão sua |
+| #51, #53 | R-20: falha de remoção de mídia vira evento | **Avisar quem monitora**: `media_delete_failed` passa a aparecer. Volume é diagnóstico ficando visível, não regressão |
+| #52 | R-20: ZIP do `download-media` | ⚠ **Muda comportamento**: pacote sem mídia agora dá 404 em vez de 200 com ZIP vazio. Decisão sua se mantém |
+| #54 | catraca 45,0 + métricas medidas | nenhuma |
+| #55, #56 | R-08, R-09 | `publish_attempts_total` / `publish_failures_total` estáveis |
+| #57, #58 | R-10 + fix do código inalcançável | **taxa de sucesso de publicação no YouTube nas primeiras 24h** |
+| #59 | R-11 (Upload-Post) | `upload_post_unknown_results_total` não pode subir |
+| #60 | R-12 (finalização) | `publish_duration_ms` com distribuição equivalente |
+| #61 | R-13 (se mergear) | **nenhuma task no beat com "unregistered task"**; olhar a fila `publish` nos primeiros 30 min |
 
-### Achados da sessão anterior (13/08)
+> **O deploy destes 11 é o maior da série** — mexe no caminho de publicação inteiro. Vale
+> subir com produção parada, como você fez hoje, e olhar a taxa de sucesso do YouTube
+> antes de liberar a fila.
 
-| O que | Onde apareceu | Situação |
-| --- | --- | --- |
-| `YOUTUBE_CHECK_CLIENT_ENABLED` era código morto | R-17 | removido · **L-9** |
-| `CTR_WORDS_*` / `FORBIDDEN_WORDS_*` são código morto (~60 linhas) | R-18 | movidas e sinalizadas · **decisão sua pendente** |
-| Congelamento de hash com escopo largo demais deixou `develop` vermelho | R-18 → #39 | corrigido · **L-10** |
+### O que sobrou para depois
 
-### ⚠ Três coisas pendentes que dependem de você
-
-1. **Decidir sobre `CTR_WORDS_*` / `FORBIDDEN_WORDS_*`** — ligar ao pipeline ou remover?
-   Estão em `apps/auto_cuts/prompts/vocabulary.py`, declaradas e sem leitor. Ver **L-9**.
-2. **Seu `.env.example` tem alteração local não commitada** (`# LLM_API_KEY=AIza...` para
-   vazio). Ela foi preservada nos dois `pull` desta sessão, mas continua fora do git —
-   commitar ou descartar.
-3. **A decisão de processo do L-7**: congelar features em `apps/social/` durante o resto
-   da onda 1, ou aceitar rebases?
-
----
-
-## Registro da sessão anterior — 2026-08-13 (manhã)
-
-**Onde paramos:** ✅ **O D-02 está fechado.** As 4 decisões do L-7 foram tomadas e o R-07
-mergeado — a máquina de estados de publicação tem **um dono só**, e um teste no CI impede
-que nasça uma sexta cópia. Suíte de 288 → **365 testes**.
-
-> **Este era o item que paga o projeto.** O resumo executivo dizia que a onda 1 "elimina a
-> duplicação da máquina de estados e torna as transições atômicas — é onde 15 dos commits
-> de `fix` nasceram". R-06 fez a atomicidade; R-07 fez a unificação. O que vem a seguir na
-> onda 1 é fatiamento de função: valioso, mas não é mais sangramento.
-
-Foram 3 PRs nesta sessão: **#36** (R-07), **#37** (R-17 lote 1) e **#38** (R-18). Na
-anterior foram 4: #32, #33, #34 e #35.
-
-Dois diagnósticos fechados hoje: **D-02** (máquina de estados duplicada) e **D-09**
-(prompts dentro do cliente HTTP). Os dois maiores arquivos do projeto encolheram —
-`grok.py` de 2.057 para **897 linhas**.
-
-⚠ **Os dois itens de hoje acharam código morto que o plano tratava como vivo** — a flag do
-R-17 e as listas de palavras do R-18. Está registrado em **L-9**, com a pergunta que isso
-levanta sobre as outras contagens deste documento.
-
-> ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
-> depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
-> R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
-> (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** (lote 3) → **43,96** (lote 4) →
-> **44,40** (lote 5) → **44,53** (lote 6) → **45,11** (R-14) → **45,34** (R-15) →
-> **45,41** (R-16) → **45,63** (R-20 PR 1) → **46,03** (PR 2) → **46,46** (continuação).
-> A margem sobre o piso de 42,0 é de **4,46pp** — quase 3× o que ela era de manhã.
->
-> O salto do lote 5 (+0,44pp num PR de configuração) é o R-17 pagando o que prometia:
-> `youtube_download.py` era intestável e foi de ~20% para 61%.
->
-> ⚠ O lote 2 subiu 0,25pp no local (43,76 → 44,01) e **não mexeu no número do CI**. É a
-> mesma divergência já registrada aqui: `settings.py` mede 84% local contra 77% no CI,
-> e os 10 testes novos batem justamente em `settings.py`. Vale como lembrete para quem
-> for subir a catraca: o número é o do log do CI, não o da máquina.
->
-> ✅ **Piso subido para 45,0 em 14/08** — antes do R-08, e não depois como estava
-> planejado. O motivo de esperar era a margem de 0,01pp que existia na época: qualquer
-> queda do R-08 deixaria o build vermelho por motivo alheio ao trabalho. Com **4,46pp**
-> de margem, o risco inverteu — o que estava desprotegido era tudo que subiu hoje.
-> O piso de 45,0 deixa **1,46pp de folga**, de propósito, para o R-08 poder puxar o
-> total para baixo sem quebrar nada.
->
-> As duas subidas vieram do jeito honesto — cobrir ramo que estava intestável, não somar
-> teste em módulo barato. Se apertar de novo, os próximos candidatos naturais são
-> `youtube_credentials.py` (13%) e `youtube_fetch.py` (8%), que ficaram testáveis agora que
-> a configuração deles responde a `override_settings`.
-
-> ⚠ **A catraca sai do número do CI, não do local.** A suíte local lê ~0,2pp a mais
-> (42,23% contra 42,03%) porque alguns ramos dependem de variáveis de ambiente e de
-> dependências opcionais que diferem entre os dois — `settings.py` mede 84% local e 77% no
-> CI; `upload_post_analytics_client.py`, 19% contra 11%. A primeira tentativa do R-04
-> subiu a catraca para 42,2 com base na medição local e **quebrou o CI** com os 351 testes
-> passando. Quem subir a catraca de novo: pegar o número do log do CI.
-
-### Feito e mergeado
-
-| Item | PR | Estado |
-| --- | --- | --- |
-| **R-01** · `_NoOpMetric.observe()` | [#25](https://github.com/Cascapera/social_automation/pull/25) | ✅ implantado 13/08 |
-| **R-02** · portão de cobertura real (40,8%) | [#29](https://github.com/Cascapera/social_automation/pull/29) | ✅ concluído |
-| **R-05** · testes do frontend no CI | [#27](https://github.com/Cascapera/social_automation/pull/27) | ✅ concluído |
-| **R-21** · `update_fields` com campo inexistente | [#30](https://github.com/Cascapera/social_automation/pull/30) | ✅ implantado 13/08 |
-| **R-03** · characterization tests (31) | [#31](https://github.com/Cascapera/social_automation/pull/31) | ✅ concluído |
-| **R-04** · characterization tests (22) | [#32](https://github.com/Cascapera/social_automation/pull/32) | ✅ concluído |
-| **R-22** · guarda inalcançável de "Job sem vídeo final" | [#33](https://github.com/Cascapera/social_automation/pull/33) | ✅ implantado 13/08 |
-| **R-23** · `post.error` sobrevivia num post `DONE` | [#34](https://github.com/Cascapera/social_automation/pull/34) | ✅ implantado 13/08 |
-| **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | ✅ implantado 13/08 |
-| **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | ✅ implantado 13/08 |
-| **R-17 lote 1** · `YOUTUBE_CHECK_*` em `settings` | [#37](https://github.com/Cascapera/social_automation/pull/37) | ✅ implantado 13/08 |
-| **R-18** · prompts fora do `grok.py` (2.057 → 897) | [#38](https://github.com/Cascapera/social_automation/pull/38) | ✅ implantado |
-| — · escopo do congelamento de hash (L-10) | [#39](https://github.com/Cascapera/social_automation/pull/39) | ✅ concluído |
-| **R-19 (a)** · CT-4 — 21 characterization tests | [#40](https://github.com/Cascapera/social_automation/pull/40) | ✅ concluído (só teste) |
-| **R-19 (b)** · `analyze_auto_cuts_task` → `services/` (2.110 → 616) | [#41](https://github.com/Cascapera/social_automation/pull/41) | ✅ **implantado 14/08** |
-| **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | ✅ **implantado 14/08** |
-| **R-17 lote 2** · `WHISPER_*` em `settings` | [#43](https://github.com/Cascapera/social_automation/pull/43) | ✅ **implantado 14/08** |
-| **R-17 lote 3** · `LLM_*`/`XAI_*`/`GROK_*` em `settings` | [#44](https://github.com/Cascapera/social_automation/pull/44) | ✅ **implantado 14/08** |
-| **R-17 lote 4** · `UPLOAD_POST_*` em `settings` | [#45](https://github.com/Cascapera/social_automation/pull/45) | ✅ **implantado 14/08** |
-| **R-17 lote 5** · `YTDLP_*` em `settings` | [#46](https://github.com/Cascapera/social_automation/pull/46) | ✅ **implantado 14/08** |
-| **R-17 lote 6** · OAuth, cripto e o resto — **fecha o R-17** | [#47](https://github.com/Cascapera/social_automation/pull/47) | ✅ **implantado 14/08** |
-| **R-14** · ações de inventário → `services/` (CT-3 + movimento) | [#48](https://github.com/Cascapera/social_automation/pull/48) | ✅ **implantado 14/08** |
-| **R-15** · `views.py` → pacote `views/` (9 módulos) | [#49](https://github.com/Cascapera/social_automation/pull/49) | ✅ **implantado 14/08** |
-| **R-16** · `serializers.py` → pacote `serializers/` (8 módulos) | [#50](https://github.com/Cascapera/social_automation/pull/50) | ✅ **implantado 14/08** |
-| **R-20 PR 1** · falha de remoção de mídia vira evento | [#51](https://github.com/Cascapera/social_automation/pull/51) | mergeado · **falta deploy** |
-| **R-20 PR 2** · ZIP do `download-media` para de mentir ⚠ | [#52](https://github.com/Cascapera/social_automation/pull/52) | mergeado · **falta deploy** |
-| **R-20 cont.** · limpeza de arquivos do job (18 engolidas) | [#53](https://github.com/Cascapera/social_automation/pull/53) | mergeado · **falta deploy** |
-| — · catraca em 45,0 + métricas medidas | [#54](https://github.com/Cascapera/social_automation/pull/54) | ✅ |
-| **R-08** · `services/publish_targets.py` (11 funções) | [#55](https://github.com/Cascapera/social_automation/pull/55) | mergeado · **falta deploy** |
-| **R-09** · preflight de `_run_post_to_platforms` | [#56](https://github.com/Cascapera/social_automation/pull/56) | mergeado · **falta deploy** |
-| **R-10** · publicação nativa YouTube (1.131 → 752) | [#57](https://github.com/Cascapera/social_automation/pull/57) | mergeado · **falta deploy** |
-| — · `fix()`: bloco inalcançável no laço nativo | [#58](https://github.com/Cascapera/social_automation/pull/58) | mergeado · **falta deploy** |
-| — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
-
-### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
-
-O plano manda deixar R-06+R-07 em produção por **≥48h** antes de seguir para o R-08 — são
-os dois itens que mexeram na atomicidade e na unificação da transição de publicação, o
-ponto de maior atenção do projeto inteiro. Eles subiram em **13/08**, então o R-08 libera
-em **2026-08-15**.
-
-### ✅ Dois deploys: 13/08 e 14/08
-
-**13/08** — R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1 e R-18.
-
-**14/08** — 10 itens, todos transparentes: R-19 (b), R-19 (c)+(d), os **5 lotes do R-17**
-(2 a 6), R-14, R-15 e R-16. Ou seja: a onda 2 inteira, o fatiamento do `auto_cuts` e a
-centralização de configuração.
-
-⚠ **O que olhar nas primeiras 48h deste deploy** — nenhum destes itens muda comportamento
-de propósito, então **qualquer movimento é sinal de problema**, ao contrário do deploy de
-13/08:
-
-| O quê | Esperado | Item |
-| --- | --- | --- |
-| Taxa de sucesso do pipeline de cortes | **estável** — o fluxo foi fatiado, não alterado | R-19 |
-| Erro 500 em `remove-awaiting` e `retry-posting` | **nenhum** | R-14 |
-| Rotas da API (smoke test das principais) | **todas respondendo** — as 364 foram comparadas antes de subir | R-15, R-16 |
-| Modelo do Whisper em uso, nos dois caminhos | **o mesmo de antes** (`small` no fatiado, `large-v3` na passada única) | R-17 lote 2 |
-| Provider, modelo e custo médio por análise do LLM | **estáveis** | R-17 lote 3 |
-| Taxa de 429 da Upload-Post | **estável** | R-17 lote 4 |
-| Taxa de sucesso do download do YouTube | **estável** | R-17 lote 5 |
-| OAuth de Contas e leitura de segredos em banco | **funcionando** | R-17 lote 6 |
-
-> **O boot é o primeiro teste.** O lote 3 do R-17 fez `LLM_MAX_SHORTS`/`_LONGS` inválidos
-> derrubarem a inicialização em vez de falharem por análise. Se a aplicação subiu, essas
-> duas variáveis estão bem formadas no `.env` de produção.
-
-### ⚠ Ainda fora de produção: o R-20 (PRs #51 e #52)
-
-Mergeados **depois** do deploy de 14/08. Dois avisos para quando subirem:
-
-1. **Avisar quem monitora.** `media_delete_failed`, `download_media_missing` e
-   `download_media_failed` **passam a aparecer**. Volume subindo é diagnóstico ficando
-   visível — os erros já aconteciam, só não eram registrados. Se o volume vier alto,
-   é medida do problema que já existia.
-2. **Mudança de comportamento no `download-media`** (PR #52): pacote sem mídia nenhuma
-   passa a responder **404** em vez de 200 com um ZIP só de texto; pacote parcial vai
-   com aviso dentro e cabeçalho `X-Missing-Media`. Se preferir manter o 200, é trocar
-   um `return` — decisão sua, antes do deploy.
+- **Métricas que ainda não fecharam** (seção 10): `arquivos > 500 linhas` (18, meta ≤8) e
+  `funções ≥ 80 linhas` (50, meta ≤25). Os módulos novos de `publishing/` são grandes
+  porque receberam fatias grandes — fatiar de novo é decisão nova, não dívida deste plano.
+- **~30 pontos do D-10** que ainda engolem exceção sem log, 12 deles em `social/tasks.py`.
+- **4 decisões suas**, abaixo, nenhuma bloqueia nada.
 
 ### ⚠ Pendências fora do código
 
