@@ -115,7 +115,12 @@ levanta sobre as outras contagens deste documento.
 > ✅ **A catraca deixou de ser risco.** Trajetória no CI: 42,03 antes do R-07 → **42,01**
 > depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
 > R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
-> (c)+(d). A margem sobre o piso de 42,0 é de **1,77pp**.
+> (c)+(d) → **43,77** com o R-17 lote 2. A margem sobre o piso de 42,0 é de **1,77pp**.
+>
+> ⚠ O lote 2 subiu 0,25pp no local (43,76 → 44,01) e **não mexeu no número do CI**. É a
+> mesma divergência já registrada aqui: `settings.py` mede 84% local contra 77% no CI,
+> e os 10 testes novos batem justamente em `settings.py`. Vale como lembrete para quem
+> for subir a catraca: o número é o do log do CI, não o da máquina.
 >
 > **Ainda não subi o piso, de propósito.** O R-08 é movimentação pura de código bem
 > coberto: muda o denominador sem melhorar nada e tende a puxar o total para baixo. Subir
@@ -154,6 +159,7 @@ levanta sobre as outras contagens deste documento.
 | **R-19 (a)** · CT-4 — 21 characterization tests | [#40](https://github.com/Cascapera/social_automation/pull/40) | ✅ concluído (só teste) |
 | **R-19 (b)** · `analyze_auto_cuts_task` → `services/` (2.110 → 616) | [#41](https://github.com/Cascapera/social_automation/pull/41) | mergeado · **falta deploy** |
 | **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | mergeado · **falta deploy** |
+| **R-17 lote 2** · `WHISPER_*` em `settings` | [#43](https://github.com/Cascapera/social_automation/pull/43) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -1997,7 +2003,9 @@ Itens que exigem parada de produção: 0
           anti-drift verificado por mutação
     - [x] Etapa (c) junto: nenhum `os.getenv("WHISPER_*")` órfão. Sem janela de órfã
           porque os 5 leitores foram migrados de uma vez
-    - [x] Suíte verde (399 → **409**) · Lint verde · cobertura 43,76% → **44,01%** local
+    - [x] Suíte verde (399 → **409**) · Lint verde · cobertura 43,76% → **44,01%** local,
+          **43,77% → 43,77% no CI** (os testes novos batem em `settings.py`, que o CI
+          mede 7pp abaixo do local)
     - [x] Commitado — `2ab5a57`
     - [ ] Implantado · verificado: modelo do Whisper igual ao de antes nos dois caminhos
   - **Próximos lotes** — restam ~45 `os.getenv` em ~13 arquivos
