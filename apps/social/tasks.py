@@ -337,7 +337,7 @@ def _youtube_day_video_index(
     video_ids: list[str] = []
     page_token = None
     # Conservative limit to avoid excessive quota use.
-    max_pages = max(1, min(12, int(os.getenv("YOUTUBE_FULL_SCAN_MAX_PAGES", "4") or "4")))
+    max_pages = settings.YOUTUBE_FULL_SCAN_MAX_PAGES
     for _ in range(max_pages):
         pl_resp = youtube.playlistItems().list(
             part="snippet,contentDetails",

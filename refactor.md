@@ -1988,7 +1988,7 @@ Itens que exigem parada de produção: 0
 
 ### Onda 3 — Config, LLM e higiene  ·  ~30h
 
-- [ ] **R-17** · Centralizar configuração em settings (expand-contract, por lotes)
+- [x] **R-17** · Centralizar configuração em settings (expand-contract, por lotes)
       risco: médio · 6h · ⚠ **produção: requer cuidado** · PRs de ~150 linhas
       pré-requisito: R-02
   - **Lote 1 — `YOUTUBE_CHECK_*` + `GOOGLE_CLIENT_*`** — [#37](https://github.com/Cascapera/social_automation/pull/37)
@@ -2058,20 +2058,40 @@ Itens que exigem parada de produção: 0
     - [x] Suíte verde (427 → **443**) · Lint verde · cobertura 44,14% → **44,57%** local
     - [x] Commitado — `244d2d6`
     - [ ] Implantado · verificado: taxa de sucesso do download do YouTube estável
-  - **Próximos lotes** — restam ~24 `os.getenv` em ~8 arquivos
-    - [ ] Lote 6 — `GOOGLE_*` / `YOUTUBE_*` do OAuth de Contas, `FRONTEND_URL`,
-          `YOUTUBE_FULL_SCAN_MAX_PAGES` e `SOCIAL_ENCRYPTION_KEY`
+  - **Lote 6 — OAuth de Contas, chave de criptografia e o resto** — [#47](https://github.com/Cascapera/social_automation/pull/47)
+    - [x] 7 variáveis, 5 leitores (`youtube_oauth`, `youtube_fetch`, `social/tasks`,
+          `social/views`, `secret_crypto`)
+    - [x] Corrigida a duplicata que o lote 5 achou: `youtube_oauth` lia
+          `GOOGLE_CLIENT_ID` por `os.getenv` enquanto `youtube_credentials`, ao lado,
+          já lia de `settings`
+    - [x] `secret_crypto` lia `os.getenv(ENV_KEY_NAME)` — nome indireto, que regex
+          nenhuma sobre literal pegaria. Tem teste próprio para não voltar
+    - [x] `FRONTEND_URL` ganhou setting **sem** unificar com as duas leituras internas
+          do `settings.py`: ALLOWED_HOSTS e CORS tratam ausência como "não acrescenta
+          nada", o redirect precisa de destino. Semânticas diferentes, comentadas
+    - [x] 17 testes, incluindo o contrato entre `secret_crypto` e a API (a mensagem de
+          erro é comparada por substring em `views.py` para virar 400 legível)
+    - [x] Suíte verde (443 → **460**) · Lint verde · cobertura 44,57% → **44,70%** local
+    - [x] Commitado — `3b939fc`
+    - [ ] Implantado · verificado: OAuth de Contas e leitura de segredos funcionando
     - ⚠ **Achado do lote 5**: `youtube_oauth.py` lê `GOOGLE_CLIENT_ID`/`_SECRET` por
       `os.getenv` **embora o lote 1 já as tenha posto em `settings`**. O anti-drift do
       lote 1 só guardava `YOUTUBE_CHECK_*`, então a duplicata passou. É o L-9 em outra
       forma: a migração se desfaz sozinha onde o teste não alcança
-    - [ ] ⚠ **Não migrar `SystemRoot`** (`vertical_reformat.py`, 3 ocorrências): é
-          ambiente do sistema operacional para achar fonte no Windows, não configuração
-          da aplicação. Entra na conta do D-08 mas não no escopo do R-17
-    - [ ] `grep 'os.getenv' apps/` retorna 0
-  - Status: **em andamento — lote 1 mergeado, aguardando deploy** · Notas: o lote 1
-    encerrou o "gap do R-04" descobrindo que ele não existia — `YOUTUBE_CHECK_CLIENT_ENABLED`
-    era **código morto**, não um ramo travado. Ver **L-9**.
+  - [x] **`grep 'os.getenv' apps/` retorna só as 3 leituras de `SystemRoot`** —
+        ambiente do sistema operacional (achar fonte no Windows), não configuração da
+        aplicação. `metrics_view.py` mantém `PROMETHEUS_MULTIPROC_*` pelo mesmo motivo:
+        a env var é contrato do `prometheus_client`, e migrá-la abriria divergência
+        entre o que a lib lê e o que a aplicação acha que ela leu
+  - Status: **concluído em 6 lotes — falta deploy** · Notas: 57 `os.getenv` em 18
+    arquivos viraram settings; o que resta em `apps/` são 3 leituras de `SystemRoot`,
+    que são ambiente do SO. Cada lote levou junto o teste de equivalência e o
+    anti-drift do próprio prefixo — o do lote 1, estreito demais, deixou passar a
+    duplicata de `GOOGLE_CLIENT_ID` que só apareceu no lote 5.
+    O lote 1 encerrou o "gap do R-04" descobrindo que ele não existia —
+    `YOUTUBE_CHECK_CLIENT_ENABLED` era **código morto**, não um ramo travado (**L-9**).
+    Ganho colateral: `override_settings` passou a alcançar caminhos que não tinham como
+    ser testados — `youtube_download.py` foi de ~20% para **61%** de cobertura.
 
 - [x] **R-18** · Separar prompts do cliente em `apps/auto_cuts/prompts/`
       risco: baixo · 4h · produção: transparente · PR: 1.184 linhas movidas / 6 arquivos

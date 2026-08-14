@@ -3,7 +3,6 @@ Busca vídeos de canais do YouTube via Data API v3.
 Usa YOUTUBE_API_KEY (recomendado) ou credenciais YOUTUBE_CHECK_* com OAuth.
 """
 import logging
-import os
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -75,7 +74,7 @@ def _get_youtube_client():
     Para criar: Google Cloud Console > APIs & Services > Credentials > Create API Key.
     Habilite a API "YouTube Data API v3" no projeto.
     """
-    api_key = (os.getenv("YOUTUBE_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    api_key = settings.YOUTUBE_API_KEY or settings.GOOGLE_API_KEY
     if api_key:
         return build("youtube", "v3", developerKey=api_key)
 

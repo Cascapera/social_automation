@@ -304,6 +304,30 @@ UPLOAD_POST_FACTORY_BRAND_DELAY_SEC = float(
     os.getenv("UPLOAD_POST_FACTORY_BRAND_DELAY_SEC", "0.15")
 )
 
+# OAuth de Contas e YouTube Data API (refactor.md R-17 lote 6 / D-08)
+# ⚠ Este redirect é o do OAuth de **Contas**. O do factory-check é o
+# YOUTUBE_CHECK_REDIRECT_URI, mais abaixo — trocar um pelo outro quebra o fluxo em
+# produção sem erro visível no código.
+YOUTUBE_REDIRECT_URI = os.getenv(
+    "YOUTUBE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback/"
+)
+# Chave da YouTube Data API v3. GOOGLE_API_KEY é o nome antigo; a precedência entre as
+# duas continua no leitor (`services/youtube_fetch.py`).
+YOUTUBE_API_KEY = (os.getenv("YOUTUBE_API_KEY") or "").strip()
+GOOGLE_API_KEY = (os.getenv("GOOGLE_API_KEY") or "").strip()
+# Páginas de 50 vídeos por varredura completa do canal. Teto de 12 para não torrar a quota.
+YOUTUBE_FULL_SCAN_MAX_PAGES = max(1, min(12, int(os.getenv("YOUTUBE_FULL_SCAN_MAX_PAGES", "4") or "4")))
+
+# Criptografia de segredos em banco (refactor.md R-17 lote 6 / D-08)
+# Vazia = `secret_crypto` levanta com mensagem própria; a API traduz para 400 legível.
+SOCIAL_ENCRYPTION_KEY = (os.getenv("SOCIAL_ENCRYPTION_KEY") or "").strip()
+
+# URL do frontend para redirect pós-OAuth (refactor.md R-17 lote 6 / D-08)
+# ⚠ Esta é a leitura COM default de dev. As outras duas de `FRONTEND_URL` neste arquivo
+# (ALLOWED_HOSTS e CORS) tratam ausência como "não acrescenta nada" — e é o certo: sem a
+# variável, não há host extra a liberar, mas ainda tem que haver para onde redirecionar.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 # yt-dlp (refactor.md R-17 lote 5 / D-08 — fonte única de configuração)
 # Todas vazias por omissão: cada uma liga um comportamento opcional do download.
 YTDLP_YOUTUBE_PLAYER_CLIENTS = (os.getenv("YTDLP_YOUTUBE_PLAYER_CLIENTS") or "").strip()
