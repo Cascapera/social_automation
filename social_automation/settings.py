@@ -247,6 +247,20 @@ CELERY_TASK_ROUTES = {
 # Whisper: always CPU so GPU is free for NVENC (set WHISPER_FORCE_CPU=0 to allow .env / CUDA)
 WHISPER_FORCE_CPU = os.getenv("WHISPER_FORCE_CPU", "1").lower() in ("1", "true", "yes")
 
+# Whisper: modelo e device (refactor.md R-17 lote 2 / D-08 — fonte única de configuração)
+# ⚠ WHISPER_MODEL tem DOIS defaults no código, e eles são diferentes entre si. Não é
+# engano de digitação recente: a transcrição fatiada (vídeo longo, um bloco por vez) usa
+# "small" e a de passada única usa "large-v3". Migrar para uma setting só apagaria essa
+# diferença em produção, então as duas viram settings separadas, com o mesmo env var por
+# trás. Quem quiser unificar: é decisão de qualidade × custo, não de refatoração.
+_whisper_model_env = (os.getenv("WHISPER_MODEL", "") or "").strip()
+WHISPER_MODEL_FULL = _whisper_model_env or "large-v3"
+WHISPER_MODEL_CHUNKED = _whisper_model_env or "small"
+# "cpu" força CPU mesmo com CUDA disponível; vazio deixa a decisão para WHISPER_FORCE_CPU.
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "").strip().lower()
+# Sem .lower() de propósito: era assim que os leitores comparavam, e "TRUE" não ligava.
+WHISPER_DEBUG_GPU = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
+
 # Multiple-Creator: retencao do video original apos job terminal (DONE/PARTIAL/ERROR).
 # Apos esse periodo, cleanup_terminal_job_files_task remove o file (mantem a row).
 MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))

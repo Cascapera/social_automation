@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -91,7 +90,7 @@ def transcribe_chunks_one_by_one(
 
     if model is None:
         if model_size is None:
-            model_size = os.getenv("WHISPER_MODEL", "small").strip() or "small"
+            model_size = settings.WHISPER_MODEL_CHUNKED
         model, _ = load_whisper_model(model_size=model_size, device=None)
 
     for chunk_path, start_sec, end_sec in chunk_paths:
