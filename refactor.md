@@ -40,11 +40,16 @@ Suíte em **409 testes**, lint verde, cobertura local **44,01%**.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
-1. **R-08** — liberado hoje (48h do deploy de 13/08). Movimentação pura, risco baixo:
-   mover `_resolve_*` e afins de `apps/social/tasks.py` para `services/publish_targets.py`.
+1. **R-08** — libera em **2026-08-15**, 48h depois do deploy de 13/08. Movimentação pura,
+   risco baixo: mover `_resolve_*` e afins de `apps/social/tasks.py` para
+   `services/publish_targets.py`.
 2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
-   (não o local). O piso segue em 42,0 e a margem já passou de 1,5pp.
+   (não o local). O piso segue em 42,0 e a margem já passou de 1,7pp.
 3. Depois disso, a onda 1 continua no **R-09**.
+
+> **3 itens esperando deploy**: R-19 (b), R-19 (c)+(d) e R-17 lote 2 — os três
+> transparentes. A verificação pós-deploy de cada um está na tabela da seção de
+> pendências.
 
 ### Estado do R-19 — ✅ concluído (falta deploy)
 
