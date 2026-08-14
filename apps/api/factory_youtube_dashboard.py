@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
@@ -86,8 +86,6 @@ VIRAL_SCORE_WEIGHTS = {
 }
 VIRAL_SCORE_VIEWS_PER_DAY_LOG_CAP = 4.0
 VIRAL_SCORE_ENGAGEMENT_RATE_CAP = 0.20
-# Pausa extra entre marcas (além do throttle no cliente HTTP) para não disparar 429 em fábricas grandes.
-_BRAND_EXTRA_DELAY_SEC = float(os.getenv("UPLOAD_POST_FACTORY_BRAND_DELAY_SEC", "0.15"))
 
 
 def upload_post_profile_username(brand_id: int) -> str:
@@ -835,8 +833,11 @@ def build_factory_youtube_dashboard(
     sum_videos = 0
 
     for i, b in enumerate(brands):
-        if i > 0 and _BRAND_EXTRA_DELAY_SEC > 0:
-            time.sleep(_BRAND_EXTRA_DELAY_SEC)
+        # Pausa extra entre marcas, além do throttle do cliente HTTP: sem ela, fábrica
+        # grande dispara 429 na Upload-Post.
+        brand_delay = settings.UPLOAD_POST_FACTORY_BRAND_DELAY_SEC
+        if i > 0 and brand_delay > 0:
+            time.sleep(brand_delay)
         row = _collect_one_brand(b, period=period_norm)
         # cópia segura para resposta (sem objeto ORM)
         clean = {k: v for k, v in row.items() if k != "youtube_profile_block"}

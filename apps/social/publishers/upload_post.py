@@ -2,7 +2,6 @@
 import contextlib
 import logging
 import mimetypes
-import os
 from datetime import timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -162,7 +161,7 @@ def publish_to_upload_post(
     para vídeos longos.
     Retorna {"success": bool, "request_id": str?, "provider_request_id": str?, "error": str?}
     """
-    api_key = os.getenv("UPLOAD_POST_API_KEY") or getattr(settings, "UPLOAD_POST_API_KEY", "")
+    api_key = settings.UPLOAD_POST_API_KEY
     if not api_key:
         raise UploadPostPublishError("UPLOAD_POST_API_KEY não configurada no .env", retriable=False)
 
