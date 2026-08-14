@@ -1,8 +1,11 @@
 """Characterization tests de `finalizar_auto_cut_task` (refactor.md CT-4 / R-19, D-11).
 
-`finalizar_auto_cut_task` tem **556 linhas** (`apps/auto_cuts/tasks.py`) e recebe
-**20 parâmetros**. O R-19 vai extraí-la para `services/finalization_flow.py`; estes testes
-são a rede que o plano exige antes disso.
+`finalizar_auto_cut_task` tinha **556 linhas** e **20 parâmetros** dentro de
+`apps/auto_cuts/tasks.py`. Estes testes foram escritos ANTES da extração (R-19 PR a) e
+passaram sem alteração de asserção DEPOIS dela (PR c) — é essa a evidência de que a
+movimentação preservou comportamento. O corpo agora mora em
+`apps/auto_cuts/services/finalization_flow.py`; a task Celery continua em `tasks.py`,
+porque o nome dela é contrato de fila.
 
 Como no arquivo irmão do `analyze`, o escopo é **só as fronteiras**. O miolo — reframe
 vertical, queima de legenda, overlays — é FFmpeg puro e não cabe em teste de unidade. O
@@ -57,7 +60,7 @@ class FinalizeTestCase(TestCase):
 
     def setUp(self):
         super().setUp()
-        patcher = patch("apps.auto_cuts.tasks.has_nvenc", return_value=False)
+        patcher = patch("apps.auto_cuts.services.finalization_flow.has_nvenc", return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
 
