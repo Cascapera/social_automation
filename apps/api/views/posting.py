@@ -4,6 +4,7 @@ Movido de `apps/api/views.py` no R-15 — movimentação pura.
 """
 
 import io
+import logging
 import zipfile
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.jobs.logging_utils import log_event
 from apps.jobs.models import (
     FactoryPostingSchedule,
     PostedVideoLog,
@@ -39,6 +41,43 @@ from ..serializers import (
     ScheduledPostSerializer,
     VideoInventoryItemSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _add_media_to_zip(zf, campo, *, arcname: str, ext_padrao: str, operation: str, **contexto) -> bool:
+    """Adiciona um arquivo de mídia ao ZIP. Devolve `False` se não deu (R-20 / D-10).
+
+    Duas formas de não dar, e as duas eram silenciosas antes: o arquivo não existe no disco
+    (banco e disco discordando) ou a leitura falha. Nenhuma das duas levanta — o pacote sai
+    sem o arquivo —, mas agora as duas viram evento no log e aparecem para o usuário.
+    """
+    try:
+        fp = Path(campo.path)
+        if not fp.exists():
+            log_event(
+                logger,
+                event="download_media_missing",
+                status="error",
+                error="arquivo não encontrado no disco",
+                operation=operation,
+                file_name=str(fp),
+                **contexto,
+            )
+            return False
+        ext = fp.suffix.lower() if fp.suffix else ext_padrao
+        zf.write(fp, arcname=arcname.format(ext=ext))
+        return True
+    except Exception as e:
+        log_event(
+            logger,
+            event="download_media_failed",
+            status="error",
+            error=str(e),
+            operation=operation,
+            **contexto,
+        )
+        return False
 
 
 class ScheduledPostViewSet(viewsets.ModelViewSet):
@@ -271,26 +310,62 @@ class VideoInventoryItemViewSet(viewsets.ReadOnlyModelViewSet):
                 full_description,
             ]
             zf.writestr(f"{safe_title}_descricao.txt", "\n".join(txt_lines).encode("utf-8"))
-            if has_video:
-                try:
-                    fp = Path(corte.file.path)
-                    if fp.exists():
-                        ext = fp.suffix.lower() if fp.suffix else ".mp4"
-                        zf.write(fp, arcname=f"{safe_title}{ext}")
-                except Exception:
-                    pass
-            if has_thumb:
-                try:
-                    fp = Path(corte.thumbnail.path)
-                    if fp.exists():
-                        ext = fp.suffix.lower() if fp.suffix else ".jpg"
-                        zf.write(fp, arcname=f"{safe_title}_thumb{ext}")
-                except Exception:
-                    pass
+            # O banco diz que a mídia existe; o disco é quem decide. Quando os dois
+            # discordam, o pacote sai incompleto — e antes do R-20 saía calado (D-10).
+            faltando = []
+            if has_video and not _add_media_to_zip(
+                zf,
+                corte.file,
+                arcname=f"{safe_title}{{ext}}",
+                ext_padrao=".mp4",
+                operation="download_media_video",
+                inventory_item_id=inventory.id,
+                corte_id=corte.id,
+            ):
+                faltando.append("vídeo")
+            if has_thumb and not _add_media_to_zip(
+                zf,
+                corte.thumbnail,
+                arcname=f"{safe_title}_thumb{{ext}}",
+                ext_padrao=".jpg",
+                operation="download_media_thumbnail",
+                inventory_item_id=inventory.id,
+                corte_id=corte.id,
+            ):
+                faltando.append("thumbnail")
+
+            if faltando:
+                zf.writestr(
+                    "ATENCAO_arquivos_faltando.txt",
+                    (
+                        "Este pacote saiu INCOMPLETO.\n\n"
+                        f"Não foi possível incluir: {', '.join(faltando)}.\n\n"
+                        "O item existe no banco, mas o arquivo não foi encontrado ou não pôde "
+                        "ser lido do disco do servidor. Avise o suporte com o número do item: "
+                        f"{inventory.id}.\n"
+                    ).encode(),
+                )
+
+        # Pacote só com o texto não serve para postar: é melhor o usuário saber agora do que
+        # descobrir ao abrir o ZIP.
+        if (has_video or has_thumb) and len(faltando) == (int(bool(has_video)) + int(bool(has_thumb))):
+            return Response(
+                {
+                    "error": (
+                        "A mídia deste item não está mais disponível no servidor. "
+                        "Nada foi incluído no pacote."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         zip_buffer.seek(0)
         filename = f"{file_base_name}.zip"
         response = FileResponse(zip_buffer, as_attachment=True, filename=filename)
         response["Content-Type"] = "application/zip"
+        if faltando:
+            # Cabeçalho para o front poder avisar sem precisar abrir o ZIP.
+            response["X-Missing-Media"] = ",".join(faltando)
         return response
 
     @action(detail=True, methods=["post"], url_path="mark-posted")
