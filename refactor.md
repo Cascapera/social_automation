@@ -57,19 +57,21 @@ linhas, não por leitura.
    risco baixo: mover `_resolve_*` e afins de `apps/social/tasks.py` para
    `services/publish_targets.py`.
 2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
-   (não o local). O piso segue em 42,0 e a margem já passou de 1,7pp.
+   (não o local). O piso segue em 42,0 e a margem já passou de 3,4pp.
 3. Depois disso, a onda 1 continua no **R-09**.
 4. A onda 2 acabou. O que sobra fora da onda 1 é o **R-20** (`except Exception: pass`
    observáveis), que dependia do R-14 e agora está destravado.
 
-> **10 itens esperando deploy**: R-19 (b), R-19 (c)+(d), os 5 lotes do R-17, R-14, R-15
-> e R-16 — todos transparentes. A verificação pós-deploy de cada um está na tabela da seção de
+> ✅ **Os 10 itens do dia foram implantados em 14/08.** A tabela do que olhar nas
+> primeiras 48h está na seção de deploy, logo abaixo. Diferente do deploy de 13/08,
+> aqui **nenhum item muda comportamento de propósito** — qualquer movimento nos painéis
+> é sinal de problema, não de sucesso. A verificação pós-deploy de cada um está na tabela da seção de
 > pendências. **O lote 3 tem uma pegadinha de deploy**: `LLM_MAX_SHORTS`/`_LONGS` com
 > valor inválido agora impedem o boot em vez de falhar por análise. Se o `.env` de
 > produção tiver lixo nessas duas, o deploy falha — o que é o objetivo, mas convém
 > conferir antes de subir.
 
-### Estado do R-19 — ✅ concluído (falta deploy)
+### Estado do R-19 — ✅ concluído e implantado (14/08)
 
 - ✅ **(a) CT-4** — 21 characterization tests das duas tasks gigantes (#40)
 - ✅ **(b)** `analyze_auto_cuts_task` → `services/analysis_flow.py`
@@ -171,62 +173,71 @@ levanta sobre as outras contagens deste documento.
 
 | Item | PR | Estado |
 | --- | --- | --- |
-| **R-01** · `_NoOpMetric.observe()` | [#25](https://github.com/Cascapera/social_automation/pull/25) | mergeado · **falta deploy** |
+| **R-01** · `_NoOpMetric.observe()` | [#25](https://github.com/Cascapera/social_automation/pull/25) | ✅ implantado 13/08 |
 | **R-02** · portão de cobertura real (40,8%) | [#29](https://github.com/Cascapera/social_automation/pull/29) | ✅ concluído |
 | **R-05** · testes do frontend no CI | [#27](https://github.com/Cascapera/social_automation/pull/27) | ✅ concluído |
-| **R-21** · `update_fields` com campo inexistente | [#30](https://github.com/Cascapera/social_automation/pull/30) | mergeado · **falta deploy** |
+| **R-21** · `update_fields` com campo inexistente | [#30](https://github.com/Cascapera/social_automation/pull/30) | ✅ implantado 13/08 |
 | **R-03** · characterization tests (31) | [#31](https://github.com/Cascapera/social_automation/pull/31) | ✅ concluído |
 | **R-04** · characterization tests (22) | [#32](https://github.com/Cascapera/social_automation/pull/32) | ✅ concluído |
-| **R-22** · guarda inalcançável de "Job sem vídeo final" | [#33](https://github.com/Cascapera/social_automation/pull/33) | mergeado · **falta deploy** |
-| **R-23** · `post.error` sobrevivia num post `DONE` | [#34](https://github.com/Cascapera/social_automation/pull/34) | mergeado · **falta deploy** |
-| **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | mergeado · **falta deploy em janela** |
-| **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | mergeado · **falta deploy** |
-| **R-17 lote 1** · `YOUTUBE_CHECK_*` em `settings` | [#37](https://github.com/Cascapera/social_automation/pull/37) | mergeado · **falta deploy** |
+| **R-22** · guarda inalcançável de "Job sem vídeo final" | [#33](https://github.com/Cascapera/social_automation/pull/33) | ✅ implantado 13/08 |
+| **R-23** · `post.error` sobrevivia num post `DONE` | [#34](https://github.com/Cascapera/social_automation/pull/34) | ✅ implantado 13/08 |
+| **R-06** · `posting_state.py` + transições atômicas | [#35](https://github.com/Cascapera/social_automation/pull/35) | ✅ implantado 13/08 |
+| **R-07** · as 5 cópias apontando para `posting_state` | [#36](https://github.com/Cascapera/social_automation/pull/36) | ✅ implantado 13/08 |
+| **R-17 lote 1** · `YOUTUBE_CHECK_*` em `settings` | [#37](https://github.com/Cascapera/social_automation/pull/37) | ✅ implantado 13/08 |
 | **R-18** · prompts fora do `grok.py` (2.057 → 897) | [#38](https://github.com/Cascapera/social_automation/pull/38) | ✅ implantado |
 | — · escopo do congelamento de hash (L-10) | [#39](https://github.com/Cascapera/social_automation/pull/39) | ✅ concluído |
 | **R-19 (a)** · CT-4 — 21 characterization tests | [#40](https://github.com/Cascapera/social_automation/pull/40) | ✅ concluído (só teste) |
-| **R-19 (b)** · `analyze_auto_cuts_task` → `services/` (2.110 → 616) | [#41](https://github.com/Cascapera/social_automation/pull/41) | mergeado · **falta deploy** |
-| **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | mergeado · **falta deploy** |
-| **R-17 lote 2** · `WHISPER_*` em `settings` | [#43](https://github.com/Cascapera/social_automation/pull/43) | mergeado · **falta deploy** |
-| **R-17 lote 3** · `LLM_*`/`XAI_*`/`GROK_*` em `settings` | [#44](https://github.com/Cascapera/social_automation/pull/44) | mergeado · **falta deploy** |
-| **R-17 lote 4** · `UPLOAD_POST_*` em `settings` | [#45](https://github.com/Cascapera/social_automation/pull/45) | mergeado · **falta deploy** |
-| **R-17 lote 5** · `YTDLP_*` em `settings` | [#46](https://github.com/Cascapera/social_automation/pull/46) | mergeado · **falta deploy** |
-| **R-17 lote 6** · OAuth, cripto e o resto — **fecha o R-17** | [#47](https://github.com/Cascapera/social_automation/pull/47) | mergeado · **falta deploy** |
-| **R-14** · ações de inventário → `services/` (CT-3 + movimento) | [#48](https://github.com/Cascapera/social_automation/pull/48) | mergeado · **falta deploy** |
-| **R-15** · `views.py` → pacote `views/` (9 módulos) | [#49](https://github.com/Cascapera/social_automation/pull/49) | mergeado · **falta deploy** |
-| **R-16** · `serializers.py` → pacote `serializers/` (8 módulos) | [#50](https://github.com/Cascapera/social_automation/pull/50) | mergeado · **falta deploy** |
+| **R-19 (b)** · `analyze_auto_cuts_task` → `services/` (2.110 → 616) | [#41](https://github.com/Cascapera/social_automation/pull/41) | ✅ **implantado 14/08** |
+| **R-19 (c)+(d)** · `finalizar_auto_cut_task` → `services/` (616 → 73) | [#42](https://github.com/Cascapera/social_automation/pull/42) | ✅ **implantado 14/08** |
+| **R-17 lote 2** · `WHISPER_*` em `settings` | [#43](https://github.com/Cascapera/social_automation/pull/43) | ✅ **implantado 14/08** |
+| **R-17 lote 3** · `LLM_*`/`XAI_*`/`GROK_*` em `settings` | [#44](https://github.com/Cascapera/social_automation/pull/44) | ✅ **implantado 14/08** |
+| **R-17 lote 4** · `UPLOAD_POST_*` em `settings` | [#45](https://github.com/Cascapera/social_automation/pull/45) | ✅ **implantado 14/08** |
+| **R-17 lote 5** · `YTDLP_*` em `settings` | [#46](https://github.com/Cascapera/social_automation/pull/46) | ✅ **implantado 14/08** |
+| **R-17 lote 6** · OAuth, cripto e o resto — **fecha o R-17** | [#47](https://github.com/Cascapera/social_automation/pull/47) | ✅ **implantado 14/08** |
+| **R-14** · ações de inventário → `services/` (CT-3 + movimento) | [#48](https://github.com/Cascapera/social_automation/pull/48) | ✅ **implantado 14/08** |
+| **R-15** · `views.py` → pacote `views/` (9 módulos) | [#49](https://github.com/Cascapera/social_automation/pull/49) | ✅ **implantado 14/08** |
+| **R-16** · `serializers.py` → pacote `serializers/` (8 módulos) | [#50](https://github.com/Cascapera/social_automation/pull/50) | ✅ **implantado 14/08** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
 
-✅ **Deploy feito em 2026-08-13.** O plano manda deixar R-06+R-07 em produção por **≥48h**
-antes de seguir para o R-08 (seção 8) — são os dois itens que mexeram na atomicidade e na
-unificação da transição de publicação, o ponto de maior atenção do projeto inteiro.
+O plano manda deixar R-06+R-07 em produção por **≥48h** antes de seguir para o R-08 — são
+os dois itens que mexeram na atomicidade e na unificação da transição de publicação, o
+ponto de maior atenção do projeto inteiro. Eles subiram em **13/08**, então o R-08 libera
+em **2026-08-15**.
 
-Contando do deploy, o R-08 libera em **2026-08-15**. Ele já está destravado do lado
-técnico (pré-requisito é o R-04, feito) e é movimentação pura, de risco baixo.
+### ✅ Dois deploys: 13/08 e 14/08
 
-> Enquanto a janela não fecha, o que não conflita com o R-08 é o **lote 2 do R-17**
-> (FFmpeg / filas Celery) e o **R-19** (fatiar `auto_cuts/tasks.py`, que convive bem com o
-> `prompts/` criado no R-18).
+**13/08** — R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1 e R-18.
 
-### 📌 O que fazer ao retomar
+**14/08** — 10 itens, todos transparentes: R-19 (b), R-19 (c)+(d), os **5 lotes do R-17**
+(2 a 6), R-14, R-15 e R-16. Ou seja: a onda 2 inteira, o fatiamento do `auto_cuts` e a
+centralização de configuração.
 
-1. `git pull` em `develop` (esperado: `d7d2a59` ou mais novo).
-2. Conferir a tabela de verificação pós-deploy, abaixo — a janela vai até 2026-08-14.
-3. Se já passou 2026-08-15: começar o R-08 (seção 7).
+⚠ **O que olhar nas primeiras 48h deste deploy** — nenhum destes itens muda comportamento
+de propósito, então **qualquer movimento é sinal de problema**, ao contrário do deploy de
+13/08:
 
-### ✅ Deploy feito em 2026-08-13
+| O quê | Esperado | Item |
+| --- | --- | --- |
+| Taxa de sucesso do pipeline de cortes | **estável** — o fluxo foi fatiado, não alterado | R-19 |
+| Erro 500 em `remove-awaiting` e `retry-posting` | **nenhum** | R-14 |
+| Rotas da API (smoke test das principais) | **todas respondendo** — as 364 foram comparadas antes de subir | R-15, R-16 |
+| Modelo do Whisper em uso, nos dois caminhos | **o mesmo de antes** (`small` no fatiado, `large-v3` na passada única) | R-17 lote 2 |
+| Provider, modelo e custo médio por análise do LLM | **estáveis** | R-17 lote 3 |
+| Taxa de 429 da Upload-Post | **estável** | R-17 lote 4 |
+| Taxa de sucesso do download do YouTube | **estável** | R-17 lote 5 |
+| OAuth de Contas e leitura de segredos em banco | **funcionando** | R-17 lote 6 |
 
-R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1 e R-18 estão em produção. **As
-verificações pós-deploy abaixo continuam valendo por 24h** — e o relógio de 48h para
-liberar o R-08 começou a contar a partir daqui.
+> **O boot é o primeiro teste.** O lote 3 do R-17 fez `LLM_MAX_SHORTS`/`_LONGS` inválidos
+> derrubarem a inicialização em vez de falharem por análise. Se a aplicação subiu, essas
+> duas variáveis estão bem formadas no `.env` de produção.
 
 ### ⚠ Pendências fora do código
 
-1. **Verificação pós-deploy — janela até 2026-08-14.** O que olhar, e o que cada número
-   significa. **Movimento esperado não é regressão** — três destes itens *devem* mexer nos
-   painéis:
+1. **Verificação do deploy de 13/08 — a janela venceu sem confirmação registrada.** Fica
+   aqui porque a tabela continua sendo o roteiro se alguém for olhar retroativamente.
+   **Movimento esperado não é regressão** — três destes itens *devem* mexer nos painéis:
 
    | O quê | Esperado | Item |
    | --- | --- | --- |
@@ -1979,10 +1990,10 @@ Itens que exigem parada de produção: 0
   - [x] Contrato HTTP inalterado (URL, payload, status, chaves do JSON)
   - [x] CT-3 passa de novo depois, **sem edição** — `git diff` no arquivo de teste é vazio
   - [x] Suíte completa verde (460 → **476**) · Lint verde
-  - [x] PR aberto e revisado · [ ] Implantado
+  - [x] PR aberto e revisado · [x] Implantado 14/08
   - [ ] Verificado · sem 500 em `remove-awaiting` e `retry-posting`
   - [x] Commitado — CT-3 `5616118` · movimento `bce8482`
-  - Status: **concluído — falta deploy** · Notas: `apps/api/views.py` de 2.496 para
+  - Status: **concluído · implantado 14/08** · Notas: `apps/api/views.py` de 2.496 para
     **2.332** linhas; as duas views viraram 6 e 9 linhas. O serviço não sabe o que é HTTP:
     erro de regra sai como `InventoryActionError` e a view decide o status — as 4 mensagens
     continuam idênticas. Duas mudanças de forma, ambas cobertas: o cálculo do próximo
@@ -2001,9 +2012,9 @@ Itens que exigem parada de produção: 0
         a uma (nome, padrão, viewset e mapa de ações)
   - [x] `manage.py check` limpo · Suíte completa verde (476) · Lint verde
   - [x] PR revisado com `--color-moved`
-  - [ ] Implantado · smoke test das rotas principais
+  - [x] Implantado 14/08 · [ ] smoke test das rotas principais
   - [x] Commitado — `fb887b5`
-  - Status: **concluído — falta deploy** · Notas: 9 módulos por domínio — `auth` (28),
+  - Status: **concluído · implantado 14/08** · Notas: 9 módulos por domínio — `auth` (28),
     `factories` (171), `brands` (329), `media` (181), `jobs` (264), `posting` (386),
     `auto_cuts` (804), `dashboards` (160), `multiple_creator` (143). Achado: o
     `User = get_user_model()` do topo **não tinha leitor nenhum**; não foi movido para
@@ -2016,9 +2027,9 @@ Itens que exigem parada de produção: 0
         são continuações de import que o ruff quebrou ao redistribuir por módulo
   - [x] `test_serializers.py` verde **sem alteração** — o `__init__` reexporta tudo
   - [x] Suíte completa verde (476) · Lint verde · `manage.py check` limpo · 364 rotas iguais
-  - [x] PR aberto e revisado · [ ] Implantado
+  - [x] PR aberto e revisado · [x] Implantado 14/08
   - [x] Commitado — `6f332f0`
-  - Status: **concluído — falta deploy** · Notas: 8 módulos — `auth` (11), `factories` (63),
+  - Status: **concluído · implantado 14/08** · Notas: 8 módulos — `auth` (11), `factories` (63),
     `media` (58), `jobs` (92), `auto_cuts` (135), `posting` (191), `brands` (315),
     `multiple_creator` (127). As referências cruzadas entre serializers ficaram todas dentro
     do próprio módulo, então não houve import novo entre módulos. `User = get_user_model()`
@@ -2043,7 +2054,7 @@ Itens que exigem parada de produção: 0
           por isso o intervalo de 1 semana entre (b) e (c) não se aplicou a este lote
     - [x] Suíte verde (365 → **374**) · Lint verde · cobertura 42,21% → **42,27%** local
     - [x] Commitado — `c516ebb`
-    - [ ] Implantado · verificado: OAuth de factory-check funcionando
+    - [x] Implantado 14/08 · [ ] verificado: OAuth de factory-check funcionando
   - **Lote 2 — `WHISPER_*`** — [#43](https://github.com/Cascapera/social_automation/pull/43)
     - [x] `WHISPER_MODEL`, `WHISPER_DEVICE` e `WHISPER_DEBUG_GPU` em `settings`,
           revisadas **variável por variável**
@@ -2060,7 +2071,7 @@ Itens que exigem parada de produção: 0
           **43,77% → 43,77% no CI** (os testes novos batem em `settings.py`, que o CI
           mede 7pp abaixo do local)
     - [x] Commitado — `2ab5a57`
-    - [ ] Implantado · verificado: modelo do Whisper igual ao de antes nos dois caminhos
+    - [x] Implantado 14/08 · [ ] verificado: modelo do Whisper igual ao de antes nos dois caminhos
   - **Lote 3 — `LLM_*` / `XAI_*` / `GROK_*`** — [#44](https://github.com/Cascapera/social_automation/pull/44)
     - [x] 11 variáveis em `settings`, revisadas **variável por variável**
     - [x] Leitor único (`services/grok.py`) migrado — sem janela de órfã
@@ -2076,7 +2087,7 @@ Itens que exigem parada de produção: 0
     - [x] Teste de equivalência + anti-drift (`test_llm_settings.py`)
     - [x] Suíte verde (409 → **416**) · Lint verde · cobertura 44,01% → **44,04%** local
     - [x] Commitado — `dbaaf54`
-    - [ ] Implantado · verificado: provider, modelo e custo por análise estáveis
+    - [x] Implantado 14/08 · [ ] verificado: provider, modelo e custo por análise estáveis
   - **Lote 4 — `UPLOAD_POST_*`** — [#45](https://github.com/Cascapera/social_automation/pull/45)
     - [x] 5 variáveis em `settings`, 3 leitores migrados
     - [x] ⚠ **A chave da API fica crua**, sem `.strip()`: o publisher usava o valor como
@@ -2090,7 +2101,7 @@ Itens que exigem parada de produção: 0
     - [x] Teste de equivalência + anti-drift + 7 do throttle (11 no total)
     - [x] Suíte verde (416 → **427**) · Lint verde · cobertura 44,04% → **44,14%** local
     - [x] Commitado — `870a3f4`
-    - [ ] Implantado · verificado: taxa de 429 da Upload-Post estável
+    - [x] Implantado 14/08 · [ ] verificado: taxa de 429 da Upload-Post estável
   - **Lote 5 — `YTDLP_*`** — [#46](https://github.com/Cascapera/social_automation/pull/46)
     - [x] 5 variáveis em `settings`, leitor único (`services/youtube_download.py`)
     - [x] `YTDLP_MIN_VIDEO_HEIGHT` normalizada no settings **com a tolerância original**
@@ -2100,7 +2111,7 @@ Itens que exigem parada de produção: 0
     - [x] 16 testes novos. Cobertura de `youtube_download.py`: ~20% → **61%**
     - [x] Suíte verde (427 → **443**) · Lint verde · cobertura 44,14% → **44,57%** local
     - [x] Commitado — `244d2d6`
-    - [ ] Implantado · verificado: taxa de sucesso do download do YouTube estável
+    - [x] Implantado 14/08 · [ ] verificado: taxa de sucesso do download do YouTube estável
   - **Lote 6 — OAuth de Contas, chave de criptografia e o resto** — [#47](https://github.com/Cascapera/social_automation/pull/47)
     - [x] 7 variáveis, 5 leitores (`youtube_oauth`, `youtube_fetch`, `social/tasks`,
           `social/views`, `secret_crypto`)
@@ -2116,7 +2127,7 @@ Itens que exigem parada de produção: 0
           erro é comparada por substring em `views.py` para virar 400 legível)
     - [x] Suíte verde (443 → **460**) · Lint verde · cobertura 44,57% → **44,70%** local
     - [x] Commitado — `3b939fc`
-    - [ ] Implantado · verificado: OAuth de Contas e leitura de segredos funcionando
+    - [x] Implantado 14/08 · [ ] verificado: OAuth de Contas e leitura de segredos funcionando
     - ⚠ **Achado do lote 5**: `youtube_oauth.py` lê `GOOGLE_CLIENT_ID`/`_SECRET` por
       `os.getenv` **embora o lote 1 já as tenha posto em `settings`**. O anti-drift do
       lote 1 só guardava `YOUTUBE_CHECK_*`, então a duplicata passou. É o L-9 em outra
@@ -2126,7 +2137,7 @@ Itens que exigem parada de produção: 0
         aplicação. `metrics_view.py` mantém `PROMETHEUS_MULTIPROC_*` pelo mesmo motivo:
         a env var é contrato do `prometheus_client`, e migrá-la abriria divergência
         entre o que a lib lê e o que a aplicação acha que ela leu
-  - Status: **concluído em 6 lotes — falta deploy** · Notas: 57 `os.getenv` em 18
+  - Status: **concluído em 6 lotes · implantado 14/08** · Notas: 57 `os.getenv` em 18
     arquivos viraram settings; o que resta em `apps/` são 3 leituras de `SystemRoot`,
     que são ambiente do SO. Cada lote levou junto o teste de equivalência e o
     anti-drift do próprio prefixo — o do lote 1, estreito demais, deixou passar a
@@ -2181,7 +2192,7 @@ Itens que exigem parada de produção: 0
   - [x] Suíte completa verde · Lint verde
   - [ ] Implantado · verificado 48h — taxa de sucesso do pipeline de cortes estável
   - [x] Commitado — (a) `87ae7d5` · (b) `7c76c81`+`e1eccfd` · (c) `c1e26b1` · (d) `8779378`
-  - Status: **concluído — falta deploy** · Notas: `auto_cuts/tasks.py` em **73 linhas**
+  - Status: **concluído · implantado 14/08** · Notas: `auto_cuts/tasks.py` em **73 linhas**
     (era 2.111): as duas tasks e nada mais. O corpo virou três módulos —
     `analysis_flow.py`, `finalization_flow.py` e `flow_common.py`.
     Conferência mecânica nos dois PRs: o multiset de linhas do corpo antigo contra o
