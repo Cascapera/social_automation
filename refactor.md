@@ -37,7 +37,10 @@ flow_common.py          os helpers que os dois fluxos usam
 
 Os dois arquivos de CT-4 passaram **sem mudar nenhuma asserção** — só os alvos de `patch()`
 acompanharam o código de módulo. Era exatamente para isso que o PR (a) foi escrito antes.
-Suíte em **460 testes**, lint verde, cobertura local **44,70%** (CI: 44,53%).
+Suíte em **476 testes**, lint verde, cobertura local **45,28%** (CI: 45,11%).
+
+**A onda 2 começou:** o R-14 saiu (CT-3 + movimento). `apps/api/views.py` foi de 2.496
+para 2.332 linhas e as duas ações de inventário agora são chamáveis de fora do HTTP.
 
 ### ▶ NA PRÓXIMA SESSÃO, NESTA ORDEM
 
@@ -47,9 +50,12 @@ Suíte em **460 testes**, lint verde, cobertura local **44,70%** (CI: 44,53%).
 2. **Subir a catraca de cobertura logo depois do R-08**, com o número do log do **CI**
    (não o local). O piso segue em 42,0 e a margem já passou de 1,7pp.
 3. Depois disso, a onda 1 continua no **R-09**.
+4. Em paralelo, a onda 2 tem o **R-15** destravado (quebrar `views.py` em pacote). É
+   movimentação pura de ~2.300 linhas — grande em linhas, trivial em revisão com
+   `--color-moved`, **desde que nenhuma lógica seja editada no mesmo PR**.
 
-> **7 itens esperando deploy**: R-19 (b), R-19 (c)+(d) e os 5 lotes do R-17 — todos
-> transparentes. A verificação pós-deploy de cada um está na tabela da seção de
+> **8 itens esperando deploy**: R-19 (b), R-19 (c)+(d), os 5 lotes do R-17 e o R-14 —
+> todos transparentes. A verificação pós-deploy de cada um está na tabela da seção de
 > pendências. **O lote 3 tem uma pegadinha de deploy**: `LLM_MAX_SHORTS`/`_LONGS` com
 > valor inválido agora impedem o boot em vez de falhar por análise. Se o `.env` de
 > produção tiver lixo nessas duas, o deploy falha — o que é o objetivo, mas convém
@@ -125,7 +131,8 @@ levanta sobre as outras contagens deste documento.
 > depois dele (0,01pp de margem, o susto) → **42,08** com o R-17 lote 1 → **42,22** com o
 > R-18 → **43,46** com o CT-4 (#40) → **43,51** com o R-19 (b) → **43,77** com o R-19
 > (c)+(d) → **43,77** com o R-17 lote 2 → **43,81** (lote 3) → **43,96** (lote 4) →
-> **44,40** (lote 5) → **44,53** (lote 6). A margem sobre o piso de 42,0 é de **2,53pp**.
+> **44,40** (lote 5) → **44,53** (lote 6) → **45,11** com o R-14. A margem sobre o piso
+> de 42,0 é de **3,11pp**.
 >
 > O salto do lote 5 (+0,44pp num PR de configuração) é o R-17 pagando o que prometia:
 > `youtube_download.py` era intestável e foi de ~20% para 61%.
@@ -177,6 +184,7 @@ levanta sobre as outras contagens deste documento.
 | **R-17 lote 4** · `UPLOAD_POST_*` em `settings` | [#45](https://github.com/Cascapera/social_automation/pull/45) | mergeado · **falta deploy** |
 | **R-17 lote 5** · `YTDLP_*` em `settings` | [#46](https://github.com/Cascapera/social_automation/pull/46) | mergeado · **falta deploy** |
 | **R-17 lote 6** · OAuth, cripto e o resto — **fecha o R-17** | [#47](https://github.com/Cascapera/social_automation/pull/47) | mergeado · **falta deploy** |
+| **R-14** · ações de inventário → `services/` (CT-3 + movimento) | [#48](https://github.com/Cascapera/social_automation/pull/48) | mergeado · **falta deploy** |
 | — · este documento | [#28](https://github.com/Cascapera/social_automation/pull/28) | ✅ |
 
 ### ▶ PRÓXIMO PASSO: R-08, a partir de 2026-08-15
@@ -1629,12 +1637,12 @@ nada. A abordagem incremental deste plano é a correta.
 
 ```
 Status: em andamento
-Progresso: 6/21 itens concluídos (R-02, R-03, R-04, R-05, R-17, R-19)
+Progresso: 7/21 itens concluídos (R-02, R-03, R-04, R-05, R-14, R-17, R-19)
            8 IMPLANTADOS em 2026-08-13, em verificacao de 24h
              (R-01, R-21, R-22, R-23, R-06, R-07, R-17 lote 1, R-18)
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
-           ▶ próximo: R-08 (liberado em 15/08)
-           suite: 288 -> 460 testes · cobertura 40,8% -> 44,70% local
+           ▶ próximo: R-08 (libera 15/08) · onda 2 aberta: R-15 destravado pelo R-14
+           suite: 288 -> 476 testes · cobertura 40,8% -> 45,28% local
            atualizado em 2026-08-14
 Itens que exigem parada de produção: 0
 ```
