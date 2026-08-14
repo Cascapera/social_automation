@@ -22,6 +22,8 @@ quebra o recovery sem quebrar teste nenhum — a menos que este exista.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.test import TestCase
 
 from apps.auto_cuts.models import (
@@ -31,6 +33,33 @@ from apps.auto_cuts.models import (
 )
 from apps.auto_cuts.tasks import finalizar_auto_cut_task
 from apps.brands.models import Brand, Factory
+
+
+class FinalizeTestCase(TestCase):
+    """Base de todos os testes daqui: sem subprocesso de ffmpeg.
+
+    `finalizar_auto_cut_task` chama `has_nvenc()` na linha 1720 — **antes** de olhar se
+    existe algum corte para finalizar. É um `ffmpeg -hide_banner -encoders` por execução,
+    só para decidir entre NVENC e CPU. Onde não há ffmpeg no PATH, `run_cmd` deixa o
+    `FileNotFoundError` subir e a task inteira morre — foi assim que o CI, que não tem o
+    binário, reprovou a primeira versão destes testes enquanto aqui passavam.
+
+    Em produção o binário existe, então não é bug de runtime — mas prende um teste de
+    **fronteira** a um toolchain de vídeo. O mock desliga essa dependência; `False` é o
+    caminho CPU, que é o que a máquina de CI usaria de qualquer forma.
+
+    ⚠ Para o R-19: ao extrair, vale mover essa sonda para perto de quem precisa dela, ou
+    memoizá-la. Hoje ela roda mesmo quando não há nada a finalizar.
+
+    Patch em `setUp`, e não decorador de classe: decorador só alcança os métodos da classe
+    que ele decora, e as classes de teste daqui são subclasses.
+    """
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch("apps.auto_cuts.tasks.has_nvenc", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
 
 class FinalizeFixtureMixin:
@@ -65,7 +94,7 @@ class FinalizeFixtureMixin:
         )
 
 
-class EntradaESaidaDeEstadoTests(FinalizeFixtureMixin, TestCase):
+class EntradaESaidaDeEstadoTests(FinalizeFixtureMixin, FinalizeTestCase):
     def test_analise_inexistente_retorna_sem_levantar(self):
         """Entrega duplicada do Celery para análise já apagada."""
         finalizar_auto_cut_task.run(999_999)  # não levanta
@@ -118,7 +147,7 @@ class EntradaESaidaDeEstadoTests(FinalizeFixtureMixin, TestCase):
         self.assertFalse(analysis.long_overlay_enabled)
 
 
-class LimpezaDeCortesNaoSelecionadosTests(FinalizeFixtureMixin, TestCase):
+class LimpezaDeCortesNaoSelecionadosTests(FinalizeFixtureMixin, FinalizeTestCase):
     """A parte destrutiva e irreversível da task."""
 
     def test_corte_nao_selecionado_e_apagado_do_banco(self):
@@ -141,7 +170,7 @@ class LimpezaDeCortesNaoSelecionadosTests(FinalizeFixtureMixin, TestCase):
         self.assertTrue(AutoCutCorte.objects.filter(id=mantido.id).exists())
 
 
-class FalhaDeFinalizacaoTests(FinalizeFixtureMixin, TestCase):
+class FalhaDeFinalizacaoTests(FinalizeFixtureMixin, FinalizeTestCase):
     """Falha de corte não vira `error` — vira estado que o recovery reconhece."""
 
     def test_corte_sem_arquivo_deixa_a_analise_pendente_de_recovery(self):
