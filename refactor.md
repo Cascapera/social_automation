@@ -2059,16 +2059,21 @@ Itens que exigem parada de produção: 0
     forma. 10 helpers e constantes continuam em `tasks.py`, com import adiado; saem no
     R-12/R-13.
 
-- [ ] **R-12** · Fatiar (4/4): finalização
+- [x] **R-12** · Fatiar (4/4): finalização
       risco: médio · 6h · produção: transparente · PR: ~250 linhas / 3 arquivos
       pré-requisito: R-10, R-11
-  - [ ] Dict de retorno idêntico, campo por campo
-  - [ ] R-03 e R-04 verdes
-  - [ ] Suíte completa verde · Lint verde
-  - [ ] PR aberto e revisado · Implantado
+  - [x] O dict de retorno de `_run_post_to_platforms` inalterado, campo por campo
+  - [x] R-04 verde · R-03 verde · **nenhum teste alterado**
+  - [x] Suíte completa verde (505) · Lint verde
+  - [x] PR aberto e revisado · [ ] Implantado
   - [ ] Verificado — `publish_duration_ms` com distribuição equivalente à semana anterior
-  - [ ] Commitado — `<hash>`
-  - Status: não iniciado · Notas: `_run_post_to_platforms` final = ____ linhas
+  - [x] Commitado — `8ca95b9`
+  - Status: **concluído — falta deploy** · Notas: `_run_post_to_platforms` de 410 para
+    **192 linhas** — começou o dia com **1.216**. A conferência mecânica deu o melhor
+    resultado possível: **nada perdido, nada acrescentado**; nem as linhas de plumbing
+    apareceram, porque o contexto entra por dataclass em vez de parâmetros soltos.
+    O ganho previsto no plano era "cai para ~120 linhas de orquestração legível"; ficou em
+    192, e o que sobra é orquestração de verdade.
 
 - [ ] **R-13** · Emagrecer `apps/social/tasks.py` para orquestração fina
       risco: médio · 4h · produção: transparente · PR: ~300 linhas movidas / ~6 arquivos
