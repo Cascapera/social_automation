@@ -1,6 +1,7 @@
 """Views para OAuth e contas sociais."""
 import uuid
 
+from django.conf import settings
 from django.core.cache import cache
 from django.shortcuts import redirect
 from rest_framework import status
@@ -247,10 +248,7 @@ def _save_youtube_account(brand, channel, token_data, youtube_credential=None):
 
 def _frontend_url(path: str) -> str:
     """URL do frontend para redirect após OAuth."""
-    import os
-
-    base = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    return f"{base.rstrip('/')}{path}"
+    return f"{settings.FRONTEND_URL.rstrip('/')}{path}"
 
 
 @api_view(["GET"])

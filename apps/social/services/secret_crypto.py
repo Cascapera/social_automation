@@ -1,16 +1,16 @@
 """Criptografia simples para segredos sensíveis em banco."""
 import base64
 import hashlib
-import os
 
 from cryptography.fernet import Fernet, InvalidToken
+from django.conf import settings
 
 ENCRYPTED_PREFIX = "enc:v1:"
 ENV_KEY_NAME = "SOCIAL_ENCRYPTION_KEY"
 
 
 def _build_fernet() -> Fernet:
-    key_material = (os.getenv(ENV_KEY_NAME) or "").strip()
+    key_material = settings.SOCIAL_ENCRYPTION_KEY
     if not key_material:
         raise ValueError(
             f"{ENV_KEY_NAME} não configurada. Defina uma chave forte no .env."

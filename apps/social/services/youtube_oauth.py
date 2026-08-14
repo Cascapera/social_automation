@@ -1,5 +1,4 @@
 """Serviço OAuth para YouTube."""
-import os
 from urllib.parse import urlencode
 
 import requests
@@ -46,14 +45,11 @@ def get_client_config(brand=None, youtube_credential=None):
             or getattr(secret_source, "youtube_redirect_uri", "")
             or ""
         ).strip()
-    client_id = source_client_id or os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = source_secret or os.getenv("GOOGLE_CLIENT_SECRET")
+    client_id = source_client_id or settings.GOOGLE_CLIENT_ID
+    client_secret = source_secret or settings.GOOGLE_CLIENT_SECRET
     if not client_id or not client_secret:
         return None
-    redirect_uri = source_redirect_uri or os.getenv(
-        "YOUTUBE_REDIRECT_URI",
-        "http://localhost:8000/api/youtube/callback/",
-    )
+    redirect_uri = source_redirect_uri or settings.YOUTUBE_REDIRECT_URI
     return {
         "web": {
             "client_id": client_id,
@@ -74,7 +70,7 @@ def get_redirect_uri(brand=None, youtube_credential=None):
             or ""
         ).strip()
         if source is not None else ""
-    ) or os.getenv("YOUTUBE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback/")
+    ) or settings.YOUTUBE_REDIRECT_URI
 
 
 def build_state_value(brand_id: int, youtube_credential_id: int | None = None) -> str:
