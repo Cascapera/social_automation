@@ -36,7 +36,18 @@ from apps.common.metrics import (
 )
 from apps.jobs.logging_utils import Timer, log_event
 from apps.jobs.models import FactoryPostingAttemptLog, ScheduledPost
-from apps.social.services.publish_targets import _resolve_post_target_brand
+from apps.social.services.publish_targets import (
+    _platforms_are_youtube_only,
+    _resolve_post_target_brand,
+)
+from apps.social.services.publishing.idempotency_keys import (
+    IDEMPOTENCY_IN_PROGRESS_DELAY_SEC,
+    YOUTUBE_QUOTA_MAX_RETRIES,
+)
+from apps.social.services.publishing.slots import (
+    _fail_expired_factory_slot,
+    _sync_factory_posting_schedule,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +72,10 @@ class FinalizeContext:
 
 def finalize_publish(ctx: FinalizeContext) -> dict:
     """Consolida o resultado e devolve o dict final da task, campo por campo igual."""
-    # Import adiado: estes ainda moram em `tasks.py` e saem no R-13.
-    from apps.social.tasks import (
-        IDEMPOTENCY_IN_PROGRESS_DELAY_SEC,
-        THUMBNAIL_BATCH_DELAY_SEC,
-        YOUTUBE_QUOTA_MAX_RETRIES,
-        _fail_expired_factory_slot,
-        _platforms_are_youtube_only,
-        _sync_factory_posting_schedule,
-        upload_thumbnails_after_batch_task,
-    )
+    # Import adiado que FICA: `upload_thumbnails_after_batch_task` é uma task Celery, e
+    # task mora em `tasks.py` por contrato de fila. É a única seta services → tasks que
+    # sobrou no fluxo de publicação.
+    from apps.social.tasks import THUMBNAIL_BATCH_DELAY_SEC, upload_thumbnails_after_batch_task
 
     post = ctx.post
     brand = ctx.brand
