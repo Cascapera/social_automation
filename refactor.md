@@ -12,22 +12,30 @@
 
 ---
 
-## ⏸ PONTO DE RETOMADA — fim da sessão de 2026-08-14 (noite)
+## ⏸ PONTO DE RETOMADA — 2026-08-15
 
 ### ⚠ PRIMEIRA COISA AO VOLTAR
 
-**A PR [#61](https://github.com/Cascapera/social_automation/pull/61) (R-13) ficou ABERTA,
-com o CI do backend ainda rodando.** Foi onde a sessão parou.
+**Não há mais código a escrever neste plano. O que falta é o deploy.**
 
-1. `gh pr checks 61` — se verde, `gh pr merge 61 --merge --delete-branch`.
-2. `git checkout develop && git pull`.
-3. Se estiver vermelha: o R-13 mexeu em muita coisa; o commit é `cb5ac22` e o que ele faz
-   está detalhado no checklist do item.
+A [#61](https://github.com/Cascapera/social_automation/pull/61) (R-13) mergeou em
+`e26b6a3` com o CI verde, e com ela **os 23 itens estão concluídos**. Os **11 PRs da
+tabela abaixo continuam só em `develop`** — é o maior deploy da série e ninguém o fez
+ainda. Enquanto ele não acontecer, o plano não terminou de valer: o código está escrito,
+não está provado em produção.
 
-### O que aconteceu nesta sessão
+1. Deployar os 11 (`#51`–`#61`), de preferência com produção parada.
+2. Passar a tabela de verificação de cada item — as colunas "Atenção no deploy" abaixo e
+   a tabela de painéis em "Pendências fora do código".
+3. Marcar `Implantado` / `Verificado` no checklist da seção 13 conforme confirmar.
 
-**O plano de refatoração chegou ao fim: 22 de 23 itens concluídos**, e o 23º (R-13) está
-mergeando. Foram **21 PRs** num dia — #41 a #61.
+Depois disso, o que existe é o que está em "O que sobrou para depois" — **nenhum item
+deste plano**, e cada um é decisão nova.
+
+### O que aconteceu na sessão de 14/08
+
+**O plano de refatoração chegou ao fim: 23 de 23 itens concluídos.** Foram **21 PRs** num
+dia — #41 a #61 (a #61 mergeou na manhã seguinte).
 
 A onda 1, que estava parada desde maio, saiu inteira: R-08 → R-09 → R-10 → R-11 → R-12 →
 R-13. E com ela o número que o projeto perseguia desde o começo:
@@ -54,10 +62,10 @@ O deploy de 14/08 levou 10 itens. **Tudo que veio depois dele está só em `deve
 | #57, #58 | R-10 + fix do código inalcançável | **taxa de sucesso de publicação no YouTube nas primeiras 24h** |
 | #59 | R-11 (Upload-Post) | `upload_post_unknown_results_total` não pode subir |
 | #60 | R-12 (finalização) | `publish_duration_ms` com distribuição equivalente |
-| #61 | R-13 (se mergear) | **nenhuma task no beat com "unregistered task"**; olhar a fila `publish` nos primeiros 30 min |
+| #61 | R-13 | **nenhuma task no beat com "unregistered task"**; olhar a fila `publish` nos primeiros 30 min |
 
 > **O deploy destes 11 é o maior da série** — mexe no caminho de publicação inteiro. Vale
-> subir com produção parada, como você fez hoje, e olhar a taxa de sucesso do YouTube
+> subir com produção parada, como foi feito em 14/08, e olhar a taxa de sucesso do YouTube
 > antes de liberar a fila.
 
 ### O que sobrou para depois
@@ -66,7 +74,10 @@ O deploy de 14/08 levou 10 itens. **Tudo que veio depois dele está só em `deve
   `funções ≥ 80 linhas` (50, meta ≤25). Os módulos novos de `publishing/` são grandes
   porque receberam fatias grandes — fatiar de novo é decisão nova, não dívida deste plano.
 - **~30 pontos do D-10** que ainda engolem exceção sem log, 12 deles em `social/tasks.py`.
-- **4 decisões suas**, abaixo, nenhuma bloqueia nada.
+- **1 decisão sua**, e só ela: o `download-media` de pacote sem mídia passou a devolver
+  **404 em vez de 200 com ZIP vazio** (#52). Está mergeado; se você preferir o
+  comportamento antigo, é reverter esse trecho antes do deploy. Nada mais espera resposta
+  sua.
 
 ### ⚠ Pendências fora do código
 
@@ -89,9 +100,10 @@ O deploy de 14/08 levou 10 itens. **Tudo que veio depois dele está só em `deve
 
    R-01 e R-23 são transparentes (R-23 só para de exibir erro em post que deu certo).
 
-2. **1 decisão de processo em aberto** (não bloqueia nada): vale congelar features em
-   `apps/social/` durante o resto da onda 1, ou aceitar rebases? Está no **L-7**
-   (seção 15). As 4 decisões técnicas que bloqueavam o R-07 já foram tomadas.
+2. ~~**1 decisão de processo em aberto**: congelar features em `apps/social/` durante a
+   onda 1?~~ — **caducou sem custo.** A onda 1 fechou em 14/08 sem nenhum rebase doloroso;
+   a pergunta do **L-7** (seção 15) não precisa mais de resposta. As 4 decisões técnicas
+   que bloqueavam o R-07 já haviam sido tomadas.
 
 > ~~5 erros locais só no Windows~~ — **resolvido no R-07.** O `→` (U+2192) que
 > `fix_youtube_posted_status.py` escrevia em stdout levantava `UnicodeEncodeError` em
@@ -1530,17 +1542,18 @@ nada. A abordagem incremental deste plano é a correta.
 ## 13. Checklist de acompanhamento
 
 ```
-Status: em andamento
-Progresso: 22/23 concluidos + R-13 na PR #61 (CI rodando quando a sessao acabou)
-           ONDA 1 FECHADA: R-08 -> R-09 -> R-10 -> R-11 -> R-12 -> R-13
+Status: codigo concluido - falta o deploy dos 11 ultimos
+Progresso: 23/23 concluidos (R-13 mergeou na #61, merge e26b6a3, CI verde)
+           TODAS AS ONDAS FECHADAS: 0, 1, 2 e 3
            (a contagem de "21 itens" do texto acima e anterior aos 3 achados
             dos characterization tests; o checklist tem 23)
            8 implantados em 13/08 + 10 implantados em 14/08
            11 mergeados e ainda FORA de producao (#51 a #61) - ver ponto de retomada
            ✅ Onda 0 fechada · ✅ D-02 (R-06+R-07) · ✅ D-09 (R-18) · ✅ D-08 (R-17) · ✅ D-11 (R-19)
-           ▶ próximo: mergear a #61 e DEPLOYAR os 11 PRs que estao so em develop
+           ▶ próximo: DEPLOYAR os 11 PRs que estao so em develop; nao ha item
+             deste plano esperando codigo
            suite: 288 -> 505 testes · cobertura 40,8% -> 47,53% local
-           atualizado em 2026-08-14
+           atualizado em 2026-08-15
 Itens que exigem parada de produção: 0
 ```
 
@@ -1886,7 +1899,8 @@ Itens que exigem parada de produção: 0
         e as 15 rotas de `CELERY_TASK_ROUTES` resolvem todas (verificado com o app Celery
         carregado, não por leitura)
   - [x] Suíte completa verde (505) · Lint verde
-  - [x] PR aberto e revisado · [ ] Implantado
+  - [x] PR aberto e revisado · [x] Mergeado — PR #61, merge `e26b6a3`, CI verde nos dois
+        jobs · [ ] Implantado
   - [ ] Verificado — nenhuma task no beat com "unregistered task"; fila `publish` nos
         primeiros 30 min
   - [x] Commitado — `cb5ac22`
@@ -1901,7 +1915,7 @@ Itens que exigem parada de produção: 0
     topo, o nome é resolvido no import e não na chamada, então patchar só a origem deixou
     de alcançar a task. Está comentado no teste — é a pegadinha de subir import.
 
-- [ ] **Onda 1 concluída** — máquina de estados com dono único e atômica, god module desfeito
+- [x] **Onda 1 concluída** — máquina de estados com dono único e atômica, god module desfeito
       ✅ **Ponto de parada seguro.** Se o projeto parar aqui, já se pagou.
 
 ---
@@ -2186,6 +2200,7 @@ Uma linha por item concluído: data · o que mudou de fato · surpresas encontra
 | 2026-08-12 | **R-23** | `post.error` zerado no ramo de sucesso quando não há warnings (`tasks.py:3568`) + teste novo do ramo com warnings. Commit `2322efa`, PR #34. | **Item que não existia no plano.** `"error"` está no `update_fields`, então o texto da tentativa anterior era *regravado* junto com `status=DONE` — um post publicado com sucesso exibia o erro da tentativa que falhou, para sempre. O teste do ramo com warnings passa nas duas versões: é ele que prova que a limpeza não engoliu a ressalva legítima. |
 | 2026-08-12 | **R-06** | `mark_posted` e `mark_still_scheduled` extraídas de `tasks.py` para `apps/social/services/posting_state.py`, cada uma em `transaction.atomic()`. 6 testes novos de rollback. Commit `1e85d53`, PR #35, mergeado em `995980d`. | Duas. (1) O R-03 **já tinha previsto a inversão**: `test_transition_is_not_atomic_today` dizia no docstring "R-06 deve INVERTER esta asserção" — o characterization test funcionou como contrato entre dois itens separados por dias. (2) `tasks.py` está commitado com **CRLF** neste repo enquanto todo o resto é LF; reescrever o arquivo por script normalizou para LF e inflou o diff de 84 para **8.014 linhas**. Corrigido com `git -c core.autocrlf=false add`. Quem mexer em `tasks.py` por script: conferir o `--stat` antes de commitar. |
 | 2026-08-12 | **PRs #33–#34** | As duas correções mergeadas em `develop` (`7c316a4`). | Conflito no `refactor.md`: as duas branches saíram de `develop` e inseriram bloco de checklist no mesmo ponto. Código e testes juntaram limpo — as correções tocam `tasks.py:2498` e `:3568`. Em itens irmãos que atualizam o mesmo documento, contar com conflito no doc mesmo quando o código não conflita. |
+| 2026-08-15 | **R-13 / fim do plano** | PR #61 mergeada em `e26b6a3` com CI verde nos dois jobs. Com ela o checklist fecha em **23/23** e as quatro ondas ficam concluídas. | O plano acaba com o código pronto e **11 PRs ainda fora de produção** — a última milha do projeto não é técnica, é o deploy. Vale registrar que o item que fechou a série é o mesmo cujo risco documentado (nome de task Celery alterado sem querer) só se verifica **depois** do deploy, olhando o beat. Nenhuma métrica deste plano prova esse item; a fila prova. |
 | 2026-08-11 | **R-03** | 31 characterization tests das 5 cópias, passando contra o código atual sem alterá-lo. PR #31. | As 5 cópias concordam em **apenas 3 campos**. A divergência 1 (ramo não-YouTube não deduplica `PostedVideoLog` nem valida id vazio) é bug claro. Confirmou também que o diagnóstico D-02 subestimava o problema: não era só duplicação, era duplicação **com uma das cópias quebrada**. |
 
 ---
