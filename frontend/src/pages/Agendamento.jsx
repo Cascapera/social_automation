@@ -14,9 +14,12 @@ import {
   getFactorySchedules,
   triggerImmediateSchedule,
   triggerBrandImmediateSchedule,
+  previewImmediatePost,
+  triggerImmediatePost,
 } from '../api'
 import { PlatformIcon } from '../components/PlatformIcons'
 import { buildFactoryWeeklyMatrix } from '../utils/factoryWeeklySchedule'
+import { describeBrandPreview, describePostButton } from '../utils/immediatePostPreview'
 import './Agendamento.css'
 
 const PLATFORMS = [
@@ -162,6 +165,11 @@ export default function Agendamento() {
   const [scheduleDateModalOpen, setScheduleDateModalOpen] = useState(false)
   const [scheduleTargetDate, setScheduleTargetDate] = useState('')
   const [scheduleForBrandId, setScheduleForBrandId] = useState(null)
+  // 'schedule' = Criar Agendamento (publica no horário do slot).
+  // 'post'     = Postar Imediato (publica agora). Mesmo modal, ações diferentes.
+  const [scheduleModalMode, setScheduleModalMode] = useState('schedule')
+  const [immediatePreview, setImmediatePreview] = useState(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
   const [factoryWeekSchedules, setFactoryWeekSchedules] = useState([])
   useEffect(() => {
     if (brandId) {
@@ -399,8 +407,71 @@ export default function Agendamento() {
   function handleOpenScheduleDateModal(forBrandId = null) {
     setScheduleForBrandId(forBrandId)
     setScheduleTargetDate(getTomorrowDateStr())
+    setScheduleModalMode('schedule')
+    setImmediatePreview(null)
     setScheduleDateModalOpen(true)
     setError('')
+  }
+
+  // Postar Imediato abre o mesmo modal, em outro modo. O padrão de data é HOJE, não
+  // amanhã: quem quer publicar agora quase sempre quer o dia corrente.
+  function handleOpenImmediatePostModal(forBrandId = null) {
+    const hoje = getTodayDateStr()
+    setScheduleForBrandId(forBrandId)
+    setScheduleTargetDate(hoje)
+    setScheduleModalMode('post')
+    setImmediatePreview(null)
+    setScheduleDateModalOpen(true)
+    setError('')
+    loadImmediatePreview(hoje, forBrandId || brandId)
+  }
+
+  function handleScheduleTargetDateChange(novaData) {
+    setScheduleTargetDate(novaData)
+    if (scheduleModalMode === 'post') {
+      loadImmediatePreview(novaData, scheduleForBrandId || brandId)
+    }
+  }
+
+  async function loadImmediatePreview(targetDate, forBrandId) {
+    if (!factoryInfo?.id || !targetDate) return
+    setLoadingPreview(true)
+    setImmediatePreview(null)
+    try {
+      const preview = await previewImmediatePost(
+        factoryInfo.id,
+        targetDate,
+        forBrandId || undefined,
+      )
+      setImmediatePreview(preview)
+    } catch (e) {
+      setError(e.message || 'Falha ao carregar a prévia.')
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  async function handleConfirmImmediatePost() {
+    if (triggeringImmediate || !scheduleTargetDate || !factoryInfo?.id) return
+    if (!immediatePreview || immediatePreview.total < 1) return
+    setError('')
+    setTriggeringImmediate(true)
+    try {
+      await triggerImmediatePost(
+        factoryInfo.id,
+        scheduleTargetDate,
+        scheduleForBrandId || brandId || undefined,
+      )
+      setScheduleDateModalOpen(false)
+      setScheduleForBrandId(null)
+      setImmediatePreview(null)
+      reloadScheduledPosts()
+      await loadFactoryWeekSchedules(factoryInfo.id)
+    } catch (e) {
+      setError(e.message || 'Falha ao publicar agora.')
+    } finally {
+      setTriggeringImmediate(false)
+    }
   }
 
   async function handleConfirmScheduleDate() {
@@ -518,6 +589,17 @@ export default function Agendamento() {
             >
               {triggeringImmediate ? 'Criando agenda...' : 'Criar Agendamento'}
             </button>
+            {factoryInfo?.id && (
+              <button
+                type="button"
+                className="factory-toggle-btn post-now"
+                onClick={() => handleOpenImmediatePostModal(brandId)}
+                disabled={triggeringImmediate}
+                title="Publica agora os vídeos desta marca no dia selecionado, sem esperar o horário do slot."
+              >
+                Postar Imediato
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -564,6 +646,15 @@ export default function Agendamento() {
               title="Cria a agenda para o dia selecionado. A publicação acontece no horário de cada slot. Útil para agendar o fim de semana na sexta."
             >
               {triggeringImmediate ? 'Criando agenda...' : 'Criar Agendamento'}
+            </button>
+            <button
+              type="button"
+              className="factory-toggle-btn post-now"
+              onClick={() => handleOpenImmediatePostModal()}
+              disabled={triggeringImmediate}
+              title="Publica agora os vídeos do dia selecionado, sem esperar o horário de cada slot."
+            >
+              Postar Imediato
             </button>
           </div>
         </section>
@@ -877,10 +968,23 @@ export default function Agendamento() {
       {scheduleDateModalOpen && (
         <div className="modal-overlay">
           <div className="modal">
-            <h3>Criar agendamento para qual dia?</h3>
+            <h3>
+              {scheduleModalMode === 'post'
+                ? 'Postar imediato — qual dia?'
+                : 'Criar agendamento para qual dia?'}
+            </h3>
             <p className="form-hint">
-              O sistema agenda os vídeos disponíveis no banco para a data selecionada, respeitando os horários fixos de cada brand.
-              A publicação acontece no horário de cada slot, não agora.
+              {scheduleModalMode === 'post' ? (
+                <>
+                  Os vídeos do dia selecionado são publicados <strong>agora</strong>, sem esperar o
+                  horário de cada slot. Horários que já passaram ficam de fora.
+                </>
+              ) : (
+                <>
+                  O sistema agenda os vídeos disponíveis no banco para a data selecionada, respeitando
+                  os horários fixos de cada brand. A publicação acontece no horário de cada slot, não agora.
+                </>
+              )}
             </p>
             <div className="form-group">
               <label htmlFor="schedule-target-date">Data</label>
@@ -888,28 +992,70 @@ export default function Agendamento() {
                 id="schedule-target-date"
                 type="date"
                 value={scheduleTargetDate}
-                onChange={(e) => setScheduleTargetDate(e.target.value)}
+                onChange={(e) => handleScheduleTargetDateChange(e.target.value)}
                 min={getTodayDateStr()}
               />
             </div>
+            {scheduleModalMode === 'post' && (
+              <div className="immediate-preview">
+                {loadingPreview && <p className="form-hint">Calculando o que seria postado...</p>}
+                {!loadingPreview && immediatePreview && (
+                  <>
+                    {immediatePreview.brands.map((b) => (
+                      <div key={b.brand_id} className="immediate-preview-brand">
+                        <strong>{b.brand_name}</strong>
+                        <span>{describeBrandPreview(b)}</span>
+                      </div>
+                    ))}
+                    {immediatePreview.total > 0 && (
+                      <p className="form-hint immediate-preview-warning">
+                        Os vídeos de uma mesma marca vão ao ar em sequência, um atrás do outro.
+                        Publicação não tem desfazer.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <div className="modal-actions">
               <button
                 type="button"
                 onClick={() => {
                   setScheduleDateModalOpen(false)
                   setScheduleForBrandId(null)
+                  setImmediatePreview(null)
                 }}
               >
                 Cancelar
               </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={handleConfirmScheduleDate}
-                disabled={triggeringImmediate || !scheduleTargetDate}
-              >
-                {triggeringImmediate ? 'Criando agenda...' : 'Criar agenda'}
-              </button>
+              {scheduleModalMode === 'post' ? (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleConfirmImmediatePost}
+                  disabled={
+                    triggeringImmediate
+                    || !scheduleTargetDate
+                    || loadingPreview
+                    || !immediatePreview
+                    || immediatePreview.total < 1
+                  }
+                >
+                  {describePostButton(immediatePreview, {
+                    loading: loadingPreview,
+                    posting: triggeringImmediate,
+                  })}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleConfirmScheduleDate}
+                  disabled={triggeringImmediate || !scheduleTargetDate}
+                >
+                  {triggeringImmediate ? 'Criando agenda...' : 'Criar agenda'}
+                </button>
+              )}
             </div>
           </div>
         </div>
