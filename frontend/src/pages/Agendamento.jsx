@@ -514,9 +514,9 @@ export default function Agendamento() {
               className="factory-toggle-btn immediate"
               onClick={() => handleOpenScheduleDateModal(brandId)}
               disabled={triggeringImmediate}
-              title="Agenda vídeos disponíveis desta marca para o dia selecionado."
+              title="Cria a agenda desta marca para o dia selecionado. A publicação acontece no horário de cada slot."
             >
-              {triggeringImmediate ? 'Agendando...' : 'Agendamento Imediato'}
+              {triggeringImmediate ? 'Criando agenda...' : 'Criar Agendamento'}
             </button>
           </div>
         </section>
@@ -561,9 +561,9 @@ export default function Agendamento() {
               className="factory-toggle-btn immediate"
               onClick={() => handleOpenScheduleDateModal()}
               disabled={triggeringImmediate}
-              title="Agenda vídeos disponíveis para o dia selecionado. Útil para agendar o fim de semana na sexta."
+              title="Cria a agenda para o dia selecionado. A publicação acontece no horário de cada slot. Útil para agendar o fim de semana na sexta."
             >
-              {triggeringImmediate ? 'Agendando...' : 'Agendamento Imediato'}
+              {triggeringImmediate ? 'Criando agenda...' : 'Criar Agendamento'}
             </button>
           </div>
         </section>
@@ -877,9 +877,10 @@ export default function Agendamento() {
       {scheduleDateModalOpen && (
         <div className="modal-overlay">
           <div className="modal">
-            <h3>Agendar para qual dia?</h3>
+            <h3>Criar agendamento para qual dia?</h3>
             <p className="form-hint">
               O sistema agenda os vídeos disponíveis no banco para a data selecionada, respeitando os horários fixos de cada brand.
+              A publicação acontece no horário de cada slot, não agora.
             </p>
             <div className="form-group">
               <label htmlFor="schedule-target-date">Data</label>
@@ -907,7 +908,7 @@ export default function Agendamento() {
                 onClick={handleConfirmScheduleDate}
                 disabled={triggeringImmediate || !scheduleTargetDate}
               >
-                {triggeringImmediate ? 'Agendando...' : 'Agendar'}
+                {triggeringImmediate ? 'Criando agenda...' : 'Criar agenda'}
               </button>
             </div>
           </div>
