@@ -11,11 +11,12 @@
 
 ## ⏸ PONTO DE RETOMADA
 
-**Estado: PR 1 (#64) e PR 2 (#65) mergeados. PR 3 (frontend) aguardando CI.**
+**Estado: os três PRs mergeados (#64, #65, #66). A feature está inteira em `develop`.**
 
-Quando o PR 3 mergear, a feature está inteira em `develop` — **e nunca foi exercitada
-contra o YouTube nem o Upload-Post de verdade.** Todo o caminho de publicação está coberto
-por teste com a task mockada; ninguém publicou um vídeo por este botão ainda.
+**A feature nunca foi exercitada contra o YouTube nem o Upload-Post de verdade.** Todo o
+caminho de publicação está coberto por teste com a task mockada; ninguém publicou um vídeo
+por este botão ainda. E, como todo o resto de `develop`, ela também **não está em
+produção** — depende do mesmo deploy pendente do `refactor.md`.
 
 Próximo passo concreto: subir e **testar com uma brand só, um vídeo só**, antes de deixar
 o botão à mão de qualquer um. Ver a seção 6.
@@ -197,7 +198,7 @@ Branch `feat/renomear-botao-criar-agendamento` · risco: nenhum · só frontend
 - [x] Modal: título e botão de confirmação coerentes com o novo nome
 - [x] Verificado que nenhum teste depende do texto (só há 2 testes, ambos de `utils/`)
 - [x] `npm test` (8 passam) + `npm run build` verdes
-- [ ] PR aberto · [ ] CI verde · [ ] Mergeado
+- [x] PR aberto (#64) · [x] CI verde · [x] Mergeado
 
 ### PR 2 · Backend do "Postar Imediato"
 
@@ -216,7 +217,7 @@ Branch a criar · risco: médio · pré-requisito: nenhum (independe do PR 1)
       republica; post nasce `public` e no presente; `FactoryPostingSchedule` guarda o slot
       original; fila recebe a task certa
 - [x] `ruff check .` limpo · suíte 505 → **515**, sob `settings_test`
-- [ ] PR aberto · [ ] CI verde · [ ] Mergeado
+- [x] PR aberto (#65) · [x] CI verde · [x] Mergeado
 
 **Não coberto neste PR, e é honesto dizer:** a idempotência de clicar duas vezes está
 apoiada no claim `PENDING → POSTING` de `preflight.py:154`, que já existe e é atômico, mas
@@ -236,7 +237,7 @@ Branch a criar · risco: baixo · pré-requisito: PR 2
 - [x] Aviso de que os vídeos saem em sequência e que não há desfazer
 - [x] Estado de carregando e bloqueio de duplo clique (`triggeringImmediate`)
 - [x] `npm test` 8 → **14** · `npm run build` verde
-- [ ] PR aberto · [ ] CI verde · [ ] Mergeado
+- [x] PR aberto (#66) · [x] CI verde · [x] Mergeado
 
 A lógica de rótulo saiu do JSX para `utils/immediatePostPreview.js` porque **"zero vídeo"
 tem três causas** — dia já agendado, banco vazio, nenhum horário elegível — e mostrar só
