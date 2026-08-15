@@ -11,9 +11,10 @@
 
 ## ⏸ PONTO DE RETOMADA
 
-**Estado: PR 1 (rename) em andamento.** Nada mergeado ainda.
+**Estado: PR 1 mergeado (#64). PR 2 (backend) pronto, aguardando CI.**
 
-Próximo passo concreto: fechar o PR 1, depois atacar o PR 2 (backend).
+Próximo passo concreto: PR 3 — o frontend. O backend já expõe os dois endpoints que ele
+consome, e o formato do JSON da prévia está na seção 3.
 
 ---
 
@@ -138,6 +139,28 @@ Imediato" inteiro, porque nele nunca há `publishAt`.
 | `POST` | `/factories/{id}/immediate-post-preview/` | roda o planejamento e devolve o que **seria** postado, por brand. Não cria alocação |
 | `POST` | `/factories/{id}/trigger-immediate-post/` | cria os posts e dispara o envio |
 
+### ⚠ Armadilha: `FactoryPostingSchedule.scheduled_at` NÃO pode virar "agora"
+
+Antes de publicar, `preflight` chama `_fail_expired_factory_slot`
+(`publishing/preflight.py:132`), que marca o post como **FAILED — "Janela de postagem
+expirada"** quando `now > deadline`. O deadline vem de `_factory_slot_deadline`
+(`publishing/slots.py:247`): é o `scheduled_at` do **`FactoryPostingSchedule`**, não o do
+post — e só existe quando o schedule tem `daily_plan_item` (publicação avulsa não tem
+deadline).
+
+Como os posts do caminho imediato vêm do plano diário, eles **têm** deadline. Então:
+
+| Campo | Valor no caminho imediato | Por quê |
+| --- | --- | --- |
+| `ScheduledPost.scheduled_at` | **agora** | é o que faz o YouTube não usar `publishAt` e o Upload-Post não usar `scheduled_date` |
+| `FactoryPostingSchedule.scheduled_at` | **horário original do slot** | é o deadline; e slot vencido não entra, então está sempre no futuro |
+
+> Se os dois virassem "agora", **todo post imediato morreria** em "Janela de postagem
+> expirada" — o deadline teria sido gravado alguns segundos antes de `now`. Esta é a
+> armadilha mais fácil de cair nesta feature.
+
+Efeito colateral bom: o horário planejado do slot fica preservado para auditoria.
+
 ### Refatoração necessária
 
 `generate_daily_schedule_for_factory` hoje planeja e grava no mesmo passo. Para a prévia
@@ -146,6 +169,10 @@ existir sem efeito colateral, separar:
 - `plan_daily_schedule_for_factory(...) -> list[PlannedAllocation]` — decide slots elegíveis
   e casa com o estoque, **sem persistir alocação**;
 - `generate_daily_schedule_for_factory(...)` — consome o plano e persiste, como hoje.
+
+Detalhe que obriga um parâmetro extra: `_available_inventory_items_for_slot`
+(`factory_scheduler.py:99`) usa `select_for_update()`, que exige transação. A prévia não
+pode travar linhas nem rodar dentro de `atomic`, então a função ganha `for_update: bool`.
 
 > ⚠ **Efeito colateral que a prévia não consegue evitar:** `DailyPostingPlanService.get_or_generate_for_day`
 > (`factory_scheduler.py:273`) **grava** o plano diário se ele ainda não existe. Uma prévia
@@ -172,18 +199,25 @@ Branch `feat/renomear-botao-criar-agendamento` · risco: nenhum · só frontend
 
 Branch a criar · risco: médio · pré-requisito: nenhum (independe do PR 1)
 
-- [ ] `plan_daily_schedule_for_factory` extraída, sem persistir alocação
-- [ ] `generate_daily_schedule_for_factory` passa a consumir o plano — **comportamento
-      atual inalterado**, provado por teste
-- [ ] Endpoint de prévia
-- [ ] Endpoint de execução: `scheduled_at=now`, `privacy_status="public"`, slot vencido fora
-- [ ] Dispara `process_brand_posting_queue_task` por brand
-- [ ] Idempotência: clicar duas vezes não publica duas vezes (o claim
-      `PENDING → POSTING` de `preflight.py:154` já protege — **confirmar com teste**)
-- [ ] Testes: prévia bate com o que a execução faz; slot vencido não entra; post nasce
-      `public` e com `scheduled_at` no presente
-- [ ] `ruff check .` + suíte sob `settings_test`
+- [x] `plan_brand_day` extraída, sem persistir alocação; `persist_planned_allocations`
+      grava o que ela decidiu
+- [x] `_schedule_brand_for_day` passa a consumir o plano — **comportamento atual
+      inalterado**, provado por `test_agendamento_normal_continua_privado_e_no_horario_do_slot`
+- [x] Endpoint de prévia — `POST /factories/{id}/immediate-post-preview/`
+- [x] Endpoint de execução — `POST /factories/{id}/trigger-immediate-post/`:
+      `scheduled_at=now`, `privacy_status="public"`, slot vencido fora
+- [x] Dispara `process_brand_posting_queue_task` por brand, via `transaction.on_commit`
+- [x] Testes (10, em `apps/jobs/tests/test_immediate_post.py`): prévia bate com a execução;
+      prévia não cria post nem ocupa inventário; slot vencido não entra; dia já agendado não
+      republica; post nasce `public` e no presente; `FactoryPostingSchedule` guarda o slot
+      original; fila recebe a task certa
+- [x] `ruff check .` limpo · suíte 505 → **515**, sob `settings_test`
 - [ ] PR aberto · [ ] CI verde · [ ] Mergeado
+
+**Não coberto neste PR, e é honesto dizer:** a idempotência de clicar duas vezes está
+apoiada no claim `PENDING → POSTING` de `preflight.py:154`, que já existe e é atômico, mas
+**não escrevi teste para ela**. O caminho de dois cliques simultâneos passa por dois
+workers e não é reproduzível num `TestCase` sem montar concorrência de verdade.
 
 ### PR 3 · Frontend do "Postar Imediato"
 
@@ -212,3 +246,5 @@ Branch a criar · risco: baixo · pré-requisito: PR 2
 | Data | O que mudou | Surpresa |
 | --- | --- | --- |
 | 2026-08-15 | Levantamento do fluxo do botão atual, do beat e das duas plataformas | O botão nunca enviou nada — `enqueue_immediately` só deixa passar slot vencido. E o caminho que ele habilita sobe vídeo privado **para sempre**: sem `publishAt`, o `private` fixo do scheduler nunca é revertido por ninguém |
+| 2026-08-15 | **PR 1** — rename dos dois botões para "Criar Agendamento" | Nenhuma: o modal de data que eu ia "criar" no PR 3 **já existia** no botão antigo |
+| 2026-08-15 | **PR 2** — backend: `plan_brand_day` + `persist_planned_allocations`, dois endpoints, 10 testes | Duas. (1) O contador de "slots já agendados" olhava o lugar errado: quando o dia já foi agendado, o `DailyPostingPlanItem` está **CONSUMED** e sai do filtro *antes* de chegar na checagem de ocupação — a prévia diria "0 vídeos" sem saber dizer por quê. Passou a somar as duas formas. (2) O disparo por `transaction.on_commit` **não roda em `TestCase`**, que nunca commita: o primeiro teste da fila passou verde sem provar nada até entrar `captureOnCommitCallbacks` |

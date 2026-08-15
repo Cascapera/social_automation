@@ -46,6 +46,34 @@ class SlotPlan:
     plan_item: DailyPostingPlanItem | None = None
 
 
+@dataclass
+class PlannedAllocation:
+    """Um slot já casado com o vídeo que o ocuparia. Ainda não persistido.
+
+    É o que `plan_brand_day` devolve: a decisão de "qual vídeo vai em qual horário",
+    separada do ato de gravá-la. Quem grava é `persist_planned_allocations`; quem só quer
+    mostrar ao usuário o que aconteceria (prévia do Postar Imediato) lê e descarta.
+    """
+
+    brand: Brand
+    video_type: str  # SHORT | LONG
+    scheduled_at: datetime
+    item: VideoInventoryItem
+    plan_item: DailyPostingPlanItem | None = None
+
+
+@dataclass
+class BrandDayPlan:
+    """Resultado do planejamento de uma brand para um dia."""
+
+    status: str  # ok | skipped | disabled | error
+    allocations: list[PlannedAllocation]
+    slots_without_stock: int = 0
+    # Slots do dia que já tinham agenda criada. Contados para a prévia do Postar Imediato
+    # conseguir dizer "0 vídeos porque o dia já está agendado" em vez de só mostrar zero.
+    slots_already_scheduled: int = 0
+
+
 def _order_with_source_diversity(items: list[VideoInventoryItem]) -> list[VideoInventoryItem]:
     """
     Ordena por score asc e evita mais de 2 seguidos do mesmo source_asset_id.
@@ -94,9 +122,16 @@ def _available_inventory_items_for_slot(
     brand: Brand,
     video_type: str,
     exclude_item_ids: set[int] | None = None,
+    for_update: bool = True,
 ) -> list[VideoInventoryItem]:
+    """Itens do banco de vídeos elegíveis para um slot.
+
+    `for_update=False` existe para a prévia do Postar Imediato: `select_for_update()` exige
+    transação e trava as linhas, e uma prévia não pode fazer nem uma coisa nem outra.
+    """
+    base = VideoInventoryItem.objects.select_for_update() if for_update else VideoInventoryItem.objects
     qs = (
-        VideoInventoryItem.objects.select_for_update()
+        base
         .filter(factory=factory, brand=brand, status="AVAILABLE", video_type=video_type)
         .exclude(auto_cut_corte_id__isnull=True)
         .order_by("id")
@@ -149,6 +184,38 @@ def _extract_tags_from_inventory(item: VideoInventoryItem) -> list[str]:
     return cleaned
 
 
+def _immediate_post_fields(
+    *,
+    slot_at_utc: datetime,
+    publish_now: bool,
+) -> tuple[datetime, str]:
+    """Devolve `(scheduled_at, privacy_status)` do `ScheduledPost`.
+
+    No agendamento normal são o horário do slot e `private`: o vídeo sobe antes da hora,
+    fica privado, e o `publishAt` nativo do YouTube o abre no horário certo.
+
+    No **Postar Imediato** os dois mudam, e um depende do outro:
+
+    - `scheduled_at = agora` é o que faz o post ser publicado de fato agora. Os dois
+      publishers decidem por comparação com o relógio: `_get_publish_at` só manda
+      `publishAt` se o horário ainda está no futuro (`publishers/youtube.py:342`), e
+      `_format_scheduled_date` só manda `scheduled_date` se falta mais de 2 minutos
+      (`publishers/upload_post.py:60`). Com o horário no presente, os dois se calam e cada
+      provedor publica na hora.
+    - `privacy_status = public` **é obrigatório por consequência**. Sem `publishAt`, nada
+      no repositório volta para tornar o vídeo público — não existe nenhum
+      `videos().update()` de privacidade. Um post imediato nascendo `private` subiria um
+      vídeo invisível para sempre.
+
+    O horário original do slot **não** se perde: ele continua em
+    `FactoryPostingSchedule.scheduled_at`, que é de onde sai o deadline de
+    `_fail_expired_factory_slot`. Ver o bloco de armadilha no FEATURE_POSTAR_IMEDIATO.md.
+    """
+    if not publish_now:
+        return slot_at_utc, "private"
+    return timezone.now().astimezone(UTC), "public"
+
+
 def allocate_inventory_item_to_slot(
     *,
     factory: Factory,
@@ -160,7 +227,14 @@ def allocate_inventory_item_to_slot(
     plan_item: DailyPostingPlanItem | None = None,
     correlation_id: str = "",
     external_ids: dict | None = None,
+    publish_now: bool = False,
 ) -> tuple[ScheduledPost, FactoryPostingSchedule]:
+    """Cria o `ScheduledPost` do slot e o `FactoryPostingSchedule` que o espelha.
+
+    `publish_now=True` é o botão "Postar Imediato": o post nasce para ser publicado agora,
+    não no horário do slot. Ver o bloco em `_immediate_post_fields` para o porquê de cada
+    campo — as três diferenças são interdependentes e nenhuma delas é cosmética.
+    """
     platform = "YT" if video_type == "SHORT" else "YTB"
     account = _first_social_account_for_video_type(brand, video_type)
     slot_at_utc = scheduled_at.astimezone(UTC)
@@ -174,16 +248,23 @@ def allocate_inventory_item_to_slot(
     merged_external_ids = dict(external_ids or {})
     merged_external_ids["slot_jitter_seconds"] = jitter_seconds
     humanized_title = humanize_title(item.title or "")[:200]
+    post_scheduled_at, post_privacy = _immediate_post_fields(
+        slot_at_utc=slot_at_utc,
+        publish_now=publish_now,
+    )
+    if publish_now:
+        merged_external_ids["published_immediately"] = True
+        merged_external_ids["immediate_post_original_slot_at"] = slot_at_utc.isoformat()
     scheduled_post = ScheduledPost.objects.create(
         job=None,
         auto_cut_corte=item.auto_cut_corte,
         platforms=[platform],
         social_account=account,
-        scheduled_at=slot_at_utc,
+        scheduled_at=post_scheduled_at,
         title=humanized_title,
         description=item.description or "",
         tags=tags,
-        privacy_status="private",
+        privacy_status=post_privacy,
         status="PENDING",
         external_ids=merged_external_ids,
         correlation_id=correlation_id or "",
@@ -241,7 +322,15 @@ def allocate_inventory_item_to_slot(
     return scheduled_post, target_schedule
 
 
-def _schedule_brand_for_day(
+def factory_day_bounds(factory: Factory, local_day: date) -> tuple[ZoneInfo, datetime, datetime]:
+    """Fuso da factory e os limites UTC do dia local. Usado pelo agendamento e pela prévia."""
+    tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
+    day_start_local = datetime.combine(local_day, time(0, 0)).replace(tzinfo=tz)
+    day_end_local = (day_start_local + timedelta(days=1)) - timedelta(microseconds=1)
+    return tz, day_start_local.astimezone(UTC), day_end_local.astimezone(UTC)
+
+
+def plan_brand_day(
     *,
     factory: Factory,
     brand: Brand,
@@ -250,14 +339,24 @@ def _schedule_brand_for_day(
     now_local: datetime,
     day_start_utc: datetime,
     day_end_utc: datetime,
-    enqueue_immediately: bool,
-    correlation_id: str | None,
-    attempt: int,
-) -> tuple[str, int]:
+    include_past_slots: bool,
+    correlation_id: str | None = None,
+    attempt: int = 0,
+    for_update: bool = True,
+) -> BrandDayPlan:
     """
-    Processa uma brand para o dia informado.
-    Retorna (status, created_count):
-      status = "ok" | "skipped" | "disabled" | "error".
+    Decide o que seria agendado para uma brand num dia, **sem persistir alocação**.
+
+    É a metade "pensar" do antigo `_schedule_brand_for_day`; a metade "gravar" ficou em
+    `persist_planned_allocations`. A separação existe para a prévia do Postar Imediato
+    poder mostrar exatamente o que a execução faria, em vez de uma estimativa paralela que
+    diverge com o tempo.
+
+    ⚠ Não é livre de efeito: `DailyPostingPlanService.get_or_generate_for_day` **grava** o
+    plano diário se ele ainda não existir. É idempotente e é o mesmo plano que o
+    agendamento automático usaria depois.
+
+    `include_past_slots` é o antigo `enqueue_immediately`, com o nome do que ele faz.
     """
     if not getattr(brand, "scheduler_enabled", True) or getattr(brand, "scheduler_paused", False):
         log_event(
@@ -268,7 +367,7 @@ def _schedule_brand_for_day(
             factory_id=factory.id,
             reason="scheduler_disabled_or_paused",
         )
-        return "disabled", 0
+        return BrandDayPlan(status="disabled", allocations=[])
 
     day_plan = DailyPostingPlanService.get_or_generate_for_day(
         brand,
@@ -278,7 +377,7 @@ def _schedule_brand_for_day(
         attempt=attempt,
     )
     if day_plan.status == DailyPostingPlan.Status.SKIPPED:
-        return "skipped", 0
+        return BrandDayPlan(status="skipped", allocations=[])
     if day_plan.status == DailyPostingPlan.Status.ERROR:
         log_event(
             logger,
@@ -290,8 +389,9 @@ def _schedule_brand_for_day(
             last_error=(day_plan.last_error or "")[:200],
             attempt=attempt,
         )
-        return "error", 0
+        return BrandDayPlan(status="error", allocations=[])
 
+    enqueue_immediately = include_past_slots
     plans: list[SlotPlan] = []
     for dpi in day_plan.items.filter(status=DailyPostingPlanItem.Status.PLANNED).order_by("order_index", "id"):
         slot_local = dpi.scheduled_at.astimezone(tz)
@@ -316,6 +416,7 @@ def _schedule_brand_for_day(
             daily_plan_item__isnull=False,
         ).values_list("video_type", "scheduled_at")
     )
+    slots_before_occupied = len(plans)
     plans = [
         p
         for p in plans
@@ -325,37 +426,119 @@ def _schedule_brand_for_day(
         )
         not in occupied
     ]
+    # "Já agendado" tem duas formas, e a prévia precisa das duas para explicar um zero:
+    # o item do plano já virou agenda (vira CONSUMED em allocate_inventory_item_to_slot) ou
+    # o par (tipo, horário) já está ocupado por um schedule do dia.
+    slots_already_scheduled = (
+        day_plan.items.filter(status=DailyPostingPlanItem.Status.CONSUMED).count()
+        + (slots_before_occupied - len(plans))
+    )
 
     short_items = _available_inventory_items_for_slot(
         factory=factory,
         brand=brand,
         video_type="SHORT",
+        for_update=for_update,
     )
     long_items = _available_inventory_items_for_slot(
         factory=factory,
         brand=brand,
         video_type="LONG",
+        for_update=for_update,
     )
     short_queue = _order_with_source_diversity(short_items)
     long_queue = _order_with_source_diversity(long_items)
 
-    created_count = 0
+    allocations: list[PlannedAllocation] = []
+    slots_without_stock = 0
     for slot_plan in plans:
         queue = short_queue if slot_plan.video_type == "SHORT" else long_queue
         if not queue:
+            slots_without_stock += 1
             continue
         item = queue.pop(0)
-        allocate_inventory_item_to_slot(
-            factory=factory,
-            brand=brand,
-            item=item,
-            video_type=slot_plan.video_type,
-            scheduled_at=slot_plan.scheduled_at,
-            plan_item=slot_plan.plan_item,
+        allocations.append(
+            PlannedAllocation(
+                brand=brand,
+                video_type=slot_plan.video_type,
+                scheduled_at=slot_plan.scheduled_at,
+                item=item,
+                plan_item=slot_plan.plan_item,
+            )
         )
-        created_count += 1
 
-    return "ok", created_count
+    return BrandDayPlan(
+        status="ok",
+        allocations=allocations,
+        slots_without_stock=slots_without_stock,
+        slots_already_scheduled=slots_already_scheduled,
+    )
+
+
+def persist_planned_allocations(
+    *,
+    factory: Factory,
+    allocations: list[PlannedAllocation],
+    publish_now: bool = False,
+    correlation_id: str = "",
+) -> list[ScheduledPost]:
+    """Grava o que `plan_brand_day` decidiu. Devolve os posts criados."""
+    posts: list[ScheduledPost] = []
+    for allocation in allocations:
+        post, _schedule = allocate_inventory_item_to_slot(
+            factory=factory,
+            brand=allocation.brand,
+            item=allocation.item,
+            video_type=allocation.video_type,
+            scheduled_at=allocation.scheduled_at,
+            plan_item=allocation.plan_item,
+            publish_now=publish_now,
+            correlation_id=correlation_id,
+        )
+        posts.append(post)
+    return posts
+
+
+def _schedule_brand_for_day(
+    *,
+    factory: Factory,
+    brand: Brand,
+    local_day: date,
+    tz: ZoneInfo,
+    now_local: datetime,
+    day_start_utc: datetime,
+    day_end_utc: datetime,
+    enqueue_immediately: bool,
+    correlation_id: str | None,
+    attempt: int,
+) -> tuple[str, int]:
+    """
+    Processa uma brand para o dia informado: planeja e grava.
+    Retorna (status, created_count):
+      status = "ok" | "skipped" | "disabled" | "error".
+    """
+    plan = plan_brand_day(
+        factory=factory,
+        brand=brand,
+        local_day=local_day,
+        tz=tz,
+        now_local=now_local,
+        day_start_utc=day_start_utc,
+        day_end_utc=day_end_utc,
+        include_past_slots=enqueue_immediately,
+        correlation_id=correlation_id,
+        attempt=attempt,
+        for_update=True,
+    )
+    if plan.status != "ok":
+        return plan.status, 0
+    # correlation_id não é repassado de propósito: o caminho antigo nunca o passou, e este
+    # PR não muda comportamento do agendamento normal. Propagá-lo é melhoria à parte.
+    posts = persist_planned_allocations(
+        factory=factory,
+        allocations=plan.allocations,
+    )
+    return "ok", len(posts)
 
 
 @transaction.atomic
