@@ -11,10 +11,14 @@
 
 ## ⏸ PONTO DE RETOMADA
 
-**Estado: PR 1 mergeado (#64). PR 2 (backend) pronto, aguardando CI.**
+**Estado: PR 1 (#64) e PR 2 (#65) mergeados. PR 3 (frontend) aguardando CI.**
 
-Próximo passo concreto: PR 3 — o frontend. O backend já expõe os dois endpoints que ele
-consome, e o formato do JSON da prévia está na seção 3.
+Quando o PR 3 mergear, a feature está inteira em `develop` — **e nunca foi exercitada
+contra o YouTube nem o Upload-Post de verdade.** Todo o caminho de publicação está coberto
+por teste com a task mockada; ninguém publicou um vídeo por este botão ainda.
+
+Próximo passo concreto: subir e **testar com uma brand só, um vídeo só**, antes de deixar
+o botão à mão de qualquer um. Ver a seção 6.
 
 ---
 
@@ -223,13 +227,21 @@ workers e não é reproduzível num `TestCase` sem montar concorrência de verda
 
 Branch a criar · risco: baixo · pré-requisito: PR 2
 
-- [ ] Botão "Postar Imediato" ao lado de "Criar Agendamento", nos dois lugares
-- [ ] Modal de data reaproveitado, em modo "postar"
-- [ ] Prévia carregada ao escolher a data, com total por brand e aviso de brand sem estoque
-- [ ] Botão de confirmação mostra o número: "Postar N vídeos"
-- [ ] Estado de carregando e bloqueio de duplo clique
-- [ ] `npm test` + `npm run build` verdes
+- [x] Botão "Postar Imediato" ao lado de "Criar Agendamento", nos dois lugares (o da brand
+      só aparece quando há factory — os endpoints são da factory)
+- [x] Modal de data reaproveitado, com `scheduleModalMode` = `schedule` | `post`
+- [x] Prévia carregada ao abrir e a cada troca de data, com total por brand
+- [x] Botão de confirmação mostra o número: "Postar N vídeos", e fica desabilitado em zero
+- [x] Padrão de data no modo postar é **hoje** (no modo agendar continua amanhã)
+- [x] Aviso de que os vídeos saem em sequência e que não há desfazer
+- [x] Estado de carregando e bloqueio de duplo clique (`triggeringImmediate`)
+- [x] `npm test` 8 → **14** · `npm run build` verde
 - [ ] PR aberto · [ ] CI verde · [ ] Mergeado
+
+A lógica de rótulo saiu do JSX para `utils/immediatePostPreview.js` porque **"zero vídeo"
+tem três causas** — dia já agendado, banco vazio, nenhum horário elegível — e mostrar só
+"0" faria o botão parecer quebrado nas três. Em `utils/` ela é testável, que é o padrão que
+o repositório já usa para `factoryWeeklySchedule`.
 
 ### Fora do escopo desta feature (mas encontrado nela)
 
@@ -241,10 +253,34 @@ Branch a criar · risco: baixo · pré-requisito: PR 2
 
 ---
 
+## 6. Primeiro teste real (antes de liberar o botão)
+
+Nenhum teste automatizado deste projeto chega a falar com o YouTube ou com o Upload-Post —
+a task de publicação está mockada em todos eles. O que está provado é que os posts nascem
+com os campos certos e que a fila recebe a task certa. **Se algum campo estiver errado, o
+sintoma aparece só na primeira publicação real.**
+
+Roteiro sugerido para a primeira vez:
+
+1. Escolher **uma brand** com **um vídeo** no banco e um slot futuro hoje.
+2. Abrir o Postar Imediato pelo botão *da brand*, conferir que a prévia diz `1 vídeo`.
+3. Postar e acompanhar:
+   - o vídeo aparece no YouTube **público**, não privado — é o bug que a feature contorna;
+   - o post vai a `DONE` e não a `FAILED` com "Janela de postagem expirada" — se aparecer
+     essa mensagem, o `FactoryPostingSchedule.scheduled_at` foi gravado errado;
+   - no Upload-Post, o vídeo sai sem data agendada.
+4. Só depois usar com a factory inteira.
+
+Um sinal de alerta que vale olhar no dia seguinte: `publish_failures_total` subindo junto
+com o uso do botão.
+
+---
+
 ## 5. Registro de execução
 
 | Data | O que mudou | Surpresa |
 | --- | --- | --- |
 | 2026-08-15 | Levantamento do fluxo do botão atual, do beat e das duas plataformas | O botão nunca enviou nada — `enqueue_immediately` só deixa passar slot vencido. E o caminho que ele habilita sobe vídeo privado **para sempre**: sem `publishAt`, o `private` fixo do scheduler nunca é revertido por ninguém |
 | 2026-08-15 | **PR 1** — rename dos dois botões para "Criar Agendamento" | Nenhuma: o modal de data que eu ia "criar" no PR 3 **já existia** no botão antigo |
+| 2026-08-15 | **PR 3** — frontend: botão, modal em dois modos, prévia | O rótulo da prévia não cabia no JSX: "zero vídeo" tem **três** causas distintas, e sem separá-las o botão pareceria quebrado. Virou `utils/immediatePostPreview.js` com teste — frontend de 8 para 14 testes |
 | 2026-08-15 | **PR 2** — backend: `plan_brand_day` + `persist_planned_allocations`, dois endpoints, 10 testes | Duas. (1) O contador de "slots já agendados" olhava o lugar errado: quando o dia já foi agendado, o `DailyPostingPlanItem` está **CONSUMED** e sai do filtro *antes* de chegar na checagem de ocupação — a prévia diria "0 vídeos" sem saber dizer por quê. Passou a somar as duas formas. (2) O disparo por `transaction.on_commit` **não roda em `TestCase`**, que nunca commita: o primeiro teste da fila passou verde sem provar nada até entrar `captureOnCommitCallbacks` |

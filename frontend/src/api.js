@@ -281,6 +281,28 @@ export async function triggerImmediateSchedule(factoryId, targetDate = null, bra
   })
 }
 
+// Postar Imediato: prévia do que seria publicado agora. Não publica nada.
+export async function previewImmediatePost(factoryId, targetDate = null, brandId = null) {
+  const body = {}
+  if (targetDate) body.target_date = targetDate
+  if (brandId) body.brand_id = brandId
+  return apiRequest(`/factories/${factoryId}/immediate-post-preview/`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// Postar Imediato: publica agora. Sem desfazer.
+export async function triggerImmediatePost(factoryId, targetDate = null, brandId = null) {
+  const body = {}
+  if (targetDate) body.target_date = targetDate
+  if (brandId) body.brand_id = brandId
+  return apiRequest(`/factories/${factoryId}/trigger-immediate-post/`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export async function triggerBrandImmediateSchedule(brandId, targetDate = null) {
   const body = targetDate ? { target_date: targetDate } : {}
   return apiRequest(`/brands/${brandId}/trigger-immediate-schedule/`, {
