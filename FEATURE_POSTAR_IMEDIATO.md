@@ -11,12 +11,15 @@
 
 ## ⏸ PONTO DE RETOMADA
 
-**Estado: os três PRs mergeados (#64, #65, #66). A feature está inteira em `develop`.**
+**Estado: quatro PRs (#64, #65, #66 + a correção de 2026-08-17). A feature está inteira em
+`develop`.**
 
-**A feature nunca foi exercitada contra o YouTube nem o Upload-Post de verdade.** Todo o
-caminho de publicação está coberto por teste com a task mockada; ninguém publicou um vídeo
-por este botão ainda. E, como todo o resto de `develop`, ela também **não está em
-produção** — depende do mesmo deploy pendente do `refactor.md`.
+**⚠ 2026-08-17 — a regra principal foi invertida.** O botão foi usado pela primeira vez de
+verdade (sábado à noite, escolhendo domingo) e publicou todos os vídeos **na hora do
+clique**. Era o comportamento especificado — e era o errado. A regra agora é: **o upload é
+que é imediato; a publicação continua no horário do slot**, pelo `publishAt` nativo do
+YouTube e pelo `scheduled_date` do Upload-Post. O botão passou a se chamar **"Enviar
+Agora"**. Ver a seção 3 e o registro no fim.
 
 Próximo passo concreto: subir e **testar com uma brand só, um vídeo só**, antes de deixar
 o botão à mão de qualquer um. Ver a seção 6.
@@ -33,28 +36,26 @@ Dois botões na aba Agendamento, onde hoje existe um só:
    brand e casar com os vídeos disponíveis no banco, mas em vez de parar em `PENDING`, já
    envia para YouTube e Upload-Post seguindo as regras de publicação que já existem.
 
-### Decisões do usuário (2026-08-15)
+### Decisões do usuário
 
-| Pergunta | Resposta |
-| --- | --- |
-| O que acontece com o horário do slot? | **Publica tudo agora**, ignorando o horário do slot |
-| Slot cujo horário já passou? | **Não incluir** |
-| Modal mostra prévia antes de confirmar? | **Sim** |
+| Pergunta | Resposta (2026-08-15) | Corrigida em 2026-08-17 |
+| --- | --- | --- |
+| O que acontece com o horário do slot? | ~~Publica tudo agora, ignorando o horário do slot~~ | **O slot manda.** O que é imediato é o *envio*; a publicação fica agendada no provedor |
+| Slot cujo horário já passou? | **Não incluir** | inalterado (não dá para agendar no passado) |
+| Modal mostra prévia antes de confirmar? | **Sim** | inalterado |
 
-**Leitura combinada das duas primeiras** (é assim que está sendo construído): os slots
-continuam decidindo **quantos e quais** vídeos entram, e slot vencido fica de fora; os que
-entram são **publicados agora**, não no horário do slot.
+**Regra vigente:** os slots continuam decidindo **quantos e quais** vídeos entram, e slot
+vencido fica de fora; os que entram são **enviados agora** e vão ao ar **no horário do
+slot**.
 
-- Clicar às 14h de hoje escolhendo **amanhã** → os 3 slots de amanhã são futuros, os 3
-  vídeos são publicados **agora**.
-- Clicar às 14h de hoje escolhendo **hoje** → slots de 09h e 13h ficam de fora; só o de
-  18h é publicado, **agora**.
+- Clicar no sábado escolhendo **domingo** → os vídeos sobem no sábado, privados, com
+  `publishAt` nos horários de domingo; o YouTube os abre sozinho.
+- Clicar às 14h de hoje escolhendo **hoje** → slots de 09h e 13h ficam de fora; o de 18h
+  sobe agora e vai ao ar às 18h.
 
-> ⚠ **Consequência aceita pelo usuário, com o aviso na tela de escolha:** os vídeos de uma
-> mesma brand vão ao ar em sequência, no mesmo intervalo de poucos minutos. É exatamente o
-> que os slots existem para evitar. `UPLOAD_INTERVAL_SECONDS = 60` **não** protege aqui —
-> ele só espaça uma brand da outra, não os vídeos dentro da mesma brand
-> (`apps/social/tasks.py:309`, o loop é sequencial e sem espera).
+**Por que a primeira decisão não sobreviveu ao primeiro uso:** "postar imediato" foi lido
+como "publicar agora", quando o que se queria era "adiantar o envio". A diferença só
+aparece quando o dia escolhido não é hoje — e foi exatamente esse o primeiro clique real.
 
 ---
 
@@ -124,18 +125,29 @@ Imediato" inteiro, porque nele nunca há `publishAt`.
 
 ## 3. Desenho
 
-### Regras do caminho imediato
+### Regras do caminho imediato (vigentes desde 2026-08-17)
 
 1. **Slot vencido não entra** — mesma regra do `enqueue_immediately=False` de hoje.
-2. **`scheduled_at` nasce como `now`**, não como o horário do slot. É isso que faz
-   `_get_publish_at()` devolver `None` e `_format_scheduled_date()` devolver `None`, ou
-   seja: é o que faz "publicar agora" realmente acontecer. O horário original do slot fica
-   preservado em `FactoryPostingSchedule.scheduled_at`.
-3. **`privacy_status` nasce `public`** — sem isso, ver o bug acima.
-4. **Envio reusa `process_brand_posting_queue_task`**, a mesma task do beat. Nenhuma regra
+2. **`scheduled_at` é o horário do slot** e **`privacy_status` nasce `private`** — os
+   mesmos valores do agendamento normal. São eles que fazem `_get_publish_at()` devolver o
+   `publishAt` e `_format_scheduled_date()` devolver o `scheduled_date`. Gravar `now` aqui
+   é o que fazia os dois provedores publicarem no minuto do clique.
+3. **O post é marcado em `external_ids["immediate_prepublish"]`.** O marcador tira o vídeo
+   do sorteio de `LONG_DIRECT_PUBLIC_PROBABILITY` (`publishers/youtube.py:30`), que em 30%
+   dos longos descarta o `publishAt` e publica direto. No fluxo normal isso adianta o vídeo
+   em no máximo 1h; no envio antecipado adiantaria **dias**.
+4. **Se o `publishAt` não sair, o vídeo sobe `public`** (`_resolve_publish_at_and_privacy`).
+   Só acontece se o slot ficar a menos de 30s enquanto o post espera na fila. Privado ali
+   seria vídeo invisível para sempre — não existe `videos().update()` de privacidade no
+   repositório.
+5. **Envio reusa `process_brand_posting_queue_task`**, a mesma task do beat. Nenhuma regra
    de publicação nova, nenhuma cópia de `_run_post_to_platforms`.
-5. **Execução assíncrona.** Upload de vídeo não cabe num request HTTP; a API responde com a
+6. **Execução assíncrona.** Upload de vídeo não cabe num request HTTP; a API responde com a
    contagem enfileirada e a UI acompanha pelo status dos posts.
+
+O padrão não é novo no repositório: é o mesmo da publicação avulsa do Banco de Vídeos
+(`inventory_actions.retry_posting_item:176`) — "upa agora; o provedor faz o agendamento
+nativo no horário".
 
 ### Endpoints
 
@@ -144,7 +156,11 @@ Imediato" inteiro, porque nele nunca há `publishAt`.
 | `POST` | `/factories/{id}/immediate-post-preview/` | roda o planejamento e devolve o que **seria** postado, por brand. Não cria alocação |
 | `POST` | `/factories/{id}/trigger-immediate-post/` | cria os posts e dispara o envio |
 
-### ⚠ Armadilha: `FactoryPostingSchedule.scheduled_at` NÃO pode virar "agora"
+### ⚠ Armadilha (histórica): `FactoryPostingSchedule.scheduled_at` NÃO pode virar "agora"
+
+> Desde 2026-08-17 o post e o schedule guardam **o mesmo** horário — o do slot — então a
+> divergência descrita abaixo não existe mais. O bloco fica porque a armadilha continua
+> valendo para quem for mexer nesses campos: gravar "agora" no schedule mata o post.
 
 Antes de publicar, `preflight` chama `_fail_expired_factory_slot`
 (`publishing/preflight.py:132`), que marca o post como **FAILED — "Janela de postagem
@@ -157,14 +173,12 @@ Como os posts do caminho imediato vêm do plano diário, eles **têm** deadline.
 
 | Campo | Valor no caminho imediato | Por quê |
 | --- | --- | --- |
-| `ScheduledPost.scheduled_at` | **agora** | é o que faz o YouTube não usar `publishAt` e o Upload-Post não usar `scheduled_date` |
-| `FactoryPostingSchedule.scheduled_at` | **horário original do slot** | é o deadline; e slot vencido não entra, então está sempre no futuro |
+| `ScheduledPost.scheduled_at` | **horário do slot** | é o que faz o YouTube usar `publishAt` e o Upload-Post usar `scheduled_date` |
+| `FactoryPostingSchedule.scheduled_at` | **horário do slot** | é o deadline; e slot vencido não entra, então está sempre no futuro no momento do envio |
 
 > Se os dois virassem "agora", **todo post imediato morreria** em "Janela de postagem
 > expirada" — o deadline teria sido gravado alguns segundos antes de `now`. Esta é a
 > armadilha mais fácil de cair nesta feature.
-
-Efeito colateral bom: o horário planejado do slot fica preservado para auditoria.
 
 ### Refatoração necessária
 
@@ -244,6 +258,25 @@ tem três causas** — dia já agendado, banco vazio, nenhum horário elegível 
 "0" faria o botão parecer quebrado nas três. Em `utils/` ela é testável, que é o padrão que
 o repositório já usa para `factoryWeeklySchedule`.
 
+### PR 4 · Corrigir a regra: envio imediato, publicação no horário do slot
+
+Branch `fix/postar-imediato-respeita-slot` · risco: médio · 2026-08-17
+
+- [x] `_immediate_post_fields` removida: o post volta a nascer com o horário do slot e
+      `private`, iguais aos do agendamento normal
+- [x] `external_ids["immediate_prepublish"]` marca o envio antecipado
+      (substitui `published_immediately` / `immediate_post_original_slot_at`, que só
+      existiam para reconstruir o horário perdido)
+- [x] `_resolve_publish_mode` tira o post marcado do sorteio de `public` direto dos longos
+- [x] `_resolve_publish_at_and_privacy` extraída de `publish` — a decisão de privacidade
+      estava dentro de um método sem nenhum teste; agora é testável e `public` é o fallback
+      quando o `publishAt` não sai
+- [x] Botão renomeado para **"Enviar Agora"**; modal, aviso e rótulos falam de envio, não
+      de publicação; padrão de data do modo envio passou a ser **amanhã**
+- [x] Testes: 3 novos em `test_immediate_post.py` (regressão do horário e do marcador) e
+      8 em `test_youtube_publish_mode.py`; frontend continua com 14
+- [x] `ruff check .` limpo · `pytest -q` **525 passando**, cobertura 47.89% (mínimo 45%)
+
 ### Fora do escopo desta feature (mas encontrado nela)
 
 - [ ] O bug do vídeo privado eterno **também afeta o botão de agendamento** quando se
@@ -263,14 +296,16 @@ sintoma aparece só na primeira publicação real.**
 
 Roteiro sugerido para a primeira vez:
 
-1. Escolher **uma brand** com **um vídeo** no banco e um slot futuro hoje.
-2. Abrir o Postar Imediato pelo botão *da brand*, conferir que a prévia diz `1 vídeo`.
-3. Postar e acompanhar:
-   - o vídeo aparece no YouTube **público**, não privado — é o bug que a feature contorna;
+1. Escolher **uma brand** com **um vídeo** no banco e um slot futuro amanhã.
+2. Abrir o Enviar Agora pelo botão *da brand*, conferir que a prévia diz `1 vídeo`.
+3. Enviar e acompanhar:
+   - no YouTube Studio o vídeo aparece **como agendado** para o horário do slot, privado
+     até lá — se aparecer público na hora do envio, o `publishAt` não foi enviado;
    - o post vai a `DONE` e não a `FAILED` com "Janela de postagem expirada" — se aparecer
      essa mensagem, o `FactoryPostingSchedule.scheduled_at` foi gravado errado;
-   - no Upload-Post, o vídeo sai sem data agendada.
-4. Só depois usar com a factory inteira.
+   - no Upload-Post, o vídeo sai **com data agendada** no horário do slot.
+4. Confirmar no dia seguinte que o vídeo abriu sozinho no horário.
+5. Só depois usar com a factory inteira.
 
 Um sinal de alerta que vale olhar no dia seguinte: `publish_failures_total` subindo junto
 com o uso do botão.
@@ -284,4 +319,5 @@ com o uso do botão.
 | 2026-08-15 | Levantamento do fluxo do botão atual, do beat e das duas plataformas | O botão nunca enviou nada — `enqueue_immediately` só deixa passar slot vencido. E o caminho que ele habilita sobe vídeo privado **para sempre**: sem `publishAt`, o `private` fixo do scheduler nunca é revertido por ninguém |
 | 2026-08-15 | **PR 1** — rename dos dois botões para "Criar Agendamento" | Nenhuma: o modal de data que eu ia "criar" no PR 3 **já existia** no botão antigo |
 | 2026-08-15 | **PR 3** — frontend: botão, modal em dois modos, prévia | O rótulo da prévia não cabia no JSX: "zero vídeo" tem **três** causas distintas, e sem separá-las o botão pareceria quebrado. Virou `utils/immediatePostPreview.js` com teste — frontend de 8 para 14 testes |
+| 2026-08-17 | **PR 4** — a regra invertida: envio imediato, publicação no horário do slot | O primeiro uso real derrubou a especificação. E o mesmo sintoma tinha um segundo caminho, que quase passou batido: `LONG_DIRECT_PUBLIC_PROBABILITY` descarta o `publishAt` em 30% dos longos — corrigir só o `scheduled_at` teria deixado um a cada três vídeos longos indo ao ar na hora do upload. A checagem `isinstance(external_ids, dict)` também não é preciosismo: `post` é `MagicMock` em vários testes, e `mock.external_ids.get(...)` devolve um mock verdadeiro |
 | 2026-08-15 | **PR 2** — backend: `plan_brand_day` + `persist_planned_allocations`, dois endpoints, 10 testes | Duas. (1) O contador de "slots já agendados" olhava o lugar errado: quando o dia já foi agendado, o `DailyPostingPlanItem` está **CONSUMED** e sai do filtro *antes* de chegar na checagem de ocupação — a prévia diria "0 vídeos" sem saber dizer por quê. Passou a somar as duas formas. (2) O disparo por `transaction.on_commit` **não roda em `TestCase`**, que nunca commita: o primeiro teste da fila passou verde sem provar nada até entrar `captureOnCommitCallbacks` |

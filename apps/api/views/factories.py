@@ -145,10 +145,10 @@ class FactoryViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="immediate-post-preview")
     def immediate_post_preview(self, request, pk=None):
         """
-        O que o "Postar Imediato" publicaria para o dia informado, sem publicar nada.
+        O que o "Enviar Agora" enviaria para o dia informado, sem enviar nada.
 
         Roda o mesmo planejamento da execução, então o número que aparece na tela é o
-        número que vai ser postado — não uma estimativa paralela.
+        número que vai ser enviado — não uma estimativa paralela.
         Body: {"target_date": "YYYY-MM-DD", "brand_id": <opcional>}
         """
         from apps.jobs.services.immediate_post import preview_immediate_post
@@ -175,11 +175,11 @@ class FactoryViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="trigger-immediate-post")
     def trigger_immediate_post(self, request, pk=None):
         """
-        Publica **agora** os vídeos do dia informado, em vez de esperar o horário do slot.
+        Envia **agora** os vídeos do dia informado, agendados para o horário de cada slot.
 
         Os slots continuam decidindo quantos e quais vídeos entram, e slot cujo horário já
-        passou fica de fora; o que entra vai para o YouTube e o Upload-Post na hora, pelas
-        mesmas regras de publicação do agendamento.
+        passou fica de fora; o que entra sobe na hora para o YouTube e o Upload-Post, que
+        publicam no horário do slot (`publishAt` / `scheduled_date`).
         Body: {"target_date": "YYYY-MM-DD", "brand_id": <opcional>}
         """
         from apps.jobs.services.immediate_post import run_immediate_post

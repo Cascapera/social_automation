@@ -281,7 +281,7 @@ export async function triggerImmediateSchedule(factoryId, targetDate = null, bra
   })
 }
 
-// Postar Imediato: prévia do que seria publicado agora. Não publica nada.
+// Enviar Agora: prévia do que seria enviado. Não envia nada.
 export async function previewImmediatePost(factoryId, targetDate = null, brandId = null) {
   const body = {}
   if (targetDate) body.target_date = targetDate
@@ -292,7 +292,8 @@ export async function previewImmediatePost(factoryId, targetDate = null, brandId
   })
 }
 
-// Postar Imediato: publica agora. Sem desfazer.
+// Enviar Agora: sobe os vídeos agora, agendados no provedor para o horário do slot.
+// Sem desfazer.
 export async function triggerImmediatePost(factoryId, targetDate = null, brandId = null) {
   const body = {}
   if (targetDate) body.target_date = targetDate

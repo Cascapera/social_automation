@@ -191,7 +191,7 @@
   color: #3b82f6;
 }
 
-/* Postar Imediato publica na hora e não tem desfazer: cor de ação, não de rotina. */
+/* Enviar Agora sobe o vídeo na hora e não tem desfazer: cor de ação, não de rotina. */
 .factory-toggle-btn.post-now {
   border-color: rgba(239, 68, 68, 0.65);
   color: #ef4444;
