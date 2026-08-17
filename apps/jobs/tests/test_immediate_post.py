@@ -1,12 +1,13 @@
-"""Postar Imediato — o botão que publica agora em vez de esperar o horário do slot.
+"""Postar Imediato — o botão que envia agora e deixa o provedor publicar no horário do slot.
 
 Três coisas são testadas aqui porque as três são invisíveis no código e caras em produção:
 
 1. **A prévia e a execução usam o mesmo planejamento.** Se divergirem, o usuário confirma
    um número e outro acontece — e publicação não tem desfazer.
-2. **Os campos do post imediato.** `scheduled_at` no presente e `privacy_status=public` não
-   são detalhe: são o que faz o vídeo ser publicado *e ficar visível*. Sem `publishAt`,
-   nada no repositório volta para abrir um vídeo privado.
+2. **Os campos do post.** `scheduled_at` no horário do slot e `privacy_status=private` são
+   o que faz o YouTube receber `publishAt` e o Upload-Post receber `scheduled_date`. Com
+   "agora" no lugar deles, os dois provedores publicam no minuto do clique — foi o bug de
+   2026-08-17, e é o que o primeiro teste deste arquivo tranca.
 3. **Slot vencido não entra** — decisão do usuário, e a que separa este botão do
    `enqueue_immediately` do agendamento.
 
@@ -96,34 +97,69 @@ class ImmediatePostTestCase(TestCase):
 
 
 class ImmediatePostFieldsTests(ImmediatePostTestCase):
-    """Os campos que fazem o vídeo ser publicado agora — e ficar visível."""
+    """Os campos que fazem o vídeo subir agora e ir ao ar no horário do slot."""
 
-    def test_post_nasce_publico_e_com_horario_no_presente(self):
+    def test_post_nasce_privado_e_no_horario_do_slot(self):
+        """Regressão do bug de 2026-08-17: clicar no sábado escolhendo domingo publicava
+        tudo no sábado, porque o post nascia com `scheduled_at=agora` e `public`.
+
+        Com o horário do slot e `private`, `_get_publish_at` devolve o `publishAt` e o
+        YouTube guarda o vídeo até a hora certa; `_format_scheduled_date` faz o mesmo no
+        Upload-Post.
+        """
         day = timezone.now().astimezone(UTC).date() + timedelta(days=1)
         slot = datetime.combine(day, time(12, 0), tzinfo=UTC)
         self.build_plan_with_slots(day, [slot])
         self.build_item()
 
-        antes = timezone.now()
         with patch("apps.social.tasks.process_brand_posting_queue_task.delay"):
             result = run_immediate_post(self.factory, target_date=day)
-        depois = timezone.now()
 
         self.assertEqual(result["queued"], 1)
         post = ScheduledPost.objects.get()
 
-        # public: sem publishAt, nada no repositório volta para abrir o vídeo depois.
-        self.assertEqual(post.privacy_status, "public")
-        # presente: é o que cala o publishAt do YouTube e o scheduled_date do Upload-Post.
-        self.assertGreaterEqual(post.scheduled_at, antes)
-        self.assertLessEqual(post.scheduled_at, depois)
+        self.assertEqual(post.privacy_status, "private")
+        # No horário do slot (a menos do jitter), não no horário do clique.
+        self.assertGreater(post.scheduled_at, timezone.now() + timedelta(hours=1))
+        self.assertLess(abs(post.scheduled_at - slot), timedelta(minutes=10))
 
-    def test_schedule_guarda_o_horario_do_slot_e_nao_o_agora(self):
-        """Se o schedule virasse 'agora', todo post imediato morreria em slot expirado.
+    def test_post_fica_marcado_como_envio_antecipado(self):
+        """O marcador é o que impede o YouTube de sortear `public` direto para longos.
+
+        Sem ele, 30% dos vídeos longos (`LONG_DIRECT_PUBLIC_PROBABILITY`) descartariam o
+        `publishAt` e iriam ao ar na hora do upload — o bug de volta, em um a cada três.
+        """
+        day = timezone.now().astimezone(UTC).date() + timedelta(days=1)
+        slot = datetime.combine(day, time(12, 0), tzinfo=UTC)
+        self.build_plan_with_slots(day, [slot])
+        self.build_item()
+
+        with patch("apps.social.tasks.process_brand_posting_queue_task.delay"):
+            run_immediate_post(self.factory, target_date=day)
+
+        post = ScheduledPost.objects.get()
+        self.assertTrue(post.external_ids.get("immediate_prepublish"))
+
+    def test_agendamento_normal_nao_marca_envio_antecipado(self):
+        """O caminho do beat continua participando do sorteio de longos."""
+        from apps.jobs.services.factory_scheduler import generate_daily_schedule_for_factory
+
+        day = timezone.now().astimezone(UTC).date() + timedelta(days=1)
+        slot = datetime.combine(day, time(12, 0), tzinfo=UTC)
+        self.build_plan_with_slots(day, [slot])
+        self.build_item()
+
+        generate_daily_schedule_for_factory(self.factory, target_date=day, allow_rerun=True)
+
+        post = ScheduledPost.objects.get()
+        self.assertNotIn("immediate_prepublish", post.external_ids or {})
+
+    def test_schedule_e_post_apontam_para_o_mesmo_horario_de_slot(self):
+        """O deadline do slot e o horário de publicação são o mesmo instante.
 
         `_fail_expired_factory_slot` compara o relógio com `FactoryPostingSchedule.scheduled_at`
-        antes de publicar. Gravar 'agora' ali significaria um deadline já vencido no momento
-        em que a task rodasse.
+        antes de publicar. Como o upload acontece bem antes do slot, o deadline está sempre
+        no futuro no momento do envio.
         """
         day = timezone.now().astimezone(UTC).date() + timedelta(days=1)
         slot = datetime.combine(day, time(12, 0), tzinfo=UTC)
@@ -135,7 +171,7 @@ class ImmediatePostFieldsTests(ImmediatePostTestCase):
 
         schedule = FactoryPostingSchedule.objects.get()
         post = ScheduledPost.objects.get()
-        self.assertGreater(schedule.scheduled_at, post.scheduled_at)
+        self.assertEqual(schedule.scheduled_at, post.scheduled_at)
         # O deadline tem que estar no futuro, senão o post falha antes de sair.
         self.assertGreater(schedule.scheduled_at, timezone.now())
 

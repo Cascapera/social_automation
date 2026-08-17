@@ -36,15 +36,15 @@ test('brand indefinida não quebra a tela', () => {
   assert.equal(describeBrandPreview({}), 'nenhum horário disponível')
 })
 
-test('botão só oferece postar quando há o que postar', () => {
+test('botão só oferece enviar quando há o que enviar', () => {
   assert.equal(describePostButton(null), 'Calculando...')
   assert.equal(describePostButton({ total: 5 }, { loading: true }), 'Calculando...')
-  assert.equal(describePostButton({ total: 0 }), 'Nada para postar')
-  assert.equal(describePostButton({ total: 1 }), 'Postar 1 vídeo')
-  assert.equal(describePostButton({ total: 5 }), 'Postar 5 vídeos')
+  assert.equal(describePostButton({ total: 0 }), 'Nada para enviar')
+  assert.equal(describePostButton({ total: 1 }), 'Enviar 1 vídeo')
+  assert.equal(describePostButton({ total: 5 }), 'Enviar 5 vídeos')
 })
 
-test('publicando tem precedência sobre qualquer outro estado', () => {
-  assert.equal(describePostButton({ total: 5 }, { posting: true }), 'Publicando...')
-  assert.equal(describePostButton(null, { posting: true }), 'Publicando...')
+test('enviando tem precedência sobre qualquer outro estado', () => {
+  assert.equal(describePostButton({ total: 5 }, { posting: true }), 'Enviando...')
+  assert.equal(describePostButton(null, { posting: true }), 'Enviando...')
 })

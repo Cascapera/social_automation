@@ -1,18 +1,24 @@
-"""Postar Imediato: publica hoje o que o agendamento publicaria no horário do slot.
+"""Postar Imediato: envia agora os vídeos do dia escolhido, agendados no provedor.
 
-O botão "Criar Agendamento" monta a agenda do dia e deixa a publicação para o beat, que
-envia cada vídeo quando o slot chega. Este módulo é o outro botão: monta **a mesma** agenda
-e publica **agora**.
+O botão "Criar Agendamento" monta a agenda do dia e deixa o **envio** para o beat, que só
+sobe cada vídeo quando o slot chega (ou até 1h antes, pela janela do YouTube). Este módulo
+é o outro botão: monta **a mesma** agenda e faz o **upload agora**, deixando a publicação
+agendada no próprio provedor — `publishAt` nativo no YouTube, `scheduled_date` no
+Upload-Post.
 
-Duas regras vêm de decisão do usuário e não de conveniência técnica (2026-08-15):
+Duas regras:
 
 1. **Slot cujo horário já passou não entra.** O dia continua mandando em quantos e quais
-   vídeos saem; o que já venceu fica de fora.
-2. **O que entra é publicado agora**, não no horário do slot. Escolher amanhã às 14h de
-   hoje publica os vídeos de amanhã hoje.
+   vídeos saem; o que já venceu fica de fora — não há como agendar no passado.
+2. **O que entra vai ao ar no horário do slot**, não no horário do clique. Clicar no sábado
+   escolhendo domingo sobe os vídeos no sábado e o provedor os abre nos horários de domingo.
 
 Nada da regra de publicação é reimplementado aqui: o envio é feito por
 `process_brand_posting_queue_task`, a mesma task que o beat usa.
+
+⚠ Histórico: até 2026-08-17 este módulo gravava `scheduled_at=agora` e
+`privacy_status=public`, o que fazia os dois provedores publicarem no minuto do clique.
+Era o comportamento especificado, e era o errado. Ver o FEATURE_POSTAR_IMEDIATO.md.
 """
 
 from __future__ import annotations
@@ -144,7 +150,11 @@ def run_immediate_post(
     brand_id: int | None = None,
     correlation_id: str = "",
 ) -> dict:
-    """Cria os posts e dispara a publicação. Devolve o que foi enfileirado."""
+    """Cria os posts e dispara o envio agora. Devolve o que foi enfileirado.
+
+    O que é "imediato" aqui é o upload, não a publicação: cada post nasce com o horário do
+    seu slot e é o provedor que o abre na hora certa.
+    """
     from apps.social.tasks import process_brand_posting_queue_task
 
     posts_by_brand: dict[int, list[int]] = {}

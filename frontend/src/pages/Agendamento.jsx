@@ -165,8 +165,9 @@ export default function Agendamento() {
   const [scheduleDateModalOpen, setScheduleDateModalOpen] = useState(false)
   const [scheduleTargetDate, setScheduleTargetDate] = useState('')
   const [scheduleForBrandId, setScheduleForBrandId] = useState(null)
-  // 'schedule' = Criar Agendamento (publica no horário do slot).
-  // 'post'     = Postar Imediato (publica agora). Mesmo modal, ações diferentes.
+  // 'schedule' = Criar Agendamento (o beat envia perto da hora do slot).
+  // 'post'     = Enviar Agora (upload imediato, publicação no horário do slot).
+  // Mesmo modal, ações diferentes.
   const [scheduleModalMode, setScheduleModalMode] = useState('schedule')
   const [immediatePreview, setImmediatePreview] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -413,17 +414,17 @@ export default function Agendamento() {
     setError('')
   }
 
-  // Postar Imediato abre o mesmo modal, em outro modo. O padrão de data é HOJE, não
-  // amanhã: quem quer publicar agora quase sempre quer o dia corrente.
+  // Enviar Agora abre o mesmo modal, em outro modo. O padrão de data é AMANHÃ, igual ao
+  // agendamento: adiantar o envio serve justamente para deixar o dia seguinte pronto.
   function handleOpenImmediatePostModal(forBrandId = null) {
-    const hoje = getTodayDateStr()
+    const alvo = getTomorrowDateStr()
     setScheduleForBrandId(forBrandId)
-    setScheduleTargetDate(hoje)
+    setScheduleTargetDate(alvo)
     setScheduleModalMode('post')
     setImmediatePreview(null)
     setScheduleDateModalOpen(true)
     setError('')
-    loadImmediatePreview(hoje, forBrandId || brandId)
+    loadImmediatePreview(alvo, forBrandId || brandId)
   }
 
   function handleScheduleTargetDateChange(novaData) {
@@ -595,9 +596,9 @@ export default function Agendamento() {
                 className="factory-toggle-btn post-now"
                 onClick={() => handleOpenImmediatePostModal(brandId)}
                 disabled={triggeringImmediate}
-                title="Publica agora os vídeos desta marca no dia selecionado, sem esperar o horário do slot."
+                title="Sobe agora os vídeos desta marca para o dia selecionado. O YouTube publica cada um no horário do seu slot."
               >
-                Postar Imediato
+                Enviar Agora
               </button>
             )}
           </div>
@@ -652,9 +653,9 @@ export default function Agendamento() {
               className="factory-toggle-btn post-now"
               onClick={() => handleOpenImmediatePostModal()}
               disabled={triggeringImmediate}
-              title="Publica agora os vídeos do dia selecionado, sem esperar o horário de cada slot."
+              title="Sobe agora os vídeos do dia selecionado. O YouTube publica cada um no horário do seu slot — útil para adiantar o fim de semana."
             >
-              Postar Imediato
+              Enviar Agora
             </button>
           </div>
         </section>
@@ -970,14 +971,15 @@ export default function Agendamento() {
           <div className="modal">
             <h3>
               {scheduleModalMode === 'post'
-                ? 'Postar imediato — qual dia?'
+                ? 'Enviar agora — vídeos de qual dia?'
                 : 'Criar agendamento para qual dia?'}
             </h3>
             <p className="form-hint">
               {scheduleModalMode === 'post' ? (
                 <>
-                  Os vídeos do dia selecionado são publicados <strong>agora</strong>, sem esperar o
-                  horário de cada slot. Horários que já passaram ficam de fora.
+                  Os vídeos do dia selecionado são enviados ao YouTube <strong>agora</strong>, já
+                  agendados para o <strong>horário de cada slot</strong>. Horários que já passaram
+                  ficam de fora.
                 </>
               ) : (
                 <>
@@ -998,7 +1000,7 @@ export default function Agendamento() {
             </div>
             {scheduleModalMode === 'post' && (
               <div className="immediate-preview">
-                {loadingPreview && <p className="form-hint">Calculando o que seria postado...</p>}
+                {loadingPreview && <p className="form-hint">Calculando o que seria enviado...</p>}
                 {!loadingPreview && immediatePreview && (
                   <>
                     {immediatePreview.brands.map((b) => (
@@ -1009,8 +1011,8 @@ export default function Agendamento() {
                     ))}
                     {immediatePreview.total > 0 && (
                       <p className="form-hint immediate-preview-warning">
-                        Os vídeos de uma mesma marca vão ao ar em sequência, um atrás do outro.
-                        Publicação não tem desfazer.
+                        O upload começa agora e leva alguns minutos por vídeo. Cada um vai ao ar no
+                        horário do seu slot, não neste momento. O envio não tem desfazer.
                       </p>
                     )}
                   </>

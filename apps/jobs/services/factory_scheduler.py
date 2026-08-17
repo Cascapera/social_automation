@@ -184,38 +184,6 @@ def _extract_tags_from_inventory(item: VideoInventoryItem) -> list[str]:
     return cleaned
 
 
-def _immediate_post_fields(
-    *,
-    slot_at_utc: datetime,
-    publish_now: bool,
-) -> tuple[datetime, str]:
-    """Devolve `(scheduled_at, privacy_status)` do `ScheduledPost`.
-
-    No agendamento normal são o horário do slot e `private`: o vídeo sobe antes da hora,
-    fica privado, e o `publishAt` nativo do YouTube o abre no horário certo.
-
-    No **Postar Imediato** os dois mudam, e um depende do outro:
-
-    - `scheduled_at = agora` é o que faz o post ser publicado de fato agora. Os dois
-      publishers decidem por comparação com o relógio: `_get_publish_at` só manda
-      `publishAt` se o horário ainda está no futuro (`publishers/youtube.py:342`), e
-      `_format_scheduled_date` só manda `scheduled_date` se falta mais de 2 minutos
-      (`publishers/upload_post.py:60`). Com o horário no presente, os dois se calam e cada
-      provedor publica na hora.
-    - `privacy_status = public` **é obrigatório por consequência**. Sem `publishAt`, nada
-      no repositório volta para tornar o vídeo público — não existe nenhum
-      `videos().update()` de privacidade. Um post imediato nascendo `private` subiria um
-      vídeo invisível para sempre.
-
-    O horário original do slot **não** se perde: ele continua em
-    `FactoryPostingSchedule.scheduled_at`, que é de onde sai o deadline de
-    `_fail_expired_factory_slot`. Ver o bloco de armadilha no FEATURE_POSTAR_IMEDIATO.md.
-    """
-    if not publish_now:
-        return slot_at_utc, "private"
-    return timezone.now().astimezone(UTC), "public"
-
-
 def allocate_inventory_item_to_slot(
     *,
     factory: Factory,
@@ -231,9 +199,22 @@ def allocate_inventory_item_to_slot(
 ) -> tuple[ScheduledPost, FactoryPostingSchedule]:
     """Cria o `ScheduledPost` do slot e o `FactoryPostingSchedule` que o espelha.
 
-    `publish_now=True` é o botão "Postar Imediato": o post nasce para ser publicado agora,
-    não no horário do slot. Ver o bloco em `_immediate_post_fields` para o porquê de cada
-    campo — as três diferenças são interdependentes e nenhuma delas é cosmética.
+    `publish_now=True` é o botão "Postar Imediato". Ele **não** muda o horário nem a
+    privacidade do post: muda só *quando o upload acontece*. O vídeo é enviado ao provedor
+    agora e o provedor o publica no horário do slot — YouTube por `publishAt` nativo,
+    Upload-Post por `scheduled_date`. É o mesmo padrão da publicação avulsa do Banco de
+    Vídeos (`inventory_actions.retry_posting_item`).
+
+    Por isso `scheduled_at` é sempre o horário do slot e `privacy_status` é sempre
+    `private`: são exatamente esses dois valores que fazem `_get_publish_at`
+    (`publishers/youtube.py:342`) mandar o `publishAt` e `_format_scheduled_date`
+    (`publishers/upload_post.py:60`) mandar o `scheduled_date`. Gravar "agora" aqui faria
+    os dois provedores publicarem no minuto do clique — foi o bug de 2026-08-17.
+
+    O que `publish_now` faz é marcar o post em `external_ids["immediate_prepublish"]`, e
+    esse marcador tem uma consequência no publisher do YouTube: envio antecipado não
+    participa do sorteio de `LONG_DIRECT_PUBLIC_PROBABILITY`, que descartaria o `publishAt`
+    e colocaria o vídeo no ar na hora do upload.
     """
     platform = "YT" if video_type == "SHORT" else "YTB"
     account = _first_social_account_for_video_type(brand, video_type)
@@ -248,23 +229,18 @@ def allocate_inventory_item_to_slot(
     merged_external_ids = dict(external_ids or {})
     merged_external_ids["slot_jitter_seconds"] = jitter_seconds
     humanized_title = humanize_title(item.title or "")[:200]
-    post_scheduled_at, post_privacy = _immediate_post_fields(
-        slot_at_utc=slot_at_utc,
-        publish_now=publish_now,
-    )
     if publish_now:
-        merged_external_ids["published_immediately"] = True
-        merged_external_ids["immediate_post_original_slot_at"] = slot_at_utc.isoformat()
+        merged_external_ids["immediate_prepublish"] = True
     scheduled_post = ScheduledPost.objects.create(
         job=None,
         auto_cut_corte=item.auto_cut_corte,
         platforms=[platform],
         social_account=account,
-        scheduled_at=post_scheduled_at,
+        scheduled_at=slot_at_utc,
         title=humanized_title,
         description=item.description or "",
         tags=tags,
-        privacy_status=post_privacy,
+        privacy_status="private",
         status="PENDING",
         external_ids=merged_external_ids,
         correlation_id=correlation_id or "",
