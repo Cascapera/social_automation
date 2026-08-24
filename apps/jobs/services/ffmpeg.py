@@ -174,6 +174,12 @@ def overlay_animation(
     }
     overlay_pos = pos_map.get(position, pos_map["bottom_right"])
 
+    # `-map` explícito e `-shortest` NÃO são detalhe de estilo: sem eles, asset animado
+    # (gif/webm/mov/mp4, que entram com `-stream_loop -1`) faz o ffmpeg codificar para
+    # sempre. Medido: 1h38 de vídeo gerado em 25s de relógio, sem nunca fechar o arquivo —
+    # o corte fica com `moov atom not found` e o worker não devolve a fila.
+    # `-map 0:a?` também garante que o áudio saia do vídeo base: sem ele, a seleção
+    # automática pode escolher a trilha do próprio asset de overlay.
     cmd = [
         settings.FFMPEG_BIN, "-y",
         *resilient_decode_options(),
@@ -182,7 +188,10 @@ def overlay_animation(
         *anim_input,
         "-filter_complex",
         f"[1:v]scale=-1:{height},format=rgba[anim];"
-        f"[0:v][anim]overlay={overlay_pos}:format=auto",
+        f"[0:v][anim]overlay={overlay_pos}:format=auto[outv]",
+        "-map", "[outv]",
+        "-map", "0:a?",
+        "-shortest",
         *video_encode_args(use_gpu),
         *audio_encode_args(input_path),
         *common_mp4_flags(),
