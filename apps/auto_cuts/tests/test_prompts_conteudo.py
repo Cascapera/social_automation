@@ -122,3 +122,48 @@ class EscalaDaNotaTests(SimpleTestCase):
         em `analysis_flow._process_ready_cuts_flow`. Mudar a escala aqui sem mexer lá
         multiplicaria a nota por 10 de novo."""
         self.assertIn("1-10", prompts.READY_CUT_SYSTEM_PROMPT_BASE)
+
+
+class CalibracaoDaNotaTests(SimpleTestCase):
+    """PR 4 · RN-08: a nota precisa significar algo em termos absolutos.
+
+    Sem âncora, `virality_score` é ordenação relativa e nada mais — e o prompt ainda manda
+    "retorne EXATAMENTE N itens", o que empurra o modelo a inflar para preencher a cota. O
+    filtro do PR 6 depende de 70 querer dizer a mesma coisa em vídeo bom e em vídeo ruim.
+    """
+
+    FAIXAS = ("85–100", "70–84", "50–69", "0–49")
+
+    def test_todo_system_prompt_pt_traz_a_calibracao_no_idioma_certo(self):
+        for nome in SYSTEM_PROMPTS_PT:
+            with self.subTest(prompt=nome):
+                texto = getattr(prompts, nome)
+                self.assertIn(prompts.SCORE_CALIBRATION_RULES_PT, texto)
+                self.assertNotIn(prompts.SCORE_CALIBRATION_RULES_EN, texto)
+
+    def test_todo_system_prompt_en_traz_a_calibracao_no_idioma_certo(self):
+        for nome in SYSTEM_PROMPTS_EN:
+            with self.subTest(prompt=nome):
+                texto = getattr(prompts, nome)
+                self.assertIn(prompts.SCORE_CALIBRATION_RULES_EN, texto)
+                self.assertNotIn(prompts.SCORE_CALIBRATION_RULES_PT, texto)
+
+    def test_as_quatro_faixas_estao_declaradas_nos_dois_idiomas(self):
+        for bloco in (prompts.SCORE_CALIBRATION_RULES_PT, prompts.SCORE_CALIBRATION_RULES_EN):
+            for faixa in self.FAIXAS:
+                with self.subTest(faixa=faixa):
+                    self.assertIn(faixa, bloco)
+
+    def test_a_regra_autoriza_explicitamente_nota_abaixo_de_50(self):
+        """A parte que muda o resultado: sem permissão, o modelo trata nota baixa como erro."""
+        self.assertIn("abaixo de 50", prompts.SCORE_CALIBRATION_RULES_PT)
+        self.assertIn("below 50", prompts.SCORE_CALIBRATION_RULES_EN)
+
+    def test_a_regra_proibe_inflar_nota_para_preencher_a_cota(self):
+        self.assertIn("preencher a quantidade pedida", prompts.SCORE_CALIBRATION_RULES_PT)
+        self.assertIn("fill the requested count", prompts.SCORE_CALIBRATION_RULES_EN)
+
+    def test_a_calibracao_cobre_o_criterio_educacional(self):
+        """As faixas falam de prender atenção; no educacional o critério é ensinar."""
+        self.assertIn("ensina", prompts.SCORE_CALIBRATION_RULES_PT)
+        self.assertIn("teaches", prompts.SCORE_CALIBRATION_RULES_EN)
