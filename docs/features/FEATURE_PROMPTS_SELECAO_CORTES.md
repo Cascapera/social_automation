@@ -1,7 +1,7 @@
 # Feature — Seleção de cortes: duração longa, sinais do autor e nota honesta
 
 ```
-Status: em implementação · Progresso: 4/9 PRs (PR 0 a 3 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
+Status: em implementação · Progresso: 5/9 PRs (PR 0 a 4 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
 ```
 
 ## 1. Resumo
@@ -469,7 +469,7 @@ medição em produção (R-4), não teste.
 ## 14. Checklist de acompanhamento
 
 ```
-Status: em implementação · Progresso: 4/9 PRs · 6/14 itens · atualizado em 2026-08-24
+Status: em implementação · Progresso: 5/9 PRs · 7/14 itens · atualizado em 2026-08-24
 ```
 
 ### PR 0 — Caracterizar `_create_suggestions`
@@ -546,15 +546,15 @@ Status: em implementação · Progresso: 4/9 PRs · 6/14 itens · atualizado em 
 
 ### PR 4 — Calibração honesta da nota
 
-- [ ] **F-06** · Blocos de faixa de nota e concatenação nos 7 prompts
-      risco: baixo · 3h · produção: distribuição de notas muda · ~140 linhas / 3 arquivos
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado · hashes atualizados
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-07
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-06** · Blocos de faixa de nota e concatenação nos 7 prompts
+      risco: baixo · 3h · produção: distribuição de notas muda · ~290 tokens por requisição
+  - [x] Testes escritos primeiro (falharam antes)
+  - [x] Implementado · 9 hashes (7 system prompts, 2 constantes novas)
+  - [x] Cobertura: mudança de texto de prompt, sem código de produção novo
+  - [x] `ruff check` · `manage.py check` · suíte verde (584 passed)
+  - [x] Critérios cobertos: CA-07
+  - [x] PR aberto e revisado — #73 · Mergeado — `c334c84` · Verificado após deploy: pendente
+  - Status: concluído · Notas: nenhum template mudou — calibração é regra de papel do modelo, não de formato. Até o PR 6 o efeito é nota média mais baixa sem ganho visível; isso é esperado, não regressão.
 
 ### PR 5 — Margem de candidatos e ordem dos filtros
 
@@ -671,6 +671,7 @@ documentação.
 
 | Data | PR | O que mudou | Surpresas |
 | --- | --- | --- | --- |
+| 2026-08-24 | PR 4 (#73) | Calibração da nota com 4 faixas nos 7 prompts | A instrução de cota ("retorne EXATAMENTE N itens") e a nota honesta se contradizem por natureza. A contrapartida virou linha explícita no prompt, em vez de esperar que o modelo resolvesse sozinho. |
 | 2026-08-24 | PR 3 (#72, `016c00f`) | Escala 0–100 nos dois prompts educacionais | Nenhuma. O registro da convivência de escalas no doc de estratégia ficou pendente e foi anexado ao F-11, para não abrir um PR de documentação sozinho. |
 | 2026-08-24 | PR 2 (#71, `7024b19`) | Bloco de sinais do autor nos 7 prompts; campo `author_cue`; `test_prompts_conteudo.py` | O congelamento de hash não pega prompt que **nasce** sem uma regra — só pega prompt que muda. Faltava a outra metade, e ela virou arquivo próprio. |
 | 2026-08-24 | PR 1 (#70, `77733a4`) | Cortes longos 8–40 min em todos os modos; `duration_minutes` sempre do timecode; 10 hashes de prompt | O mínimo de 8 min, ao deixar de ser exclusivo dos modos virais, passou a **descartar** long educacional abaixo de 8 min — que antes era aceito. Está previsto em RN-01, mas não estava escrito na descrição do PR 1 no plano. |
