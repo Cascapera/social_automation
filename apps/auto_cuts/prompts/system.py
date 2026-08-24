@@ -19,6 +19,8 @@ from apps.auto_cuts.prompts.vocabulary import (
     AUTHOR_CUE_RULES_PT,
     METADATA_SAFETY_RULES_EN,
     METADATA_SAFETY_RULES_PT,
+    SCORE_CALIBRATION_RULES_EN,
+    SCORE_CALIBRATION_RULES_PT,
 )
 
 SYSTEM_PROMPT = """Você é um editor especialista em viralizar podcasts e entrevistas longas.
@@ -65,7 +67,7 @@ IMPORTANTE:
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
-""" + AUTHOR_CUE_RULES_PT + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
+""" + AUTHOR_CUE_RULES_PT + SCORE_CALIBRATION_RULES_PT + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
@@ -114,7 +116,7 @@ IMPORTANTE:
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
-""" + AUTHOR_CUE_RULES_PT + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
+""" + AUTHOR_CUE_RULES_PT + SCORE_CALIBRATION_RULES_PT + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro. Nunca use inglês ou outro idioma."""
 
@@ -154,7 +156,7 @@ IMPORTANTE: Use APENAS timestamps que aparecem na transcrição. Não invente ou
 
 IMPORTANTE: Você deve categorizar obrigatoriamente todos os shorts e cortes longos usando SOMENTE um dos valores listados no bloco "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB" do contexto. Nunca deixe em branco nem invente outros nomes/códigos.
 
-""" + AUTHOR_CUE_RULES_PT + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
+""" + AUTHOR_CUE_RULES_PT + SCORE_CALIBRATION_RULES_PT + ANTI_AUTOMATION_RULES_PT + METADATA_SAFETY_RULES_PT + """
 
 IDIOMA OBRIGATÓRIO: Todo o texto de saída (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) deve ser SEMPRE em português brasileiro."""
 
@@ -203,7 +205,7 @@ IMPORTANT:
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
-""" + AUTHOR_CUE_RULES_EN + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
+""" + AUTHOR_CUE_RULES_EN + SCORE_CALIBRATION_RULES_EN + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
 LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
@@ -252,7 +254,7 @@ IMPORTANT:
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
-""" + AUTHOR_CUE_RULES_EN + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
+""" + AUTHOR_CUE_RULES_EN + SCORE_CALIBRATION_RULES_EN + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
 LANGUAGE REQUIRED: All output text (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, title_suggestion, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 
@@ -304,7 +306,7 @@ IMPORTANT: Use ONLY timestamps that appear in the transcription. Do not invent o
 
 IMPORTANT: You must categorize all shorts and long cuts using ONLY one of the values listed in the "ALLOWED THEME CATEGORIES FOR THIS JOB" block of the context. Never leave blank or invent other names/codes.
 
-""" + AUTHOR_CUE_RULES_EN + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
+""" + AUTHOR_CUE_RULES_EN + SCORE_CALIBRATION_RULES_EN + ANTI_AUTOMATION_RULES_EN + METADATA_SAFETY_RULES_EN + """
 
 LANGUAGE REQUIRED: All output text (title, title_suggestion, thumbnail_text, hook, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) must ALWAYS be in English. Never use Portuguese or other languages."""
 

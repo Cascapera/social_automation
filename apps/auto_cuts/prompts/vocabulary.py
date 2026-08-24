@@ -169,3 +169,39 @@ Rules:
 - author_cue: when a marker exists, copy the phrase as it appears in the transcript, max 120 characters. When there is none, return "".
 
 """
+
+
+# Calibração da nota. O prompt sempre mandou pontuar, nunca disse o que cada faixa
+# significa — e ainda manda "retorne EXATAMENTE N itens", o que empurra o modelo a inflar
+# para preencher a cota. Sem âncora e com cota, a nota vira ordenação relativa e nada mais.
+# O filtro do PR 6 precisa que ela signifique algo em termos absolutos: 70 tem que querer
+# dizer a mesma coisa em vídeo bom e em vídeo ruim.
+SCORE_CALIBRATION_RULES_PT = """CALIBRAÇÃO DA NOTA (crítico):
+virality_score não é nota de esforço nem de simpatia pelo trecho. O backend usa essa nota para descartar corte fraco — nota inflada não faz o corte ser publicado, faz um corte pior tomar o lugar de um melhor.
+
+Faixas:
+- 85–100: excepcional. Para o scroll sozinho, funciona sem nenhum contexto do episódio, e você apostaria nele.
+- 70–84: bom. Se sustenta sozinho e entrega o que o título promete.
+- 50–69: mediano. Só vale publicar se não houver coisa melhor no vídeo.
+- 0–49: fraco. Depende de contexto externo, é técnico demais, a explicação se arrasta, não tem gancho, ou o assunto não interessa fora do episódio.
+
+É esperado e desejável que parte dos candidatos fique abaixo de 50: vídeo fraco gera candidato fraco, e dizer isso na nota é mais útil do que esconder. Nunca aumente a nota de um trecho fraco para preencher a quantidade pedida — devolva o candidato com a nota que ele merece e deixe o backend decidir.
+
+Em conteúdo educacional, leia as mesmas faixas trocando "prende" por "ensina": 85–100 é a explicação completa e clara que a pessoa salva para rever; 0–49 é o trecho que só faz sentido para quem assistiu a aula inteira.
+
+"""
+
+SCORE_CALIBRATION_RULES_EN = """SCORE CALIBRATION (critical):
+virality_score is not a score for effort, nor for how much you like the passage. The backend uses it to discard weak clips — an inflated score does not get the clip published, it gets a worse clip published in place of a better one.
+
+Bands:
+- 85–100: exceptional. Stops the scroll on its own, works with no context from the episode, and you would bet on it.
+- 70–84: good. Stands on its own and delivers what the title promises.
+- 50–69: average. Only worth publishing if there is nothing better in the video.
+- 0–49: weak. Depends on outside context, too technical, the explanation drags, no hook, or the subject does not travel outside the episode.
+
+It is expected and desirable that some candidates land below 50: a weak video produces weak candidates, and saying so in the score is more useful than hiding it. Never raise the score of a weak passage to fill the requested count — return the candidate with the score it deserves and let the backend decide.
+
+For educational content, read the same bands replacing "grabs" with "teaches": 85–100 is the complete, clear explanation someone saves to watch again; 0–49 is the passage that only makes sense to whoever watched the whole lecture.
+
+"""
