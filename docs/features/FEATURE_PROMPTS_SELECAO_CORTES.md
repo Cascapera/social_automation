@@ -1,7 +1,7 @@
 # Feature — Seleção de cortes: duração longa, sinais do autor e nota honesta
 
 ```
-Status: em implementação · Progresso: 0/9 PRs (F-00 em revisão) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
+Status: em implementação · Progresso: 1/9 PRs (PR 0 mergeado) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
 ```
 
 ## 1. Resumo
@@ -469,7 +469,7 @@ medição em produção (R-4), não teste.
 ## 14. Checklist de acompanhamento
 
 ```
-Status: em implementação · Progresso: 0/9 PRs · 1/14 itens · atualizado em 2026-08-24
+Status: em implementação · Progresso: 1/9 PRs · 1/14 itens · atualizado em 2026-08-24
 ```
 
 ### PR 0 — Caracterizar `_create_suggestions`
@@ -484,10 +484,10 @@ Status: em implementação · Progresso: 0/9 PRs · 1/14 itens · atualizado em 
   - [x] `manage.py check --fail-level WARNING` limpo (com `settings_test`; o settings padrão exige psycopg, ausente no venv local — no CI roda com o padrão)
   - [x] Suíte completa verde — 564 passed, cobertura global 49,24% (catraca 45,0)
   - [x] Critérios cobertos: nenhum (é rede de segurança, não regra nova)
-  - [ ] PR aberto e revisado
-  - [ ] Mergeado — `<hash>`
-  - [ ] Verificado após deploy
-  - Status: em revisão · Notas: `analysis_flow.py` saiu de 14% para 37% de cobertura. Três testes marcados com ⚠ existem para mudar nos PRs 1, 5 e 7 — a mudança de asserção é a prova de que a regra mudou de propósito.
+  - [x] PR aberto e revisado — #69
+  - [x] Mergeado — `bfd34fc` (merge `eb325b2`)
+  - [x] Verificado após deploy — PR só de teste, sem efeito em produção
+  - Status: concluído · Notas: `analysis_flow.py` saiu de 14% para 37% de cobertura. Três testes marcados com ⚠ existem para mudar nos PRs 1, 5 e 7 — a mudança de asserção é a prova de que a regra mudou de propósito.
 
 ### PR 1 — Cortes longos de 8 a 40 minutos
 
@@ -671,7 +671,7 @@ documentação.
 
 | Data | PR | O que mudou | Surpresas |
 | --- | --- | --- | --- |
-| 2026-08-24 | PR 0 | 39 testes de caracterização de `_create_suggestions`; cobertura do arquivo de 14% para 37% | Os testes passaram todos na primeira execução — nenhuma previsão minha sobre o comportamento atual estava errada. Como isso também é o sintoma de teste que não afirma nada, validei a rede por mutação de três constantes. Uma descoberta ficou registrada em teste: em contexto de factory, com alvo 2 e os dois primeiros colocados sem brand mapeada, o job entrega **zero** short mesmo tendo três candidatos válidos na fila. |
+| 2026-08-24 | PR 0 (#69, `eb325b2`) | 39 testes de caracterização de `_create_suggestions`; cobertura do arquivo de 14% para 37% | Os testes passaram todos na primeira execução — nenhuma previsão minha sobre o comportamento atual estava errada. Como isso também é o sintoma de teste que não afirma nada, validei a rede por mutação de três constantes. Uma descoberta ficou registrada em teste: em contexto de factory, com alvo 2 e os dois primeiros colocados sem brand mapeada, o job entrega **zero** short mesmo tendo três candidatos válidos na fila. |
 
 ## 15. Rollout e rollback
 
