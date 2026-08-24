@@ -167,3 +167,37 @@ class CalibracaoDaNotaTests(SimpleTestCase):
         """As faixas falam de prender atenção; no educacional o critério é ensinar."""
         self.assertIn("ensina", prompts.SCORE_CALIBRATION_RULES_PT)
         self.assertIn("teaches", prompts.SCORE_CALIBRATION_RULES_EN)
+
+
+class FaixaDeDuracaoEducacionalTests(SimpleTestCase):
+    """PR 7 · RN-17: o educacional pede 120-150s, não mais 120-180s.
+
+    Mudar só o clamp do backend deixaria o modelo propondo 175s e o backend truncando no
+    meio da frase. O corte tem de nascer fechando na faixa.
+    """
+
+    EDUCACIONAIS = (
+        "SYSTEM_PROMPT_EDUCATIONAL",
+        "SYSTEM_PROMPT_EDUCATIONAL_EN",
+        "CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL",
+        "CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN",
+    )
+
+    def test_nenhum_prompt_educacional_menciona_a_faixa_antiga(self):
+        for nome in self.EDUCACIONAIS:
+            with self.subTest(prompt=nome):
+                texto = getattr(prompts, nome)
+                self.assertNotIn("120–180", texto)
+                self.assertNotIn("2–3 min", texto)
+                self.assertNotIn("2 a 3 minutos", texto)
+
+    def test_os_system_prompts_educacionais_declaram_o_teto_de_150(self):
+        for nome in ("SYSTEM_PROMPT_EDUCATIONAL", "SYSTEM_PROMPT_EDUCATIONAL_EN"):
+            with self.subTest(prompt=nome):
+                self.assertIn("120–150", getattr(prompts, nome))
+
+    def test_nenhum_exemplo_de_duracao_encosta_no_teto(self):
+        """Exemplo colado no limite ensina o modelo a colar no limite."""
+        for nome in ("CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL", "CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN"):
+            with self.subTest(prompt=nome):
+                self.assertNotIn('"duration": 150', getattr(prompts, nome))

@@ -264,7 +264,7 @@ CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL = """{context_block}Transcrição do vídeo d
 
 Tarefas (responda em UMA ÚNICA resposta JSON):
 
-1. RANKED_SHORTS: Identifique 10–15 trechos curtos EDUCACIONAIS (2–3 min cada, 120–180 seg). Priorize blocos que explicam um conceito completo. Ranqueie por valor didático. IMPORTANTE: Cada corte deve ter início, meio e fim. Nunca corte no meio de uma explicação.
+1. RANKED_SHORTS: Identifique 10–15 trechos curtos EDUCACIONAIS (2–2,5 min cada, 120–150 seg). Priorize blocos que explicam um conceito completo. Ranqueie por valor didático. IMPORTANTE: Cada corte deve ter início, meio e fim. Nunca corte no meio de uma explicação.
 
 2. FINAL_LONG_CUTS: Monte 1–3 cortes longos (20–40 min) combinando blocos narrativos com fluxo natural. Sugira título informativo para cada um.
 
@@ -287,7 +287,7 @@ Responda SOMENTE com JSON válido:
       "rank": 1,
       "start": "MM:SS",
       "end": "MM:SS",
-      "duration": 150,
+      "duration": 140,
       "hook": "frase inicial",
       "title": "Título informativo 📚",
       "reason": "valor didático",
@@ -324,7 +324,7 @@ Responda SOMENTE com JSON válido:
   ]
 }}
 
-Máximo: 10–15 cortes curtos (2–3 min), 3 cortes longos."""
+Máximo: 10–15 cortes curtos (2–2,5 min), 3 cortes longos."""
 
 CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
 
@@ -708,7 +708,7 @@ CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Video transcription di
 
 Tasks (respond in ONE JSON response):
 
-1. RANKED_SHORTS: Identify 10–15 EDUCATIONAL short clips (2–3 min each, 120–180 sec). Prioritize blocks that explain a complete concept. Rank by didactic value. IMPORTANT: Each cut must have beginning, middle and end. Never cut in the middle of an explanation.
+1. RANKED_SHORTS: Identify 10–15 EDUCATIONAL short clips (2–2.5 min each, 120–150 sec). Prioritize blocks that explain a complete concept. Rank by didactic value. IMPORTANT: Each cut must have beginning, middle and end. Never cut in the middle of an explanation.
 
 2. FINAL_LONG_CUTS: Assemble 1–3 long cuts (20–40 min) combining narrative blocks with natural flow. Suggest informative title for each.
 
@@ -732,7 +732,7 @@ Respond ONLY with valid JSON:
       "rank": 1,
       "start": "MM:SS",
       "end": "MM:SS",
-      "duration": 150,
+      "duration": 140,
       "hook": "opening phrase",
       "title": "Informative title 📚",
       "reason": "didactic value",
@@ -769,4 +769,4 @@ Respond ONLY with valid JSON:
   ]
 }}
 
-Max: 10–15 short cuts (2–3 min), 3 long cuts."""
+Max: 10–15 short cuts (2–2.5 min), 3 long cuts."""
