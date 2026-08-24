@@ -9,7 +9,7 @@ chamador levanta `KeyError` só em runtime. Os hashes de `test_grok_prompts_inte
 valem aqui também.
 """
 
-CHUNKS_PROMPT_TEMPLATE = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
+CHUNKS_PROMPT_TEMPLATE = """{context_block}Transcrição completa do vídeo (com timestamps):
 
 {chunks_block}
 
@@ -131,7 +131,7 @@ Regras finais:
 - ranked_shorts pode vir vazio ([]).
 - Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) em português brasileiro."""
 
-CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
+CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG = """{context_block}Transcrição completa do vídeo (com timestamps):
 
 {chunks_block}
 
@@ -256,7 +256,7 @@ Regras finais:
 - ranked_shorts pode vir vazio ([]).
 - Todo texto (suggested_title, thumbnail_text, hook_sentence, main_topic, reason, suggested_description, suggested_first_comment, tags, chapters, etc.) em português brasileiro."""
 
-CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL = """{context_block}Transcrição do vídeo dividida em blocos (com timestamps):
+CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL = """{context_block}Transcrição completa do vídeo (com timestamps):
 
 {chunks_block}
 
@@ -326,7 +326,7 @@ Responda SOMENTE com JSON válido:
 
 Máximo: 10–15 cortes curtos (2–2,5 min), 3 cortes longos."""
 
-CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
+CHUNKS_PROMPT_TEMPLATE_VIRAL_EN = """{context_block}Full video transcription (with timestamps):
 
 {chunks_block}
 
@@ -448,7 +448,7 @@ Final constraints:
 - final_long_cuts must contain exactly 10 items.
 - ranked_shorts may be empty ([])."""
 
-CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG_EN = """{context_block}Video transcription divided into blocks (with timestamps):
+CHUNKS_PROMPT_TEMPLATE_VIRAL_LONG_EN = """{context_block}Full video transcription (with timestamps):
 
 {chunks_block}
 
@@ -573,7 +573,7 @@ Final constraints:
 - final_long_cuts must contain exactly 10 items.
 - ranked_shorts may be empty ([])."""
 
-CHUNKS_PROMPT_TEMPLATE_VIRAL_TRANSLATE = """{context_block}Video transcription divided into blocks (with timestamps):
+CHUNKS_PROMPT_TEMPLATE_VIRAL_TRANSLATE = """{context_block}Full video transcription (with timestamps):
 
 {chunks_block}
 
@@ -700,7 +700,7 @@ Final constraints:
 - ranked_shorts may be empty ([]).
 - EVERY clip MUST have subtitle_segments_pt with the Portuguese translation of transcript segments in that time range."""
 
-CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Video transcription divided into blocks (with timestamps):
+CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN = """{context_block}Full video transcription (with timestamps):
 
 {chunks_block}
 

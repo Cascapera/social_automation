@@ -201,3 +201,27 @@ class FaixaDeDuracaoEducacionalTests(SimpleTestCase):
         for nome in ("CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL", "CHUNKS_PROMPT_TEMPLATE_EDUCATIONAL_EN"):
             with self.subTest(prompt=nome):
                 self.assertNotIn('"duration": 150', getattr(prompts, nome))
+
+
+class BlocoDeTranscricaoTests(SimpleTestCase):
+    """PR 9: o prompt anuncia transcrição completa, não dividida em blocos.
+
+    Se o texto continuasse dizendo "dividida em blocos" enquanto o backend manda um bloco
+    só, o modelo receberia uma descrição que não corresponde ao que está lendo.
+    """
+
+    def test_nenhum_template_anuncia_divisao_em_blocos(self):
+        for nome in TEMPLATES:
+            with self.subTest(template=nome):
+                texto = getattr(prompts, nome)
+                self.assertNotIn("dividida em blocos", texto)
+                self.assertNotIn("divided into blocks", texto)
+
+    def test_todo_template_anuncia_a_transcricao_com_timestamps(self):
+        for nome in TEMPLATES:
+            with self.subTest(template=nome):
+                texto = getattr(prompts, nome)
+                self.assertTrue(
+                    "com timestamps" in texto or "with timestamps" in texto,
+                    f"{nome} não diz ao modelo que a transcrição tem timestamps",
+                )

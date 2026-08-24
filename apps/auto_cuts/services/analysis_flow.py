@@ -61,10 +61,7 @@ from apps.auto_cuts.services.grok import (
     analyze_ready_cuts_batch_titles_from_transcripts,
 )
 from apps.auto_cuts.services.thumbnail import generate_auto_thumbnail
-from apps.auto_cuts.services.transcript import (
-    chunk_transcript,
-    segments_to_transcript_with_timestamps,
-)
+from apps.auto_cuts.services.transcript import segments_to_transcript_with_timestamps
 from apps.auto_cuts.services.video_chunks import (
     cleanup_cortes_processo,
     extract_chunks_to_folder,
@@ -568,17 +565,37 @@ def _analyze_and_cut(analysis, analysis_id: int, *, task_id: str) -> None:
             _process_ready_cuts_flow(analysis, duration_sec, segments)
             return
 
-        logger.info("[FLUXO] Starting chunk_transcript (%d segments)...", len(segments))
-        chunks = chunk_transcript(segments, chunk_minutes=18, overlap_minutes=3)
-        logger.info("[FLUXO] chunk_transcript done: %d blocks.", len(chunks) if chunks else 0)
-        if not chunks:
+        # Bloco único: a transcrição inteira numa mensagem só.
+        #
+        # Até aqui isto passava por `chunk_transcript(chunk_minutes=18, overlap_minutes=3)`,
+        # que é resto do desenho original — uma requisição por bloco mais um prompt de
+        # agregação, como o AUTO_CUTS_STRATEGY ainda descreve. Virou requisição única e o
+        # overlap ficou: 3 min repetidos em cada fronteira, dentro da MESMA mensagem.
+        #
+        # Medido numa transcrição real de 3h (3.794 segmentos): 222.711 chars com overlap
+        # contra 188.704 em bloco único — 15% de input pago para mandar o mesmo trecho
+        # duas vezes, com os mesmos timestamps e sem nenhuma deduplicação no backend.
+        #
+        # Sem marcador de bloco também some o artefato de fronteira: com blocos contíguos,
+        # um momento que atravessa 18:00 fica partido entre dois rótulos e o modelo pode
+        # evitar propor um corte que os cruze.
+        transcript_text = segments_to_transcript_with_timestamps(segments)
+        logger.info("[FLUXO] Transcript block ready: %d chars, %d segments.",
+                    len(transcript_text), len(segments))
+        if not transcript_text.strip():
             analysis.status = "error"
-            analysis.error = "Não foi possível dividir a transcrição em blocos."
+            analysis.error = "Transcrição vazia: nada para analisar."
             analysis.save(update_fields=["status", "error"])
             return
+        chunks = [{
+            "text": transcript_text,
+            "start_sec": segments[0].get("start", 0),
+            "end_sec": segments[-1].get("end", 0),
+            "segments": segments,
+        }]
 
         analysis.status = "analyzing"
-        analysis.progress_message = f"Analisando {len(chunks)} blocos com IA (1 requisição)..."
+        analysis.progress_message = "Analisando a transcrição com IA (1 requisição)..."
         analysis.progress = 20
         analysis.save(update_fields=["transcript_segments", "transcript", "status", "progress_message", "progress"])
 
