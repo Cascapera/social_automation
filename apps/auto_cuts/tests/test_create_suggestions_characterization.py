@@ -7,17 +7,17 @@ as fronteiras da task (desistência silenciosa, `status="error"`, reagendamento,
 e diz isso no próprio docstring.
 
 Este arquivo trava o comportamento **atual**, antes de qualquer mudança do projeto. Ele não
-afirma que o comportamento de hoje é o desejado — afirma que é este. Algumas asserções aqui
-existem para mudar, e a mudança é a prova de que a regra mudou de propósito:
+afirma que o comportamento de hoje é o desejado — afirma que é este. Quando uma regra muda
+de propósito, a asserção correspondente muda junto, e é essa mudança que aparece na revisão.
 
-  · `test_short_educacional_acima_do_teto_e_truncado_em_180s` → 150s no PR 7
-
-Já cumpridas:
+Mudanças já registradas por aqui:
 
   · teto do long 15 min → 40 min · `duration_minutes` do LLM → calculado dos timestamps ·
     mínimo de 8 min passando a valer também no educacional (PR 1, #70)
   · corte na quantidade passou a acontecer depois dos filtros: o job entregava zero short
     tendo três candidatos válidos na fila (PR 5)
+  · teto do short educacional 180s → 150s, e teto duro de 170s valendo para todo modo,
+    incluindo `prompt_version` desconhecido (PR 7)
 
 É o mesmo mecanismo do hash de prompt em `test_grok_prompts_integridade.py`, aplicado a
 comportamento em vez de texto: quem mudar tem que passar por aqui e dizer por quê.
@@ -192,14 +192,27 @@ class DuracaoDeShortViralLongTests(CriarSugestoesMixin, TestCase):
 class DuracaoDeShortEducacionalTests(CriarSugestoesMixin, TestCase):
     """Modo educacional: só teto, sem mínimo."""
 
-    def test_short_educacional_acima_do_teto_e_truncado_em_180s(self):
-        """⚠ Muda no PR 7: o teto do educacional cai para 150s."""
+    def test_short_educacional_acima_do_teto_e_truncado_em_150s(self):
+        """O teto era 180s, exatamente o limite do Shorts do YouTube.
+
+        Um corte de 180,0s vira 180,0x depois do re-encode a 30fps e sai da classificação
+        de Short — observado em produção. 150s dão 30s de folga.
+        """
         analysis = self.criar(
             pv="educational", ranked_shorts=[short_educacional("10:00", "13:20")]
         )
 
         (sug,) = self.shorts(analysis)
-        self.assertEqual(sug.duration_seconds, 180)
+        self.assertEqual(sug.duration_seconds, 150)
+
+    def test_short_educacional_de_170s_tambem_e_truncado(self):
+        """Entre o teto antigo e o novo: antes passava inteiro, agora não."""
+        analysis = self.criar(
+            pv="educational", ranked_shorts=[short_educacional("10:00", "12:50")]
+        )
+
+        (sug,) = self.shorts(analysis)
+        self.assertEqual(sug.duration_seconds, 150)
 
     def test_short_educacional_curto_passa_intacto(self):
         """Não há mínimo no modo educacional: 40s passa, onde o viral descartaria."""
@@ -211,21 +224,40 @@ class DuracaoDeShortEducacionalTests(CriarSugestoesMixin, TestCase):
         self.assertEqual(sug.duration_seconds, 40)
 
 
-class DuracaoDeShortSemModoConhecidoTests(CriarSugestoesMixin, TestCase):
-    """O buraco que o PR 7 fecha.
+class TetoDuroDeShortTests(CriarSugestoesMixin, TestCase):
+    """A rede para o que não tem faixa própria.
 
-    O clamp de duração está dentro de `if is_viral_prompt / elif is_educational_prompt`.
-    Um `prompt_version` fora dessas duas listas — um modo novo cujo autor esqueceu de
-    incluir na tupla — cai no `else` implícito e é gravado com a duração crua do LLM, sem
-    teto, sem mínimo e sem erro nenhum.
+    O clamp por modo mora dentro de `if is_viral_prompt / elif is_educational_prompt`. Um
+    `prompt_version` fora dessas duas listas — um modo novo cujo autor esqueceu de incluir
+    na tupla — caía no `else` implícito e era gravado com a duração crua do LLM: sem teto,
+    sem mínimo e sem erro nenhum. O teto duro é aplicado depois dos ramos, sobre todo short.
     """
 
-    def test_prompt_version_desconhecido_nao_aplica_teto_nenhum(self):
+    def test_prompt_version_desconhecido_bate_no_teto_duro(self):
         analysis = self.criar(pv="modo_que_nao_existe", candidate_shorts=[short_viral("10:00", "16:40")])
 
         (sug,) = self.shorts(analysis)
-        self.assertEqual(sug.duration_seconds, None)
-        self.assertEqual(tc_to_seconds(sug.end_tc) - tc_to_seconds(sug.start_tc), 400)
+        self.assertEqual(sug.duration_seconds, 170)
+        self.assertEqual(tc_to_seconds(sug.end_tc) - tc_to_seconds(sug.start_tc), 170)
+
+    def test_nenhum_modo_configurado_produz_short_acima_do_teto_duro(self):
+        """Percorre `prompt_version.choices` — modo novo nasce coberto por este teste."""
+        modos = [codigo for codigo, _ in AutoCutAnalysis._meta.get_field("prompt_version").choices]
+        self.assertEqual(len(modos), 7, modos)
+
+        for pv in modos + ["modo_que_nao_existe", ""]:
+            with self.subTest(prompt_version=pv):
+                analysis = self.build_analysis()
+                self.criar(
+                    analysis=analysis,
+                    pv=pv,
+                    candidate_shorts=[short_viral("10:00", "20:00")],
+                    ranked_shorts=[short_educacional("10:00", "20:00")],
+                )
+                for sug in self.shorts(analysis):
+                    duracao = tc_to_seconds(sug.end_tc) - tc_to_seconds(sug.start_tc)
+                    self.assertLessEqual(duracao, 170, f"{pv}: {duracao}s")
+                    self.assertLess(duracao, 180, f"{pv}: encostou no limite do Shorts")
 
 
 class DuracaoDeCorteLongoTests(CriarSugestoesMixin, TestCase):

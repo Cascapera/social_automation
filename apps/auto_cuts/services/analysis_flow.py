@@ -108,7 +108,16 @@ VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT = 95  # keep even below min duration if sco
 # ramo sem limite, e não vale repetir o padrão aqui.
 LONG_CUT_MIN_SEC = 8 * 60
 LONG_CUT_MAX_SEC = 40 * 60
-EDUCATIONAL_SHORT_MAX_SEC = 180
+# 150 e nao 180: o Shorts do YouTube classifica ate 3 min (180s), e um corte de 180,0s
+# vira 180,0x depois do re-encode a 30fps — observado em producao saindo da
+# classificacao e sendo tratado como video longo. 30s de folga resolvem.
+EDUCATIONAL_SHORT_MAX_SEC = 150
+# Teto duro, aplicado a TODO short depois dos ramos por modo. As faixas acima sao a
+# regra do dia a dia; esta e a rede para o que nao tem faixa propria — `prompt_version`
+# desconhecido, ou modo novo cujo autor esqueceu de incluir nas tuplas de decisao.
+# 170 fica acima da maior faixa em uso (viral_long, 160s) e abaixo do limite da
+# plataforma, entao nao altera nenhum modo existente.
+SHORT_MAX_SEC_HARD = 170
 THEME_CATEGORY_NORMALIZATION = {
     "business_money": "BUSINESS_MONEY",
     "business": "BUSINESS_MONEY",
@@ -1015,6 +1024,19 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
                 end_tc = seconds_to_tc(end_sec)
                 raw_duration = EDUCATIONAL_SHORT_MAX_SEC
             duration_seconds = raw_duration
+
+        if end_sec - start_sec > SHORT_MAX_SEC_HARD:
+            logger.info(
+                "[FLUXO] short truncado no teto duro de %ss (modo=%s): %.2fs (%s -> %s)",
+                SHORT_MAX_SEC_HARD,
+                pv,
+                end_sec - start_sec,
+                start_tc,
+                end_tc,
+            )
+            end_sec = start_sec + SHORT_MAX_SEC_HARD
+            end_tc = seconds_to_tc(end_sec)
+            duration_seconds = float(SHORT_MAX_SEC_HARD)
 
         rank += 1
         brand_for_theme = getattr(analysis, "target_brand", None) or getattr(analysis, "brand", None)

@@ -22,10 +22,19 @@ System to analyze podcast/video transcriptions via Grok API (xAI) and suggest vi
 |------|-------------|------------------|
 | `viral`, `viral_en`, `viral_translate` | 30–60s | below 30s discarded · above 60s truncated |
 | `viral_long`, `viral_long_en` | 90–160s | below 80s discarded unless score > 95 (never below 30s) · above 160s truncated |
-| `educational`, `educational_en` | 120–180s | above 180s truncated · no minimum |
+| `educational`, `educational_en` | 120–150s | above 150s truncated · no minimum |
+
+Plus a **hard ceiling of 170s (`SHORT_MAX_SEC_HARD`) applied to every short after the
+per-mode branches**, whatever the `prompt_version`. The per-mode bands above are the day to
+day rule; the hard ceiling is the net for what has no band of its own — an unknown
+`prompt_version`, or a new mode whose author forgot to add it to the decision tuples. It
+sits above the widest band in use (viral_long, 160s), so it changes no existing mode.
 
 - **Target:** high-impact moments (humor, shock, quotable, controversy, emotion)
-- **Platform ceiling:** YouTube classifies a video as a Short up to 3 minutes (180s).
+- **Platform ceiling:** YouTube classifies a video as a Short up to 3 minutes (180s). The
+  educational band was 120–180s until 2026-08-24: a 180.0s cut becomes 180.0x after the
+  30fps re-encode and drops out of the Short classification, which was observed in
+  production. Every band now keeps at least 10s of headroom.
 
 ### Long cuts (YouTube)
 
