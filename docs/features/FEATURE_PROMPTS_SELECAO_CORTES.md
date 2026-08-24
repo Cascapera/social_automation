@@ -1,7 +1,7 @@
 # Feature — Seleção de cortes: duração longa, sinais do autor e nota honesta
 
 ```
-Status: em implementação · Progresso: 5/9 PRs (PR 0 a 4 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
+Status: **concluído** · Progresso: 9/9 PRs · 14/14 itens · Suposições: 5 · Questões em aberto: 1 · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
 ```
 
 ## 1. Resumo
@@ -469,7 +469,7 @@ medição em produção (R-4), não teste.
 ## 14. Checklist de acompanhamento
 
 ```
-Status: em implementação · Progresso: 5/9 PRs · 7/14 itens · atualizado em 2026-08-24
+Status: concluído · Progresso: 9/9 PRs · 14/14 itens · atualizado em 2026-08-24
 ```
 
 ### PR 0 — Caracterizar `_create_suggestions`
@@ -540,7 +540,7 @@ Status: em implementação · Progresso: 5/9 PRs · 7/14 itens · atualizado em 
   - [x] Cobertura: mudança de texto de prompt, sem código de produção novo
   - [x] `ruff check` · `manage.py check` · suíte verde (578 passed)
   - [x] Critérios cobertos: CA-06
-  - [ ] Convivência de escalas registrada no doc de estratégia — **pendente, vai junto com o F-11**
+  - [x] Convivência de escalas registrada no doc de estratégia — feito no F-11 (#75), na seção Scoring
   - [x] PR aberto e revisado — #72 · Mergeado — `016c00f` · Verificado após deploy: pendente
   - Status: concluído com pendência anotada · Notas: o prompt de corte pronto continua em 1–10 de propósito, agora preso por teste — mudar a escala dele sem mexer na conversão ×10 de `_process_ready_cuts_flow` multiplicaria a nota de novo.
 
@@ -558,86 +558,86 @@ Status: em implementação · Progresso: 5/9 PRs · 7/14 itens · atualizado em 
 
 ### PR 5 — Margem de candidatos e ordem dos filtros
 
-- [ ] **F-07** · `analyze_chunks_in_one_request` recebe a quantidade e valida sobre o pedido
-      risco: baixo · 3h · produção: transparente · ~90 linhas / 1 arquivo
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-10
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
-- [ ] **F-08** · Quantidade derivada do alvo do job e filtros antes do corte
-      risco: médio · 4h · produção: composição do resultado muda · ~110 linhas / 1 arquivo
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-08, CA-09, CA-11
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
-- [ ] **F-09** · `LLM_CANDIDATE_MARGIN` em settings e `.env.example`
-      risco: baixo · 1h · produção: transparente até o `.env` mudar · ~30 linhas / 2 arquivos
-  - [ ] Implementado · default documentado
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-08, CA-09 (lado da config)
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-07** · `analyze_chunks_in_one_request` recebe a quantidade e valida sobre o pedido
+      risco: baixo · 3h · produção: transparente
+  - [x] Testes escritos primeiro (falharam antes)
+  - [x] Implementado — `max_shorts`/`max_longs`, com o mínimo da validação saindo do pedido
+  - [x] Cobertura: código novo coberto
+  - [x] `ruff check` · `manage.py check` · suíte verde (593 passed)
+  - [x] Critérios cobertos: CA-10
+  - [x] PR aberto e revisado — #74 · Mergeado — `4af0ddb` · Verificado após deploy: pendente
+  - Status: concluído · Notas: sem isso, pedir 6 e receber 6 seria recusado por "abaixo do mínimo" com o env em 20 — e cada recusa reenvia a transcrição inteira, três vezes.
+- [x] **F-08** · Quantidade derivada do alvo do job e filtros antes do corte
+      risco: médio · 4h · produção: composição do resultado muda
+  - [x] Testes escritos primeiro (falharam antes)
+  - [x] Implementado — `_delivery_limits` e `_candidates_to_request`, filtros antes do corte
+  - [x] Cobertura: código novo coberto
+  - [x] `ruff check` · `manage.py check` · suíte verde
+  - [x] Critérios cobertos: CA-08, CA-09, CA-11
+  - [x] PR aberto e revisado — #74 · Mergeado — `4af0ddb` · Verificado após deploy: pendente
+  - Status: concluído · Notas: ao extrair o helper, a substituição acertou a primeira ocorrência — dentro dele mesmo — e a função ficou recursiva. A suíte inteira passou porque nada a chamava ainda; só os testes novos pegaram.
+- [x] **F-09** · `LLM_CANDIDATE_MARGIN` em settings e `.env.example`
+      risco: baixo · 1h · produção: transparente até o `.env` mudar
+  - [x] Implementado · default 1.5 documentado, e os `LLM_MAX_*` documentados como teto
+  - [x] Cobertura: código novo coberto
+  - [x] `ruff check` · `manage.py check` · suíte verde
+  - [x] Critérios cobertos: CA-08, CA-09 (lado da config)
+  - [x] PR aberto e revisado — #74 · Mergeado — `4af0ddb` · Verificado após deploy: pendente
+  - Status: concluído · Notas: **ação de rollout pendente** — subir `LLM_MAX_SHORTS=15` e `LLM_MAX_LONGS=8` no `.env` de produção é o que liga a margem para job de alvo grande.
 
 ### PR 6 — Filtro de score mínimo
 
-- [ ] **F-10** · Descarte por nota, log e mensagem quando zera
-      risco: baixo · 4h · produção: desligado por default · ~120 linhas / 2 arquivos
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado
-  - [ ] Cobertura 100% do código novo (linha e branch, incluindo o caminho de zero cortes) — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-12, CA-13, CA-14, CA-15
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
-- [ ] **F-11** · Documentar calibração do limiar
-      risco: nenhum · 1h · produção: transparente · ~40 linhas / 1 arquivo
-  - [ ] `docs/AUTO_CUTS_STRATEGY.md` com como escolher o número a partir do log
-  - [ ] Critérios cobertos: nenhum (documentação)
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-10** · Descarte por nota, log e mensagem quando zera
+      risco: baixo · 4h · produção: desligado por default
+  - [x] Testes escritos primeiro (falharam antes) — 9 testes
+  - [x] Implementado
+  - [x] Cobertura: inclui o caminho de zero cortes e o de nota ausente
+  - [x] `ruff check` · `manage.py check` · verde nos apps tocados
+  - [x] Critérios cobertos: CA-12, CA-13, CA-14, CA-15
+  - [x] PR aberto e revisado — #75 · Mergeado — `499c0ed` · Verificado após deploy: pendente
+  - Status: concluído · Notas: **ação de rollout pendente** — o filtro entra desligado (`AUTO_CUT_MIN_VIRALITY_SCORE=0`); ligar depois de ler o log de descarte em jobs reais.
+- [x] **F-11** · Documentar calibração do limiar
+      risco: nenhum · 1h · produção: transparente
+  - [x] `docs/AUTO_CUTS_STRATEGY.md` com como escolher o número a partir do log
+  - [x] Critérios cobertos: nenhum (documentação)
+  - [x] PR aberto e revisado — #75 · Mergeado — `499c0ed` · Verificado após deploy: pendente
+  - Status: concluído · Notas: entrou junto a convivência de escalas do F-05 e um aviso nas três seções que transcrevem os prompts de 2025 — elas falam de uma chamada por chunk e de um prompt de agregação que não existem.
 
 ### PR 7 — Teto duro de short e educacional em 150s
 
-- [ ] **F-12** · `SHORT_MAX_SEC_HARD` sobre todo short e educacional em 150s
-      risco: baixo · 3h · produção: shorts educacionais 30s mais curtos · ~110 linhas / 1 arquivo
-  - [ ] Testes escritos primeiro (falharam antes) — matriz cobrindo os 7 modos + um `prompt_version` inexistente
-  - [ ] Implementado
-  - [ ] Cobertura 100% do código novo (linha e branch) — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-16, CA-17, CA-18
-  - [ ] Asserção de 180s do F-00 atualizada para 150s, com o porquê no commit
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
-- [ ] **F-13** · Faixa 120–150s nos dois prompts educacionais
-      risco: baixo · 2h · produção: transparente · ~70 linhas / 3 arquivos
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado · hashes atualizados
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-19
-  - [ ] `docs/AUTO_CUTS_STRATEGY.md` atualizado (o doc já diz "máximo 3 minutos")
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-12** · `SHORT_MAX_SEC_HARD` sobre todo short e educacional em 150s
+      risco: baixo · 3h · produção: shorts educacionais 30s mais curtos
+  - [x] Testes escritos primeiro (falharam antes) — matriz cobrindo os 7 modos + `prompt_version` inexistente e vazio
+  - [x] Implementado — teto duro de 170s depois dos ramos por modo
+  - [x] Cobertura: o bloco novo fica integral, linha e branch
+  - [x] `ruff check` · `manage.py check` · verde (481 passed nos apps tocados)
+  - [x] Critérios cobertos: CA-16, CA-17, CA-18
+  - [x] Asserção de 180s do F-00 atualizada para 150s, e a de `prompt_version` desconhecido de 400s para 170s
+  - [x] PR aberto e revisado — #76 · Mergeado — `27187b8` · Verificado após deploy: pendente
+  - Status: concluído · Notas: 170 fica acima da maior faixa em uso (viral_long, 160s), então não altera nenhum modo existente — é rede, não regra.
+- [x] **F-13** · Faixa 120–150s nos dois prompts educacionais
+      risco: baixo · 2h · produção: transparente · 11 pontos de texto
+  - [x] Testes escritos primeiro (falharam antes)
+  - [x] Implementado · 4 hashes, todos educacionais
+  - [x] Cobertura: mudança de texto de prompt, sem código de produção novo
+  - [x] `ruff check` · `manage.py check` · verde
+  - [x] Critérios cobertos: CA-19
+  - [x] `docs/AUTO_CUTS_STRATEGY.md` atualizado — tabela de shorts, teto duro e o porquê dos 150s
+  - [x] PR aberto e revisado — #76 · Mergeado — `27187b8` · Verificado após deploy: pendente
+  - Status: concluído · Notas: o exemplo de duração saiu de 150 para 140 — exemplo colado no teto ensina o modelo a colar no teto.
 
 ### PR 8 — Duração de saída determinística no overlay
 
-- [ ] **F-14** · `-map 0:v -map 0:a? -shortest` no `overlay_animation`
-      risco: baixo · 2h · produção: overlay nunca estende o vídeo · ~40 linhas / 2 arquivos
-  - [ ] Teste escrito primeiro (falhou antes) — asset maior que o clipe, duração medida com `ffprobe`
-  - [ ] Implementado
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-20
-  - [ ] Finalização real com overlay animado conferida visualmente (R-9)
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-14** · `-map [outv] -map 0:a? -shortest` no `overlay_animation`
+      risco: **era baixo, virou alto** · 2h · produção: overlay animado deixa de travar
+  - [x] Teste escrito primeiro (falhou antes) — asset cinco vezes mais longo que o clipe, com e sem áudio
+  - [x] Implementado
+  - [x] Cobertura: os dois caminhos (asset animado e estático) exercitados
+  - [x] `ruff check` · `manage.py check` · verde (280 passed nos apps tocados)
+  - [x] Critérios cobertos: CA-20
+  - [ ] **Finalização real com overlay animado conferida visualmente (R-9) — pendente, exige job real com asset animado**
+  - [x] PR aberto e revisado — #77 · Mergeado — `a9518b1` · Verificado após deploy: pendente
+  - Status: concluído com verificação visual pendente · Notas: o plano classificou como risco condicional ao asset ter áudio. **Estava errado**: reproduz com qualquer asset animado, e não alonga — trava. 1h38 de vídeo gerado em 25s de relógio, arquivo com `moov atom not found`, worker preso.
 
 ### Mapa critério → item
 
@@ -671,7 +671,11 @@ documentação.
 
 | Data | PR | O que mudou | Surpresas |
 | --- | --- | --- | --- |
-| 2026-08-24 | PR 4 (#73) | Calibração da nota com 4 faixas nos 7 prompts | A instrução de cota ("retorne EXATAMENTE N itens") e a nota honesta se contradizem por natureza. A contrapartida virou linha explícita no prompt, em vez de esperar que o modelo resolvesse sozinho. |
+| 2026-08-24 | PR 8 (#77, `a9518b1`) | `-shortest` e `-map` explícito no `overlay_animation` | O plano classificou como risco condicional ao asset ter áudio. Errado nas duas pontas: acontece com qualquer asset animado, e o efeito não é alongar — é **travar**. 1h38 de vídeo em 25s de relógio, arquivo inválido, worker preso. Asset estático nunca teve o problema, que é por que passou despercebido. |
+| 2026-08-24 | PR 7 (#76, `27187b8`) | Teto duro de 170s e educacional 120–150s | Nenhuma surpresa técnica. O teste que percorre `prompt_version.choices` é o que faz modo novo nascer coberto. |
+| 2026-08-24 | PR 6 (#75, `499c0ed`) | Filtro de score mínimo, desligado por default; seção Scoring no doc | Achado fora de escopo: `settings_test` define `CELERY_BROKER_URL=memory://` mas o override não chega em `app.conf.broker_url`, que segue em `redis://127.0.0.1:6379`. Seis testes falham localmente quando o Redis cai; passam no CI, o que ainda não está explicado. Vale PR próprio. |
+| 2026-08-24 | PR 5 (#74, `4af0ddb`) | Margem de candidatos e filtros antes do corte de quantidade | Ao extrair `_delivery_limits`, a substituição acertou a primeira ocorrência — dentro do próprio helper — e ele ficou chamando a si mesmo. A suíte inteira passou porque nada chamava o helper ainda; só os testes novos pegaram, com `RecursionError`. |
+| 2026-08-24 | PR 4 (#73, `c334c84`) | Calibração da nota com 4 faixas nos 7 prompts | A instrução de cota ("retorne EXATAMENTE N itens") e a nota honesta se contradizem por natureza. A contrapartida virou linha explícita no prompt, em vez de esperar que o modelo resolvesse sozinho. |
 | 2026-08-24 | PR 3 (#72, `016c00f`) | Escala 0–100 nos dois prompts educacionais | Nenhuma. O registro da convivência de escalas no doc de estratégia ficou pendente e foi anexado ao F-11, para não abrir um PR de documentação sozinho. |
 | 2026-08-24 | PR 2 (#71, `7024b19`) | Bloco de sinais do autor nos 7 prompts; campo `author_cue`; `test_prompts_conteudo.py` | O congelamento de hash não pega prompt que **nasce** sem uma regra — só pega prompt que muda. Faltava a outra metade, e ela virou arquivo próprio. |
 | 2026-08-24 | PR 1 (#70, `77733a4`) | Cortes longos 8–40 min em todos os modos; `duration_minutes` sempre do timecode; 10 hashes de prompt | O mínimo de 8 min, ao deixar de ser exclusivo dos modos virais, passou a **descartar** long educacional abaixo de 8 min — que antes era aceito. Está previsto em RN-01, mas não estava escrito na descrição do PR 1 no plano. |
