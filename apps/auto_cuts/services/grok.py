@@ -590,6 +590,8 @@ def analyze_chunks_in_one_request(
     allowed_theme_categories: list[str] | None = None,
     brand_only: bool = False,
     analysis_id: int | None = None,
+    max_shorts: int | None = None,
+    max_longs: int | None = None,
 ) -> dict:
     """
     Analisa todos os chunks em uma única requisição.
@@ -597,6 +599,8 @@ def analyze_chunks_in_one_request(
     prompt_version: viral, viral_long, educational, viral_en, viral_long_en, educational_en, viral_translate
     brand_only: quando True, theme_category é opcional (conteúdo para uma única marca).
     analysis_id: opcional; se GROK_SAVE_RESPONSE_JSON=1, salva a resposta em JSON com este id no nome.
+    max_shorts/max_longs: quantos candidatos pedir. Sem valor, cai no teto de `settings` —
+      o chamador é quem sabe o alvo do job, e é ele que aplica a margem.
     Retorna JSON com ranked_shorts e final_long_cuts (economia de tokens).
     """
     if not chunks:
@@ -644,9 +648,10 @@ def analyze_chunks_in_one_request(
         context_block=context_block, chunks_block=chunks_block
     )
 
-    # Limites configuráveis via env (interpolados no prompt no momento da chamada)
-    llm_max_shorts = settings.LLM_MAX_SHORTS
-    llm_max_longs = settings.LLM_MAX_LONGS
+    # Quantidade pedida: a do chamador, limitada pelo teto de env. O mínimo exigido na
+    # validação sai daqui também, então pedir menos não faz a resposta ser recusada.
+    llm_max_shorts = max(1, min(int(max_shorts or settings.LLM_MAX_SHORTS), settings.LLM_MAX_SHORTS))
+    llm_max_longs = max(1, min(int(max_longs or settings.LLM_MAX_LONGS), settings.LLM_MAX_LONGS))
     if is_educational:
         if lang == "en":
             limit_block = (

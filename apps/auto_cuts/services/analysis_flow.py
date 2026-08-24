@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import shutil
 import tempfile
+from math import ceil
 from pathlib import Path
 
 from django.conf import settings
@@ -143,6 +144,32 @@ ALL_THEME_CATEGORIES = [
     "CONTROVERSIES_DEBATE",
     "COMEDY_HUMOR",
 ]
+
+
+def _delivery_limits(analysis) -> tuple[int, int]:
+    """Quantos cortes este job entrega, no máximo.
+
+    O alvo vem do job, mas a entrega para em 10 shorts e 5 longos — teto que já existia
+    aqui antes de o alvo ser configurável. Fica numa função só porque quem monta o pedido
+    ao LLM precisa exatamente do mesmo número que quem grava as sugestões.
+    """
+    shorts_limit = max(1, min(10, int(getattr(analysis, "shorts_target", 10) or 10)))
+    longs_limit = max(1, min(5, int(getattr(analysis, "longs_target", 3) or 3)))
+    return shorts_limit, longs_limit
+
+
+def _candidates_to_request(analysis) -> tuple[int, int]:
+    """Quantos candidatos pedir ao LLM: o alvo da entrega mais a margem.
+
+    Pedir exatamente o alvo ignora que o backend ainda vai descartar por duração, por
+    categoria sem brand mapeada e por nota. A margem custa output de LLM, que é barato
+    perto do FFmpeg — e é o que faz o job entregar o que prometeu.
+    """
+    shorts_limit, longs_limit = _delivery_limits(analysis)
+    margem = float(getattr(settings, "LLM_CANDIDATE_MARGIN", 1.5) or 1.5)
+    pedir_shorts = min(settings.LLM_MAX_SHORTS, ceil(shorts_limit * margem))
+    pedir_longs = min(settings.LLM_MAX_LONGS, ceil(longs_limit * margem))
+    return max(1, pedir_shorts), max(1, pedir_longs)
 
 
 def _pick_timestamp(item: dict, start: bool = True) -> str:
@@ -736,6 +763,13 @@ def _request_llm_analysis(analysis, chunks):
             "[FLUXO] Allowed categories for routing in this job: %s",
             ", ".join(allowed_theme_categories),
         )
+    pedir_shorts, pedir_longs = _candidates_to_request(analysis)
+    logger.info(
+        "[FLUXO] Pedindo %d shorts e %d longos ao LLM (alvo do job: %d e %d).",
+        pedir_shorts,
+        pedir_longs,
+        *_delivery_limits(analysis),
+    )
     final = None
     for attempt in range(MAX_RETRIES):
         try:
@@ -748,6 +782,8 @@ def _request_llm_analysis(analysis, chunks):
                 allowed_theme_categories=allowed_theme_categories,
                 brand_only=brand_only,
                 analysis_id=analysis.id,
+                max_shorts=pedir_shorts,
+                max_longs=pedir_longs,
             )
             logger.info(
                 "[FLUXO] Grok API respondeu OK. candidates=%d, ranked_shorts=%d, final_long_cuts=%d",
@@ -787,8 +823,7 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
     brand_only = _is_brand_only(analysis)
     is_viral_prompt = pv in ("viral", "viral_en", "viral_translate", "viral_long", "viral_long_en")
     is_educational_prompt = pv in ("educational", "educational_en")
-    shorts_limit = max(1, min(10, int(getattr(analysis, "shorts_target", 10) or 10)))
-    longs_limit = max(1, min(5, int(getattr(analysis, "longs_target", 3) or 3)))
+    shorts_limit, longs_limit = _delivery_limits(analysis)
 
     candidate_shorts_source = final.get("candidate_shorts") or []
     ranked_shorts_source = final.get("ranked_shorts") or []
@@ -799,10 +834,10 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
     else:
         shorts_source = ranked_shorts_source or candidate_shorts_source
     if pv in ("viral_long", "viral_long_en"):
-        ranked_shorts = _sort_shorts_viral_long(shorts_source, tc_to_seconds)[:shorts_limit]
+        ranked_shorts = _sort_shorts_viral_long(shorts_source, tc_to_seconds)
     else:
-        ranked_shorts = _sort_by_virality(shorts_source)[:shorts_limit]
-    ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])[:longs_limit]
+        ranked_shorts = _sort_by_virality(shorts_source)
+    ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])
 
     source_asset_id = ""
     if getattr(analysis, "source_id", None):
@@ -825,6 +860,10 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
         + longs_ignored_missing_theme
         + longs_ignored_unmapped
     )
+    # O corte na quantidade vem depois dos filtros, não antes: cortar primeiro faz o
+    # candidato válido da posição 11 nunca substituir o descartado da posição 3.
+    ranked_shorts = ranked_shorts[:shorts_limit]
+    ranked_longs = ranked_longs[:longs_limit]
     if ignored_total:
         logger.warning(
             "[FLUXO] Analysis %s: %s cut(s) skipped due to invalid theme_category / no mapping "

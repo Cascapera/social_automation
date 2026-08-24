@@ -276,8 +276,14 @@ GROK_MODEL = (os.getenv("GROK_MODEL") or "").strip()
 LLM_BASE_URL = (os.getenv("LLM_BASE_URL") or "").strip()
 # Limites interpolados no prompt no momento da chamada. Valor inválido derruba o boot em
 # vez de fazer cada análise falhar com ValueError no meio da task — é de propósito.
+# Teto absoluto de candidatos pedidos ao LLM. Não é a quantidade: a quantidade sai do
+# alvo do job multiplicado pela margem, e estes valores só limitam o resultado.
 LLM_MAX_SHORTS = max(1, int(os.getenv("LLM_MAX_SHORTS", "10")))
 LLM_MAX_LONGS = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
+# Margem sobre o alvo do job. O backend descarta candidato por duração, por categoria
+# sem brand mapeada e (a partir do filtro de nota) por score — pedir exatamente o alvo
+# faz o job entregar menos do que pediu sempre que qualquer um desses filtra algo.
+LLM_CANDIDATE_MARGIN = max(1.0, float(os.getenv("LLM_CANDIDATE_MARGIN", "1.5")))
 # Override de tabela de preço do LLM, em JSON. Vazio = usa GROK_PRICING.
 GROK_PRICING_JSON = (os.getenv("GROK_PRICING_JSON") or "").strip()
 # Depuração: salva a resposta parseada do LLM em MEDIA_ROOT/grok_responses.
