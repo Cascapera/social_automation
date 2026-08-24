@@ -143,7 +143,7 @@ Para shorts (2–3 min):
 - hook: frase inicial que prende (primeiros 5s)
 - title: título informativo (máx 60 chars)
 - reason: por que é educativo
-- virality_score: 1–10 (10 = máximo valor didático)
+- virality_score: 0–100 (100 = máximo valor didático)
 - theme_category: OBRIGATÓRIO (use SOMENTE um dos valores listados em "CATEGORIAS DE TEMA PERMITIDAS NESTE JOB")
 
 Para cortes longos:
@@ -293,7 +293,7 @@ For shorts (2–3 min):
 - hook: opening phrase that grabs (first 5s)
 - title: informative title (max 60 chars)
 - reason: why it's educational
-- virality_score: 1–10 (10 = max didactic value)
+- virality_score: 0–100 (100 = max didactic value)
 - theme_category: REQUIRED (use ONLY one of the values listed in "ALLOWED THEME CATEGORIES FOR THIS JOB")
 
 For long cuts:

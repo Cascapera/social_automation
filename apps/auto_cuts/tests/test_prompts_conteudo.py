@@ -99,3 +99,26 @@ class SinaisDoAutorTests(SimpleTestCase):
     def test_o_limite_de_120_caracteres_esta_declarado_nos_dois_idiomas(self):
         self.assertIn("120", prompts.AUTHOR_CUE_RULES_PT)
         self.assertIn("120", prompts.AUTHOR_CUE_RULES_EN)
+
+
+class EscalaDaNotaTests(SimpleTestCase):
+    """PR 3 · RN-07: uma escala só, 0–100, em todos os modos de análise."""
+
+    def test_nenhum_prompt_de_analise_pede_a_escala_de_1_a_10(self):
+        """O backend não reescalona: escala divergente vira nota incomparável no banco."""
+        for nome in SYSTEM_PROMPTS_PT + SYSTEM_PROMPTS_EN + TEMPLATES:
+            with self.subTest(prompt=nome):
+                texto = getattr(prompts, nome)
+                self.assertNotIn("1–10", texto)
+                self.assertNotIn("1-10", texto)
+
+    def test_os_dois_prompts_educacionais_pedem_0_a_100(self):
+        for nome in ("SYSTEM_PROMPT_EDUCATIONAL", "SYSTEM_PROMPT_EDUCATIONAL_EN"):
+            with self.subTest(prompt=nome):
+                self.assertIn("0–100", getattr(prompts, nome))
+
+    def test_o_prompt_de_corte_pronto_segue_em_1_a_10_de_proposito(self):
+        """Ele não passa por `_create_suggestions`; o backend converte ×10 explicitamente
+        em `analysis_flow._process_ready_cuts_flow`. Mudar a escala aqui sem mexer lá
+        multiplicaria a nota por 10 de novo."""
+        self.assertIn("1-10", prompts.READY_CUT_SYSTEM_PROMPT_BASE)
