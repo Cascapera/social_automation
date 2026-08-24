@@ -476,8 +476,15 @@ class NormalizacaoDeCamposTests(CriarSugestoesMixin, TestCase):
         (sug,) = self.shorts(analysis)
         self.assertIsNone(sug.virality_score)
 
-    def test_escala_educacional_de_1_a_10_e_gravada_sem_conversao(self):
-        """⚠ Contexto do PR 3: o educacional pontua 1–10 e o backend não reescalona."""
+    def test_backend_nunca_reescalona_a_nota_que_o_llm_devolveu(self):
+        """A escala é definida no prompt, não no backend — que só normaliza e limita.
+
+        Até o PR 3 o modo educacional pedia 1–10 enquanto todos os outros pediam 0–100, e
+        como aqui não há conversão, um corte educacional excelente ficava gravado como 9 ao
+        lado de um viral 96. Hoje os dois prompts pedem 0–100; este teste existe para que a
+        ausência de conversão continue sendo uma escolha visível, e não uma surpresa para
+        quem introduzir uma escala nova num prompt.
+        """
         analysis = self.criar(pv="educational", ranked_shorts=[short_educacional("10:00", "12:00", score=9)])
 
         (sug,) = self.shorts(analysis)
