@@ -1,7 +1,7 @@
 # Feature — Seleção de cortes: duração longa, sinais do autor e nota honesta
 
 ```
-Status: em implementação · Progresso: 2/9 PRs (PR 0 e PR 1 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
+Status: em implementação · Progresso: 3/9 PRs (PR 0, 1 e 2 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
 ```
 
 ## 1. Resumo
@@ -469,7 +469,7 @@ medição em produção (R-4), não teste.
 ## 14. Checklist de acompanhamento
 
 ```
-Status: em implementação · Progresso: 2/9 PRs · 3/14 itens · atualizado em 2026-08-24
+Status: em implementação · Progresso: 3/9 PRs · 5/14 itens · atualizado em 2026-08-24
 ```
 
 ### PR 0 — Caracterizar `_create_suggestions`
@@ -513,23 +513,23 @@ Status: em implementação · Progresso: 2/9 PRs · 3/14 itens · atualizado em 
 
 ### PR 2 — Sinais do autor
 
-- [ ] **F-03** · Blocos `AUTHOR_CUE_RULES_PT` / `_EN` em `vocabulary.py`
-      risco: baixo · 2h · produção: transparente · ~60 linhas / 1 arquivo
-  - [ ] Implementado · exportado em `__all__` · hash novo registrado
-  - [ ] `CoberturaDoCongelamentoTests` verde
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-04
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
-- [ ] **F-04** · Concatenar nos 7 system prompts e declarar `author_cue` nos 7 templates
-      risco: baixo · 3h · produção: transparente · ~220 linhas / 3 arquivos
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado · hashes atualizados
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-04, CA-05
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-03** · Blocos `AUTHOR_CUE_RULES_PT` / `_EN` em `vocabulary.py`
+      risco: baixo · 2h · produção: transparente · ~390 tokens por requisição
+  - [x] Implementado · exportado em `__all__` · hash novo registrado
+  - [x] `CoberturaDoCongelamentoTests` verde
+  - [x] `ruff check` · `manage.py check` · suíte verde
+  - [x] Critérios cobertos: CA-04
+  - [x] PR aberto e revisado — #71 · Mergeado — `9edb01e` (merge `7024b19`) · Verificado após deploy: pendente
+  - Status: concluído · Notas: texto revisado e aprovado pelo dono do conteúdo antes do merge. Duas regras entraram além do pedido: direção do marcador (frente/trás) e "marcador não salva trecho fraco" — esta segunda para a regra não virar caminho de nota inflada, já que a nota é o que o PR 6 usa para descartar.
+- [x] **F-04** · Concatenar nos 7 system prompts e declarar `author_cue` nos 7 templates
+      risco: baixo · 3h · produção: transparente · 185 linhas / 6 arquivos
+  - [x] Testes escritos primeiro (falharam antes) — `test_prompts_conteudo.py`, arquivo novo
+  - [x] Implementado · 16 hashes (14 alterados, 2 novos)
+  - [x] Cobertura: os testes novos são de conteúdo de prompt, sem código de produção novo
+  - [x] `ruff check` · `manage.py check` · suíte verde (575 passed)
+  - [x] Critérios cobertos: CA-04, CA-05
+  - [x] PR aberto e revisado — #71 · Mergeado — `9edb01e` (merge `7024b19`) · Verificado após deploy: pendente
+  - Status: concluído · Notas: os exemplos de JSON dos 7 templates foram renderizados e parseados com `json.loads` depois da edição. `test_prompts_conteudo.py` cobre o que o hash não cobre — prompt novo que nasça sem a regra.
 
 ### PR 3 — Escala 0–100 no modo educacional
 
@@ -671,6 +671,7 @@ documentação.
 
 | Data | PR | O que mudou | Surpresas |
 | --- | --- | --- | --- |
+| 2026-08-24 | PR 2 (#71, `7024b19`) | Bloco de sinais do autor nos 7 prompts; campo `author_cue`; `test_prompts_conteudo.py` | O congelamento de hash não pega prompt que **nasce** sem uma regra — só pega prompt que muda. Faltava a outra metade, e ela virou arquivo próprio. |
 | 2026-08-24 | PR 1 (#70, `77733a4`) | Cortes longos 8–40 min em todos os modos; `duration_minutes` sempre do timecode; 10 hashes de prompt | O mínimo de 8 min, ao deixar de ser exclusivo dos modos virais, passou a **descartar** long educacional abaixo de 8 min — que antes era aceito. Está previsto em RN-01, mas não estava escrito na descrição do PR 1 no plano. |
 | 2026-08-24 | PR 0 (#69, `eb325b2`) | 39 testes de caracterização de `_create_suggestions`; cobertura do arquivo de 14% para 37% | Os testes passaram todos na primeira execução — nenhuma previsão minha sobre o comportamento atual estava errada. Como isso também é o sintoma de teste que não afirma nada, validei a rede por mutação de três constantes. Uma descoberta ficou registrada em teste: em contexto de factory, com alvo 2 e os dois primeiros colocados sem brand mapeada, o job entrega **zero** short mesmo tendo três candidatos válidos na fila. |
 
