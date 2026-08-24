@@ -42,6 +42,7 @@ Para cada clipe (short ou longo), inclua:
 - thumbnail_text (2–4 palavras fortes)
 - suggested_description (250–600 chars, varie o estilo de abertura entre clips)
 - tags (lista de 10–15 palavras-chave lowercase)
+- author_cue (frase do autor que sinalizou o corte, máx. 120 chars; "" quando não houver)
 
 Somente em final_long_cuts (cortes longos), inclua também:
 - chapters (3–8 itens com timestamps RELATIVOS ao início do clip; primeiro DEVE ser "00:00")
@@ -69,7 +70,8 @@ Responda SOMENTE com JSON válido:
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "PALAVRA FORTE",
       "suggested_description": "Você já passou por um climão desses no trabalho? Nesse corte o convidado conta em detalhes como descobriu que estava sendo demitido no meio da reunião — e a reação que virou piada interna da empresa. Se quiser entender o contexto completo, o episódio inteiro está linkado abaixo.",
-      "tags": ["podcast", "história real", "trabalho", "demissão", "constrangimento", "corte viral", "bastidores", "reação", "história de trabalho", "situação inesperada"]
+      "tags": ["podcast", "história real", "trabalho", "demissão", "constrangimento", "corte viral", "bastidores", "reação", "história de trabalho", "situação inesperada"],
+      "author_cue": "presta atenção nessa parte, é o que quase ninguém entende"
     }}
   ],
   "ranked_shorts": [
@@ -164,6 +166,7 @@ Para cada clipe (short ou longo), inclua:
 - thumbnail_text (2–4 palavras fortes)
 - suggested_description (250–600 chars, varie o estilo de abertura entre clips)
 - tags (lista de 10–15 palavras-chave lowercase)
+- author_cue (frase do autor que sinalizou o corte, máx. 120 chars; "" quando não houver)
 
 Somente em final_long_cuts (cortes longos), inclua também:
 - chapters (3–8 itens com timestamps RELATIVOS ao início do clip; primeiro DEVE ser "00:00")
@@ -192,7 +195,8 @@ Responda SOMENTE com JSON válido:
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "PALAVRA FORTE",
       "suggested_description": "Você já passou por um climão desses no trabalho? Nesse corte o convidado conta em detalhes como descobriu que estava sendo demitido no meio da reunião — e a reação que virou piada interna da empresa. Se quiser entender o contexto completo, o episódio inteiro está linkado abaixo.",
-      "tags": ["podcast", "história real", "trabalho", "demissão", "constrangimento", "corte viral", "bastidores", "reação", "história de trabalho", "situação inesperada"]
+      "tags": ["podcast", "história real", "trabalho", "demissão", "constrangimento", "corte viral", "bastidores", "reação", "história de trabalho", "situação inesperada"],
+      "author_cue": "presta atenção nessa parte, é o que quase ninguém entende"
     }}
   ],
   "ranked_shorts": [
@@ -270,6 +274,7 @@ Inclua obrigatoriamente para cada corte:
 - thumbnail_text (2–4 palavras curtas para a capa)
 - suggested_description (250–600 chars, varie o estilo de abertura entre clips)
 - tags (10–15 palavras-chave lowercase)
+- author_cue (frase do autor que sinalizou o corte, máx. 120 chars; "" quando não houver)
 
 Somente em final_long_cuts, inclua também:
 - chapters (3–8 itens; primeiro timestamp "00:00", relativos ao início do clip)
@@ -291,7 +296,8 @@ Responda SOMENTE com JSON válido:
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "IDEIA CENTRAL",
       "suggested_description": "Como você decide quando vale a pena arriscar no investimento? Este trecho apresenta um método simples em três passos para avaliar o risco antes de mover o dinheiro. Exemplos reais e aplicação prática ao final.",
-      "tags": ["finanças", "investimento", "educação financeira", "estratégia", "risco", "decisão financeira", "guia prático", "caso real", "análise", "didático"]
+      "tags": ["finanças", "investimento", "educação financeira", "estratégia", "risco", "decisão financeira", "guia prático", "caso real", "análise", "didático"],
+      "author_cue": "presta atenção nessa parte, é o que quase ninguém entende"
     }}
   ],
   "final_long_cuts": [
@@ -353,6 +359,7 @@ For each clip (short or long), include:
 - thumbnail_text (2–4 powerful words)
 - suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list)
 - tags (10–15 lowercase keywords, mix generic and specific)
+- author_cue (the speaker's phrase that flagged the clip, max 120 chars; "" when there is none)
 
 For clips in final_long_cuts, ALSO include:
 - chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00"
@@ -381,7 +388,8 @@ Respond ONLY with valid JSON:
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE",
       "suggested_description": "Ever wondered what it feels like to be fired live on stage? In this clip he shares the exact moment he realized the cameras were rolling and his career had just changed forever. A raw, funny, and slightly painful story about how public embarrassment can be a turning point.",
-      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","viral clip","real story","work moment","stage fail","shorts","funny","life lesson"]
+      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","viral clip","real story","work moment","stage fail","shorts","funny","life lesson"],
+      "author_cue": "pay attention to this part, this is the one that matters"
     }}
   ],
   "ranked_shorts": [
@@ -475,6 +483,7 @@ For each clip (short or long), include:
 - thumbnail_text (2–4 powerful words)
 - suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list)
 - tags (10–15 lowercase keywords, mix generic and specific)
+- author_cue (the speaker's phrase that flagged the clip, max 120 chars; "" when there is none)
 
 For clips in final_long_cuts, ALSO include:
 - chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00"
@@ -504,7 +513,8 @@ Respond ONLY with valid JSON:
       "thumbnail_moment_timestamp": "00:15:34",
       "thumbnail_text": "FIRED LIVE",
       "suggested_description": "Two full minutes of one of the most awkward career stories ever told. He explains the warning signs he ignored, the moment he realized it was over, and the reaction that followed. Perfect watch if you like raw real-life stories that feel like a mini documentary.",
-      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","long short","real story","work moment","stage fail","viral clip","funny","life lesson","interview"]
+      "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","long short","real story","work moment","stage fail","viral clip","funny","life lesson","interview"],
+      "author_cue": "pay attention to this part, this is the one that matters"
     }}
   ],
   "ranked_shorts": [
@@ -596,6 +606,7 @@ For each clip (short or long), include:
 - thumbnail_text (2–4 powerful words)
 - suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list) — written in English (will describe the clip for the English audience)
 - tags (10–15 lowercase keywords, mix generic and specific) — in English
+- author_cue (the speaker's phrase that flagged the clip, max 120 chars; "" when there is none)
 - subtitle_segments_pt (REQUIRED): array of {{"start": float, "end": float, "text": "PT translation"}}
 
 For clips in final_long_cuts, ALSO include:
@@ -626,6 +637,7 @@ Respond ONLY with valid JSON:
       "thumbnail_text": "FIRED LIVE",
       "suggested_description": "Ever wondered what it feels like to be fired live on stage? In this clip he shares the exact moment he realized the cameras were rolling and his career had just changed forever. A raw, funny, and slightly painful story about how public embarrassment can be a turning point.",
       "tags": ["fired live","embarrassing story","workplace fail","career turn","public humiliation","viral clip","real story","work moment","stage fail","shorts","funny","life lesson"],
+      "author_cue": "pay attention to this part, this is the one that matters"
       "subtitle_segments_pt": [{{"start": 922.0, "end": 925.5, "text": "E foi nesse momento que percebi"}}, {{"start": 925.5, "end": 928.0, "text": "que tinha sido demitido ao vivo no palco"}}]
     }}
   ],
@@ -707,6 +719,7 @@ For every cut, include:
 - thumbnail_text (2–4 short words for cover text)
 - suggested_description (250–600 chars, unique per clip, vary structure: question / bold statement / bullet list)
 - tags (10–15 lowercase keywords, mix generic and specific)
+- author_cue (the speaker's phrase that flagged the clip, max 120 chars; "" when there is none)
 
 For clips in final_long_cuts, ALSO include:
 - chapters: 3–8 chapters like [{{"timestamp":"MM:SS","title":"..."}}], first ALWAYS at "00:00"
@@ -728,7 +741,8 @@ Respond ONLY with valid JSON:
       "thumbnail_moment_timestamp": "MM:SS",
       "thumbnail_text": "CORE IDEA",
       "suggested_description": "In this short cut we walk through the core idea of portfolio allocation in under three minutes. I explain why diversification matters, where most investors get it wrong, and a simple rule you can apply to your own setup today. Save it if you want to come back later.",
-      "tags": ["portfolio allocation","diversification","investing basics","personal finance","wealth building","long term investing","investor mistakes","finance tips","strategy","money","asset allocation","financial education"]
+      "tags": ["portfolio allocation","diversification","investing basics","personal finance","wealth building","long term investing","investor mistakes","finance tips","strategy","money","asset allocation","financial education"],
+      "author_cue": "pay attention to this part, this is the one that matters"
     }}
   ],
   "final_long_cuts": [
