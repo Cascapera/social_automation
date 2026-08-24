@@ -11,12 +11,13 @@ afirma que o comportamento de hoje é o desejado — afirma que é este. Algumas
 existem para mudar, e a mudança é a prova de que a regra mudou de propósito:
 
   · `test_short_educacional_acima_do_teto_e_truncado_em_180s` → 150s no PR 7
-  · `test_descarte_acontece_depois_do_corte_de_quantidade`     → passa a entregar 2 no PR 5
 
 Já cumpridas:
 
   · teto do long 15 min → 40 min · `duration_minutes` do LLM → calculado dos timestamps ·
     mínimo de 8 min passando a valer também no educacional (PR 1, #70)
+  · corte na quantidade passou a acontecer depois dos filtros: o job entregava zero short
+    tendo três candidatos válidos na fila (PR 5)
 
 É o mesmo mecanismo do hash de prompt em `test_grok_prompts_integridade.py`, aplicado a
 comportamento em vez de texto: quem mudar tem que passar por aqui e dizer por quê.
@@ -432,13 +433,12 @@ class RoteamentoPorFactoryTests(CriarSugestoesMixin, TestCase):
 
         self.assertEqual(self.shorts(analysis), [])
 
-    def test_descarte_acontece_depois_do_corte_de_quantidade(self):
-        """⚠ Muda no PR 5 (D-03/CA-11): hoje o job entrega ZERO short tendo 3 válidos.
+    def test_candidato_valido_da_fila_ocupa_a_vaga_do_descartado(self):
+        """CA-11: o corte na quantidade acontece DEPOIS dos filtros.
 
-        Os dois primeiros colocados não têm brand mapeada. Como o corte na quantidade
-        acontece antes do filtro de roteamento, eles ocupam as duas vagas do job e são
-        descartados em seguida — os três candidatos válidos que estavam logo atrás na fila
-        nunca chegam a ser considerados.
+        Os dois primeiros colocados não têm brand mapeada. Até o PR 5 eles ocupavam as duas
+        vagas do job e eram descartados em seguida, e o job entregava **zero** short mesmo
+        com três candidatos válidos logo atrás na fila. Agora os válidos assumem as vagas.
         """
         analysis = self.build_factory_analysis(shorts_target=2)
         self.criar(
@@ -452,7 +452,9 @@ class RoteamentoPorFactoryTests(CriarSugestoesMixin, TestCase):
             ],
         )
 
-        self.assertEqual(self.shorts(analysis), [])
+        sugs = self.shorts(analysis)
+        self.assertEqual([s.start_tc for s in sugs], ["12:00", "13:00"])
+        self.assertEqual([s.virality_score for s in sugs], [50, 49])
 
 
 class NormalizacaoDeCamposTests(CriarSugestoesMixin, TestCase):
