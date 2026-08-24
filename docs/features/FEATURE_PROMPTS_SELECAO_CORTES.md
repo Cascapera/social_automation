@@ -1,7 +1,7 @@
 # Feature — Seleção de cortes: duração longa, sinais do autor e nota honesta
 
 ```
-Status: em implementação · Progresso: 1/9 PRs (PR 0 mergeado) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
+Status: em implementação · Progresso: 2/9 PRs (PR 0 e PR 1 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
 ```
 
 ## 1. Resumo
@@ -469,7 +469,7 @@ medição em produção (R-4), não teste.
 ## 14. Checklist de acompanhamento
 
 ```
-Status: em implementação · Progresso: 1/9 PRs · 1/14 itens · atualizado em 2026-08-24
+Status: em implementação · Progresso: 2/9 PRs · 3/14 itens · atualizado em 2026-08-24
 ```
 
 ### PR 0 — Caracterizar `_create_suggestions`
@@ -491,25 +491,25 @@ Status: em implementação · Progresso: 1/9 PRs · 1/14 itens · atualizado em 
 
 ### PR 1 — Cortes longos de 8 a 40 minutos
 
-- [ ] **F-01** · Constantes unificadas e clamp válido em todos os modos
-      risco: médio · 2h · produção: cortes longos maiores · ~90 linhas / 2 arquivos
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-01, CA-02, CA-03
-  - [ ] Asserção de 15 min do F-00 atualizada para 40, com o porquê no commit
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
-- [ ] **F-02** · Texto dos prompts, hashes e doc de estratégia
-      risco: baixo · 2h · produção: transparente · ~70 linhas / 4 arquivos
-  - [ ] Hashes atualizados no mesmo PR, com a mudança editorial descrita no commit
-  - [ ] `CoberturaDoCongelamentoTests` verde
-  - [ ] `docs/AUTO_CUTS_STRATEGY.md` atualizado
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-01 (lado do prompt)
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-01** · Constantes unificadas e clamp válido em todos os modos
+      risco: médio · 2h · produção: cortes longos maiores · 42 linhas / 1 arquivo
+  - [x] Testes escritos primeiro (falharam antes) — as asserções do F-00 ficaram vermelhas antes da mudança de código
+  - [x] Implementado — `LONG_CUT_MIN_SEC` / `LONG_CUT_MAX_SEC` fora do `if is_viral_prompt`
+  - [x] Cobertura: o bloco de clamp de long fica integral, linha e branch
+  - [x] `ruff check` limpo · `manage.py check` limpo · suíte verde (566 passed)
+  - [x] Critérios cobertos: CA-01, CA-02, CA-03
+  - [x] Asserção de 15 min do F-00 atualizada para 40, com o porquê no commit — mais duas: `duration_minutes` do LLM → calculado, e o mínimo de 8 min passando a valer no educacional
+  - [x] PR aberto e revisado — #70 · Mergeado — `cbecad6` (merge `77733a4`) · Verificado após deploy: pendente, efeito só no próximo job analisado
+  - Status: concluído · Notas: o mínimo de 8 min passou a descartar long educacional curto, que antes era aceito. Estava em RN-01, mas não estava na lista de mudanças do PR — vale saber ao olhar o primeiro job educacional.
+- [x] **F-02** · Texto dos prompts, hashes e doc de estratégia
+      risco: baixo · 2h · produção: transparente · 61 linhas / 4 arquivos
+  - [x] Hashes atualizados no mesmo PR, com a mudança editorial descrita no commit — 10 hashes, conferidos um a um contra a lista congelada antes de escrever os valores novos
+  - [x] `CoberturaDoCongelamentoTests` verde
+  - [x] `docs/AUTO_CUTS_STRATEGY.md` atualizado — tabela do que o prompt pede × o que o backend impõe
+  - [x] `ruff check` · `manage.py check` · suíte verde
+  - [x] Critérios cobertos: CA-01 (lado do prompt)
+  - [x] PR aberto e revisado — #70 · Mergeado — `cbecad6` (merge `77733a4`) · Verificado após deploy: pendente
+  - Status: concluído · Notas: só os 10 hashes virais mudaram. Nenhum educacional, nenhum bloco de vocabulário — o educacional continua pedindo 20–40 min.
 
 ### PR 2 — Sinais do autor
 
@@ -671,6 +671,7 @@ documentação.
 
 | Data | PR | O que mudou | Surpresas |
 | --- | --- | --- | --- |
+| 2026-08-24 | PR 1 (#70, `77733a4`) | Cortes longos 8–40 min em todos os modos; `duration_minutes` sempre do timecode; 10 hashes de prompt | O mínimo de 8 min, ao deixar de ser exclusivo dos modos virais, passou a **descartar** long educacional abaixo de 8 min — que antes era aceito. Está previsto em RN-01, mas não estava escrito na descrição do PR 1 no plano. |
 | 2026-08-24 | PR 0 (#69, `eb325b2`) | 39 testes de caracterização de `_create_suggestions`; cobertura do arquivo de 14% para 37% | Os testes passaram todos na primeira execução — nenhuma previsão minha sobre o comportamento atual estava errada. Como isso também é o sintoma de teste que não afirma nada, validei a rede por mutação de três constantes. Uma descoberta ficou registrada em teste: em contexto de factory, com alvo 2 e os dois primeiros colocados sem brand mapeada, o job entrega **zero** short mesmo tendo três candidatos válidos na fila. |
 
 ## 15. Rollout e rollback
