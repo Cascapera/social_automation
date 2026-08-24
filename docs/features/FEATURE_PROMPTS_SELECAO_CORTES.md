@@ -1,7 +1,7 @@
 # Feature — Seleção de cortes: duração longa, sinais do autor e nota honesta
 
 ```
-Status: em implementação · Progresso: 3/9 PRs (PR 0, 1 e 2 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
+Status: em implementação · Progresso: 4/9 PRs (PR 0 a 3 mergeados) · Suposições: 5 · Questões em aberto: 1 · 2026-08-24
 ```
 
 ## 1. Resumo
@@ -469,7 +469,7 @@ medição em produção (R-4), não teste.
 ## 14. Checklist de acompanhamento
 
 ```
-Status: em implementação · Progresso: 3/9 PRs · 5/14 itens · atualizado em 2026-08-24
+Status: em implementação · Progresso: 4/9 PRs · 6/14 itens · atualizado em 2026-08-24
 ```
 
 ### PR 0 — Caracterizar `_create_suggestions`
@@ -533,16 +533,16 @@ Status: em implementação · Progresso: 3/9 PRs · 5/14 itens · atualizado em 
 
 ### PR 3 — Escala 0–100 no modo educacional
 
-- [ ] **F-05** · Escala única nos dois prompts educacionais
-      risco: baixo · 1h · produção: score educacional passa a 0–100 · ~60 linhas / 3 arquivos
-  - [ ] Testes escritos primeiro (falharam antes)
-  - [ ] Implementado · hashes atualizados
-  - [ ] Cobertura 100% do código novo — evidência colada
-  - [ ] `ruff check` · `manage.py check` · suíte verde
-  - [ ] Critérios cobertos: CA-06
-  - [ ] Convivência de escalas registrada no doc de estratégia
-  - [ ] PR aberto e revisado · Mergeado — `<hash>` · Verificado após deploy
-  - Status: não iniciado · Notas:
+- [x] **F-05** · Escala única nos dois prompts educacionais
+      risco: baixo · 1h · produção: score educacional passa a 0–100 · 40 linhas / 5 arquivos
+  - [x] Testes escritos primeiro (falharam antes)
+  - [x] Implementado · 4 hashes, todos educacionais
+  - [x] Cobertura: mudança de texto de prompt, sem código de produção novo
+  - [x] `ruff check` · `manage.py check` · suíte verde (578 passed)
+  - [x] Critérios cobertos: CA-06
+  - [ ] Convivência de escalas registrada no doc de estratégia — **pendente, vai junto com o F-11**
+  - [x] PR aberto e revisado — #72 · Mergeado — `016c00f` · Verificado após deploy: pendente
+  - Status: concluído com pendência anotada · Notas: o prompt de corte pronto continua em 1–10 de propósito, agora preso por teste — mudar a escala dele sem mexer na conversão ×10 de `_process_ready_cuts_flow` multiplicaria a nota de novo.
 
 ### PR 4 — Calibração honesta da nota
 
@@ -671,6 +671,7 @@ documentação.
 
 | Data | PR | O que mudou | Surpresas |
 | --- | --- | --- | --- |
+| 2026-08-24 | PR 3 (#72, `016c00f`) | Escala 0–100 nos dois prompts educacionais | Nenhuma. O registro da convivência de escalas no doc de estratégia ficou pendente e foi anexado ao F-11, para não abrir um PR de documentação sozinho. |
 | 2026-08-24 | PR 2 (#71, `7024b19`) | Bloco de sinais do autor nos 7 prompts; campo `author_cue`; `test_prompts_conteudo.py` | O congelamento de hash não pega prompt que **nasce** sem uma regra — só pega prompt que muda. Faltava a outra metade, e ela virou arquivo próprio. |
 | 2026-08-24 | PR 1 (#70, `77733a4`) | Cortes longos 8–40 min em todos os modos; `duration_minutes` sempre do timecode; 10 hashes de prompt | O mínimo de 8 min, ao deixar de ser exclusivo dos modos virais, passou a **descartar** long educacional abaixo de 8 min — que antes era aceito. Está previsto em RN-01, mas não estava escrito na descrição do PR 1 no plano. |
 | 2026-08-24 | PR 0 (#69, `eb325b2`) | 39 testes de caracterização de `_create_suggestions`; cobertura do arquivo de 14% para 37% | Os testes passaram todos na primeira execução — nenhuma previsão minha sobre o comportamento atual estava errada. Como isso também é o sintoma de teste que não afirma nada, validei a rede por mutação de três constantes. Uma descoberta ficou registrada em teste: em contexto de factory, com alvo 2 e os dois primeiros colocados sem brand mapeada, o job entrega **zero** short mesmo tendo três candidatos válidos na fila. |
