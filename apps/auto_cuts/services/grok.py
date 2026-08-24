@@ -331,9 +331,27 @@ def _extract_grok_usage(response) -> dict[str, int]:
     }
 
 
+@lru_cache(maxsize=32)
+def _warn_missing_pricing_once(model: str) -> None:
+    """Avisa uma vez por modelo que o custo dele nao esta sendo contado.
+
+    Sem isto, modelo fora da tabela de preco produz custo 0,00 no painel — que e
+    indistinguivel de "barato" e some justamente quando o fornecedor troca o modelo por
+    baixo dos panos.
+    """
+    logger.warning(
+        "[LLM] modelo %s nao esta em GROK_PRICING: custo nao sera contabilizado. "
+        "Acrescente o preco em grok_pricing.py ou em GROK_PRICING_JSON.",
+        model,
+    )
+
+
 def _calculate_grok_cost_usd(*, model: str, usage: Mapping[str, int]) -> float:
-    pricing = _get_grok_pricing().get(_normalize_grok_model_name(model))
+    normalized = _normalize_grok_model_name(model)
+    pricing = _get_grok_pricing().get(normalized)
     if not pricing:
+        if any(_coerce_int(usage.get(k)) for k in ("input_tokens", "output_tokens")):
+            _warn_missing_pricing_once(normalized)
         return 0.0
     input_tokens = _coerce_int(usage.get("input_tokens"))
     output_tokens = _coerce_int(usage.get("output_tokens"))
@@ -402,8 +420,13 @@ def _execute_grok_chat_completion(
         )
         raise
 
+    # Rotula pelo modelo que a API DEVOLVEU, nao pelo que foi pedido. O provedor
+    # redireciona modelo descontinuado sem avisar, e com preco diferente: rotular pelo
+    # pedido faz o painel calcular o custo com a tabela do modelo errado — barato demais,
+    # exatamente quando o custo real subiu. O aviso de redirect em `call_grok_chat` ja
+    # existia, mas so no log; a metrica seguia mentindo.
     _observe_grok_request_metrics(
-        model=model_name,
+        model=(getattr(response, "model", None) or "").strip() or model_name,
         operation=operation,
         duration_ms=(perf_counter() - started_at) * 1000.0,
         usage=_extract_grok_usage(response),
