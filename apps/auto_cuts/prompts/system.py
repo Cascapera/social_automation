@@ -42,7 +42,7 @@ Evite:
 
 REGRAS DE DURAÇÃO:
 - Shorts: 30–60 segundos
-- Longos: 8–30 minutos
+- Longos: 8–40 minutos
 
 FORMATO DE SCORE:
 - virality_score em percentual de 0 a 100 (sem símbolo %, valor inteiro)
@@ -91,7 +91,7 @@ Evite:
 
 REGRAS DE DURAÇÃO:
 - Shorts (viral longo): 90–160 segundos — narrativa mais completa que o corte de 30–60s; gancho forte nos primeiros segundos e desenvolvimento até conclusão natural
-- Longos: 8–30 minutos
+- Longos: 8–40 minutos
 
 FORMATO DE SCORE:
 - virality_score em percentual de 0 a 100 (sem símbolo %, valor inteiro)
@@ -180,7 +180,7 @@ Avoid moments that are:
 
 DURATION RULES:
 - Shorts: 30–60 seconds
-- Long cuts: 8–15 minutes
+- Long cuts: 8–40 minutes
 
 SCORING FORMAT:
 - virality_score must be an integer from 0 to 100 (no % symbol)
@@ -229,7 +229,7 @@ Avoid moments that are:
 
 DURATION RULES:
 - Shorts (viral long): 90–160 seconds — fuller narrative than 30–60s clips; strong hook early and natural payoff
-- Long cuts: 8–15 minutes
+- Long cuts: 8–40 minutes
 
 SCORING FORMAT:
 - virality_score must be an integer from 0 to 100 (no % symbol)

@@ -7,12 +7,16 @@ as fronteiras da task (desistência silenciosa, `status="error"`, reagendamento,
 e diz isso no próprio docstring.
 
 Este arquivo trava o comportamento **atual**, antes de qualquer mudança do projeto. Ele não
-afirma que o comportamento de hoje é o desejado — afirma que é este. Três asserções aqui
+afirma que o comportamento de hoje é o desejado — afirma que é este. Algumas asserções aqui
 existem para mudar, e a mudança é a prova de que a regra mudou de propósito:
 
-  · `test_long_acima_do_teto_e_truncado_em_15_min`      → 40 min no PR 1
-  · `test_long_educacional_confia_no_duration_min_do_llm` → passa a calcular dos timestamps no PR 1
   · `test_short_educacional_acima_do_teto_e_truncado_em_180s` → 150s no PR 7
+  · `test_descarte_acontece_depois_do_corte_de_quantidade`     → passa a entregar 2 no PR 5
+
+Já cumpridas:
+
+  · teto do long 15 min → 40 min · `duration_minutes` do LLM → calculado dos timestamps ·
+    mínimo de 8 min passando a valer também no educacional (PR 1, #70)
 
 É o mesmo mecanismo do hash de prompt em `test_grok_prompts_integridade.py`, aplicado a
 comportamento em vez de texto: quem mudar tem que passar por aqui e dizer por quê.
@@ -226,13 +230,19 @@ class DuracaoDeShortSemModoConhecidoTests(CriarSugestoesMixin, TestCase):
 class DuracaoDeCorteLongoTests(CriarSugestoesMixin, TestCase):
     """Cortes longos: hoje a regra vale só para os modos virais."""
 
-    def test_long_acima_do_teto_e_truncado_em_15_min(self):
-        """⚠ Muda no PR 1: o teto passa para 40 min."""
+    def test_long_acima_do_teto_e_truncado_em_40_min(self):
+        analysis = self.criar(long_cuts=[long_cut("00:00", "45:00")])
+
+        (sug,) = self.longs(analysis)
+        self.assertEqual(sug.duration_minutes, 40.0)
+        self.assertEqual(tc_to_seconds(sug.end_tc) - tc_to_seconds(sug.start_tc), 40 * 60)
+
+    def test_long_de_20_min_passa_intacto_onde_antes_era_truncado(self):
+        """A faixa antiga parava em 15 min: este corte perdia 5 min no meio da frase."""
         analysis = self.criar(long_cuts=[long_cut("00:00", "20:00")])
 
         (sug,) = self.longs(analysis)
-        self.assertEqual(sug.duration_minutes, 15.0)
-        self.assertEqual(tc_to_seconds(sug.end_tc) - tc_to_seconds(sug.start_tc), 900)
+        self.assertEqual(sug.duration_minutes, 20.0)
 
     def test_long_abaixo_de_8_min_e_descartado(self):
         analysis = self.criar(long_cuts=[long_cut("00:00", "06:00")])
@@ -250,12 +260,12 @@ class DuracaoDeCorteLongoTests(CriarSugestoesMixin, TestCase):
 
         self.assertEqual(self.longs(analysis), [])
 
-    def test_long_educacional_confia_no_duration_min_do_llm(self):
-        """⚠ Muda no PR 1 (RN-02): `duration_minutes` passa a vir dos timestamps.
+    def test_long_educacional_ignora_o_duration_min_do_llm(self):
+        """RN-02: manda o timecode, não o número que o LLM escreveu.
 
-        Hoje o modo educacional não passa pelo clamp e grava `duration_min` como o LLM
-        mandou — mesmo quando os timestamps dizem outra coisa. Aqui o corte tem 22 min de
-        timecode e o campo grava 90.
+        Antes do PR 1 o modo educacional não passava pelo clamp e gravava `duration_min`
+        como veio — 90, enquanto os timestamps diziam 22 min. Quem extrai o vídeo usa o
+        timecode, então o campo mentia para a interface e para qualquer relatório.
         """
         analysis = self.criar(
             pv="educational",
@@ -263,17 +273,26 @@ class DuracaoDeCorteLongoTests(CriarSugestoesMixin, TestCase):
         )
 
         (sug,) = self.longs(analysis)
-        self.assertEqual(sug.duration_minutes, 90)
+        self.assertEqual(sug.duration_minutes, 22.0)
         self.assertEqual(tc_to_seconds(sug.end_tc) - tc_to_seconds(sug.start_tc), 22 * 60)
 
-    def test_long_educacional_nao_tem_minimo_nem_teto(self):
+    def test_long_educacional_abaixo_do_minimo_e_descartado(self):
+        """O mínimo de 8 min passou a valer também fora dos modos virais."""
         analysis = self.criar(
             pv="educational",
             long_cuts=[long_cut("00:00", "02:00", duration_min=2)],
         )
 
+        self.assertEqual(self.longs(analysis), [])
+
+    def test_long_educacional_acima_do_teto_e_truncado_em_40_min(self):
+        analysis = self.criar(
+            pv="educational",
+            long_cuts=[long_cut("00:00", "50:00", duration_min=50)],
+        )
+
         (sug,) = self.longs(analysis)
-        self.assertEqual(sug.duration_minutes, 2)
+        self.assertEqual(sug.duration_minutes, 40.0)
 
 
 class OrdenacaoELimiteTests(CriarSugestoesMixin, TestCase):
