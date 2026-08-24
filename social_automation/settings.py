@@ -284,6 +284,10 @@ LLM_MAX_LONGS = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
 # sem brand mapeada e (a partir do filtro de nota) por score — pedir exatamente o alvo
 # faz o job entregar menos do que pediu sempre que qualquer um desses filtra algo.
 LLM_CANDIDATE_MARGIN = max(1.0, float(os.getenv("LLM_CANDIDATE_MARGIN", "1.5")))
+# Nota mínima para um corte ser criado. 0 desliga o filtro — é o default, e mantém o
+# comportamento de antes de ele existir. Depende da calibração de nota estar nos prompts:
+# sem faixas ancoradas, a nota é ordenação relativa e um limiar fixo não significa nada.
+AUTO_CUT_MIN_VIRALITY_SCORE = max(0, min(100, int(os.getenv("AUTO_CUT_MIN_VIRALITY_SCORE", "0") or 0)))
 # Override de tabela de preço do LLM, em JSON. Vazio = usa GROK_PRICING.
 GROK_PRICING_JSON = (os.getenv("GROK_PRICING_JSON") or "").strip()
 # Depuração: salva a resposta parseada do LLM em MEDIA_ROOT/grok_responses.

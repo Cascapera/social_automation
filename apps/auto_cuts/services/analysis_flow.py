@@ -172,6 +172,43 @@ def _candidates_to_request(analysis) -> tuple[int, int]:
     return max(1, pedir_shorts), max(1, pedir_longs)
 
 
+def _min_virality_score() -> int:
+    """Nota mínima configurada. 0 = filtro desligado."""
+    return max(0, int(getattr(settings, "AUTO_CUT_MIN_VIRALITY_SCORE", 0) or 0))
+
+
+def _filter_by_min_score(items: list[dict], *, analysis_id, tipo: str) -> tuple[list[dict], int]:
+    """Descarta candidato com nota abaixo do mínimo. Devolve (mantidos, descartados).
+
+    Item **sem nota** não é descartado: nota ausente ou ilegível significa "não avaliado",
+    e tratar isso como zero transformaria uma falha de formato da resposta em descarte
+    silencioso de conteúdo que pode ser bom.
+    """
+    minimo = _min_virality_score()
+    if minimo <= 0:
+        return list(items or []), 0
+
+    mantidos: list[dict] = []
+    descartados = 0
+    for item in items or []:
+        score = _normalize_virality_score((item or {}).get("virality_score"))
+        if score is not None and score < minimo:
+            descartados += 1
+            continue
+        mantidos.append(item)
+
+    if descartados:
+        logger.info(
+            "[FLUXO] Analysis %s: %d %s descartado(s) por nota abaixo de %d (restaram %d).",
+            analysis_id,
+            descartados,
+            tipo,
+            minimo,
+            len(mantidos),
+        )
+    return mantidos, descartados
+
+
 def _pick_timestamp(item: dict, start: bool = True) -> str:
     """Accept legacy and new timestamp keys."""
     if start:
@@ -839,6 +876,13 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
         ranked_shorts = _sort_by_virality(shorts_source)
     ranked_longs = _sort_by_virality(final.get("final_long_cuts") or [])
 
+    ranked_shorts, shorts_below_score = _filter_by_min_score(
+        ranked_shorts, analysis_id=analysis.id, tipo="short"
+    )
+    ranked_longs, longs_below_score = _filter_by_min_score(
+        ranked_longs, analysis_id=analysis.id, tipo="long"
+    )
+
     source_asset_id = ""
     if getattr(analysis, "source_id", None):
         source_asset_id = str(analysis.source_id)
@@ -864,6 +908,21 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
     # candidato válido da posição 11 nunca substituir o descartado da posição 3.
     ranked_shorts = ranked_shorts[:shorts_limit]
     ranked_longs = ranked_longs[:longs_limit]
+
+    descartados_por_nota = shorts_below_score + longs_below_score
+    if descartados_por_nota and not ranked_shorts and not ranked_longs:
+        # Vídeo cujo melhor momento não passa da régua. Não é erro do sistema: é a resposta
+        # honesta, e virar `status="error"` faria a factory tratar conteúdo fraco como falha.
+        logger.warning(
+            "[FLUXO] Analysis %s: nenhum corte acima da nota mínima (%d). %d candidato(s) descartado(s).",
+            analysis.id,
+            _min_virality_score(),
+            descartados_por_nota,
+        )
+        analysis.progress_message = (
+            f"Nenhum corte acima da nota mínima ({_min_virality_score()}): "
+            f"{descartados_por_nota} candidato(s) descartado(s)."
+        )[:200]
     if ignored_total:
         logger.warning(
             "[FLUXO] Analysis %s: %s cut(s) skipped due to invalid theme_category / no mapping "

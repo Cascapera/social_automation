@@ -44,6 +44,62 @@ System to analyze podcast/video transcriptions via Grok API (xAI) and suggest vi
 
 ---
 
+## Scoring
+
+`virality_score` is an integer **0–100 in every analysis mode**, including the educational
+ones (they used 1–10 until 2026-08-24). The backend never rescales what the model returns —
+`_normalize_virality_score` only strips a `%` and clamps to 0..100 — so the scale lives in
+the prompt and nowhere else. A prompt that introduces a different scale silently produces
+scores that cannot be compared with the rest of the table.
+
+> Two exceptions, both deliberate. **Ready-cut metadata** (`READY_CUT_SYSTEM_PROMPT_BASE`)
+> still asks for 1–10 and is multiplied by 10 in `_process_ready_cuts_flow`; changing that
+> prompt without touching the conversion would scale the score twice. And **suggestions
+> written before 2026-08-24 in educational mode** are stored on the old 1–10 scale — there
+> was no migration, because the score is only read when the suggestion is created, and old
+> rows are never re-sorted or re-filtered.
+
+### Bands
+
+The prompts anchor the score so that a number means the same thing across videos — without
+anchors it is only a relative ranking, and the best moment of a bad video scores 90 just
+like the best moment of a great one.
+
+| Band | Meaning |
+|------|---------|
+| 85–100 | Exceptional. Stops the scroll on its own, works with no context from the episode. |
+| 70–84 | Good. Stands alone and delivers what the title promises. |
+| 50–69 | Average. Only worth publishing if there is nothing better in the video. |
+| 0–49 | Weak. Needs outside context, too technical, drags, no hook, or does not travel. |
+
+The prompts state explicitly that candidates below 50 are expected, and forbid raising a
+score to fill the requested count — the count instruction sits in the same prompt and pushes
+the other way.
+
+### Minimum score filter
+
+`AUTO_CUT_MIN_VIRALITY_SCORE` (default `0` = off) discards any suggestion scoring below it,
+before the delivery cap is applied.
+
+- **Inclusive**: with 70, a clip scoring exactly 70 is kept.
+- **Missing score is not zero**: a clip with no readable `virality_score` is *not* discarded.
+  Absent means "not scored", and treating it as zero would turn a response-format glitch into
+  silent loss of good content.
+- **Zero surviving cuts is not an error.** A video whose best moment does not clear the bar
+  produces no cuts, with a `progress_message` saying so. Turning that into `status="error"`
+  would make the factory treat weak content as a system failure.
+
+**How to pick the number.** Turn it on at `0`, run real jobs, and read the
+`[FLUXO] Analysis N: X short(s) descartado(s) por nota abaixo de Y` lines to see how many
+would fall at each level before committing to one. A starting point of 60 is reasonable;
+raise it slowly and watch the stock of AVAILABLE videos in the factory, since a strict bar
+plus a weak source library dries up the queue.
+
+The filter only makes sense with the calibration above in the prompts. Against an
+un-anchored score, a fixed threshold means nothing.
+
+---
+
 ## Chunking strategy
 
 ### Why chunking
@@ -88,6 +144,17 @@ System to analyze podcast/video transcriptions via Grok API (xAI) and suggest vi
    - `duration` or `duration_min`
 
 ---
+
+> ### ⚠ As três seções de prompt abaixo são um registro de 2025, não o texto atual
+>
+> Elas foram escritas antes de os prompts existirem em código e não acompanharam nenhuma
+> mudança desde então: falam de uma chamada por chunk (hoje é uma requisição única), de
+> agregação num terceiro prompt (não existe), e de `virality_score` 1–10 (hoje é 0–100 em
+> todos os modos — ver **Scoring**).
+>
+> **A fonte da verdade é `apps/auto_cuts/prompts/`**, com o texto congelado por hash em
+> `apps/auto_cuts/tests/test_grok_prompts_integridade.py`. Estas seções ficam como registro
+> de como o desenho começou.
 
 ## Prompt 1: System (fixed)
 
@@ -230,7 +297,7 @@ Each item shown on the "Auto Cuts" screen:
 | **Duration** | `duration` / `duration_min` | e.g. 1m 48s or 18m |
 | **Hook** | `hook` (short) | Opening line |
 | **Rationale** | `reason` | Viral potential |
-| **Score** | `virality_score` (short) | 1–10 |
+| **Score** | `virality_score` | 0–100 (see Scoring above) |
 | **Rank** | `rank` (short) | Position in top 10–15 |
 
 User actions:
