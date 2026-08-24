@@ -88,15 +88,20 @@ LLM_PROVIDER_DEFAULTS: dict[str, str] = {
 
 
 def _build_chunks_block(chunks: list[dict], lang: str = "pt") -> str:
-    """Monta bloco com chunks separados para o prompt."""
+    """Monta o bloco de transcrição do prompt.
+
+    Com um único chunk — o caminho normal desde que a transcrição passou a ir inteira numa
+    mensagem só — o texto vai limpo, sem rótulo. Marcador de bloco só faz sentido quando há
+    mais de um: aí ele separa; sozinho, ele só sugere ao modelo uma fronteira que não
+    existe, e corte que a atravesse pode deixar de ser proposto.
+    """
+    textos = [(chunk.get("text") or "").strip() for chunk in chunks]
+    textos = [texto for texto in textos if texto]
+    if len(textos) == 1:
+        return textos[0]
+
     label = "BLOCK" if lang == "en" else "BLOCO"
-    parts = []
-    for i, chunk in enumerate(chunks, 1):
-        text = chunk.get("text", "").strip()
-        if not text:
-            continue
-        parts.append(f"--- {label} {i} ---\n{text}\n")
-    return "\n".join(parts)
+    return "\n".join(f"--- {label} {i} ---\n{texto}\n" for i, texto in enumerate(textos, 1))
 
 
 def _extract_json(text: str) -> dict | list:
