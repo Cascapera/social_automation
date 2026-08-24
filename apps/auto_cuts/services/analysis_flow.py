@@ -102,8 +102,11 @@ VIRAL_SHORT_MAX_SEC = 60
 VIRAL_LONG_SHORT_MIN_SEC = 80
 VIRAL_LONG_SHORT_MAX_SEC = 160
 VIRAL_LONG_SHORT_SCORE_KEEP_IF_SHORT = 95  # keep even below min duration if score clears bar
-VIRAL_LONG_MIN_SEC = 8 * 60
-VIRAL_LONG_MAX_SEC = 15 * 60
+# Cortes longos: faixa única para os 7 modos. O teto vale para todo `cut_type="long"`,
+# não só para os modos virais — um `if` por modo é o que deixou o clamp de short com um
+# ramo sem limite, e não vale repetir o padrão aqui.
+LONG_CUT_MIN_SEC = 8 * 60
+LONG_CUT_MAX_SEC = 40 * 60
 EDUCATIONAL_SHORT_MAX_SEC = 180
 THEME_CATEGORY_NORMALIZATION = {
     "business_money": "BUSINESS_MONEY",
@@ -954,24 +957,23 @@ def _create_suggestions(analysis, final: dict, pv: str) -> list[tuple]:
                 end_tc,
             )
             continue
-        if is_viral_prompt:
-            raw_duration = end_sec - start_sec
-            if raw_duration < VIRAL_LONG_MIN_SEC:
-                logger.info(
-                    "[FLUXO] viral long skipped: duration < %ss: %.2fs (%s -> %s)",
-                    VIRAL_LONG_MIN_SEC,
-                    raw_duration,
-                    start_tc,
-                    end_tc,
-                )
-                continue
-            if raw_duration > VIRAL_LONG_MAX_SEC:
-                end_sec = start_sec + VIRAL_LONG_MAX_SEC
-                end_tc = seconds_to_tc(end_sec)
-                raw_duration = VIRAL_LONG_MAX_SEC
-            duration_minutes = round(raw_duration / 60.0, 2)
-        else:
-            duration_minutes = item.get("duration_min")
+        raw_duration = end_sec - start_sec
+        if raw_duration < LONG_CUT_MIN_SEC:
+            logger.info(
+                "[FLUXO] long skipped: duration < %ss: %.2fs (%s -> %s)",
+                LONG_CUT_MIN_SEC,
+                raw_duration,
+                start_tc,
+                end_tc,
+            )
+            continue
+        if raw_duration > LONG_CUT_MAX_SEC:
+            end_sec = start_sec + LONG_CUT_MAX_SEC
+            end_tc = seconds_to_tc(end_sec)
+            raw_duration = LONG_CUT_MAX_SEC
+        # Sempre dos timestamps: `duration_min` é o que o LLM diz, e ele diverge do corte
+        # que vai ser extraído — quem manda é o timecode.
+        duration_minutes = round(raw_duration / 60.0, 2)
 
         brand_for_theme = getattr(analysis, "target_brand", None) or getattr(analysis, "brand", None)
         theme_for_long = (

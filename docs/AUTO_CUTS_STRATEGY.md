@@ -8,13 +8,38 @@ System to analyze podcast/video transcriptions via Grok API (xAI) and suggest vi
 
 ## Output specifications
 
+> The ranges below are **enforced in code**, in `apps/auto_cuts/services/analysis_flow.py`
+> (constants at the top of the file) and asserted in
+> `apps/auto_cuts/tests/test_create_suggestions_characterization.py`. What the prompt asks
+> for and what the backend accepts are two different things — a clip outside the range is
+> discarded (below the minimum) or truncated (above the maximum), whatever the prompt said.
+> Sections further down this document are older than this one; when they disagree, the
+> constants win.
+
 ### Short cuts (Reels, TikTok, Shorts)
-- **Ideal duration:** 15–90 seconds
-- **Maximum:** 3 minutes
+
+| Mode | Prompt asks | Backend enforces |
+|------|-------------|------------------|
+| `viral`, `viral_en`, `viral_translate` | 30–60s | below 30s discarded · above 60s truncated |
+| `viral_long`, `viral_long_en` | 90–160s | below 80s discarded unless score > 95 (never below 30s) · above 160s truncated |
+| `educational`, `educational_en` | 120–180s | above 180s truncated · no minimum |
+
 - **Target:** high-impact moments (humor, shock, quotable, controversy, emotion)
+- **Platform ceiling:** YouTube classifies a video as a Short up to 3 minutes (180s).
 
 ### Long cuts (YouTube)
-- **Ideal duration:** 10–30 minutes
+
+| Mode | Prompt asks | Backend enforces |
+|------|-------------|------------------|
+| viral modes | 8–40 min | below 8 min discarded · above 40 min truncated |
+| educational modes | 20–40 min | same 8–40 min band |
+
+- Since **2026-08-24** the band is a single rule for all seven modes (`LONG_CUT_MIN_SEC` /
+  `LONG_CUT_MAX_SEC`). It used to be 8–15 min and applied only to the viral modes, which
+  left educational long cuts with no ceiling at all and truncated a 25-minute block at 15.
+- `duration_minutes` is always derived from the clip timecodes, never from the `duration_min`
+  the model reports — the extractor uses the timecodes, so anything else would be a field
+  that disagrees with the file on disk.
 - **Target:** blocks with viral potential, cohesive narrative, strong title, strong opening hook
 
 ---

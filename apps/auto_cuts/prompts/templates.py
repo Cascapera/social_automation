@@ -23,7 +23,7 @@ REGRA CRÍTICA DE FORMATO:
 - NUNCA retorne array na raiz.
 
 1. Gere entre 30 e 50 candidatos de shorts virais (30–60 segundos), todos com virality_score (0–100).
-2. Gere 10 candidatos de cortes longos (8–15 min), todos com virality_score (0–100).
+2. Gere 10 candidatos de cortes longos (8–40 min), todos com virality_score (0–100).
 3. Não é obrigatório ordenar a saída. Apenas preencha corretamente as notas.
 4. O backend fará a seleção final dos melhores scores conforme a quantidade configurada no job.
 
@@ -143,7 +143,7 @@ REGRA CRÍTICA DE FORMATO:
 - NUNCA retorne array na raiz.
 
 1. Gere entre 30 e 50 candidatos de shorts virais estendidos (90–160 segundos cada), todos com virality_score (0–100). Priorize momentos com narrativa coesa e gancho forte no início.
-2. Gere 10 candidatos de cortes longos (8–15 min), todos com virality_score (0–100).
+2. Gere 10 candidatos de cortes longos (8–40 min), todos com virality_score (0–100).
 
 CRÍTICO — DURAÇÃO DOS SHORTS: start_timestamp e end_timestamp devem delimitar 90 a 160 segundos de áudio/vídeo. O campo duration_seconds deve ser consistente (diferença entre fim e início). Não use cortes de 30–60s neste modo; se precisar do mínimo absoluto, não fique abaixo de 80 segundos.
 3. Não é obrigatório ordenar a saída. Apenas preencha corretamente as notas.
@@ -334,7 +334,7 @@ CRITICAL FORMAT RULE:
 - NEVER return a root-level array.
 
 1) Generate 30–50 candidate viral short clips (30–60 seconds), all with virality_score (0–100).
-2) Generate 10 candidate long clips (8–15 minutes), all with virality_score (0–100).
+2) Generate 10 candidate long clips (8–40 minutes), all with virality_score (0–100).
 3) Ordering is optional. Focus on correct scoring and valid timestamps.
 4) Backend will pick final best scores using the job configured limits.
 
@@ -454,7 +454,7 @@ CRITICAL FORMAT RULE:
 - NEVER return a root-level array.
 
 1) Generate 30–50 candidate extended viral short clips (90–160 seconds each), all with virality_score (0–100). Prefer cohesive stories with a strong hook.
-2) Generate 10 candidate long clips (8–15 minutes), all with virality_score (0–100).
+2) Generate 10 candidate long clips (8–40 minutes), all with virality_score (0–100).
 
 CRITICAL — SHORT DURATION: start_timestamp and end_timestamp must span 90 to 160 seconds. duration_seconds must match (end minus start). Do NOT use 30–60s clips in this mode; if you must use a floor, do not go below 80 seconds.
 3) Ordering is optional. Focus on correct scoring and valid timestamps.
@@ -577,7 +577,7 @@ CRITICAL FORMAT RULE:
 - NEVER return a root-level array.
 
 1) Generate 30–50 candidate viral short clips (30–60 seconds), all with virality_score (0–100).
-2) Generate 10 candidate long clips (8–15 minutes), all with virality_score (0–100).
+2) Generate 10 candidate long clips (8–40 minutes), all with virality_score (0–100).
 3) For EVERY clip, include subtitle_segments_pt: array of {{start, end, text}} with Brazilian Portuguese translation of the transcript segments within that clip's time range. start/end in seconds (float).
 4) Backend will pick final best scores using the job configured limits.
 
