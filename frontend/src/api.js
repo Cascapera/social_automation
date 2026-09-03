@@ -474,12 +474,18 @@ export async function getBrandAssets(brandId, assetType) {
   })
 }
 
-export async function createBrandAsset(brandId, assetType, file, label = '') {
+export async function createBrandAsset(brandId, assetType, file, label = '', extra = {}) {
   const formData = new FormData()
   formData.append('brand', brandId)
   formData.append('asset_type', assetType)
   formData.append('file', file)
   if (label) formData.append('label', label)
+  // extra: campos da zona de texto dos modelos de capa (text_zone_*, alinhamento, cores, fonte)
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      formData.append(key, String(value))
+    }
+  })
   const token = getToken()
   const res = await fetch(`${API_BASE}/brand-assets/`, {
     method: 'POST',
@@ -488,7 +494,9 @@ export async function createBrandAsset(brandId, assetType, file, label = '') {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || err.file || err.asset_type || `Erro ${res.status}`)
+    const firstField = Object.values(err)[0]
+    const message = Array.isArray(firstField) ? firstField[0] : firstField
+    throw new Error(err.detail || message || `Erro ${res.status}`)
   }
   return res.json()
 }
