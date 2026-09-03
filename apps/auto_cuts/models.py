@@ -185,6 +185,22 @@ class AutoCutAnalysis(models.Model):
         related_name="+",
         help_text="Asset OVERLAY_LONG da brand; usado só se long_overlay_enabled.",
     )
+    thumb_template_short = models.ForeignKey(
+        BrandAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Modelo de capa dos shorts (THUMB_SHORT). Nulo = padrão da brand ou faixa inferior.",
+    )
+    thumb_template_long = models.ForeignKey(
+        BrandAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Modelo de capa dos longs (THUMB_LONG). Nulo = padrão da brand ou faixa inferior.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

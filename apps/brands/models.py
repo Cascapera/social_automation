@@ -331,6 +331,23 @@ class Brand(models.Model):
         default=False,
         help_text="Se ativo, insere o logo da marca nos cortes longos horizontais na finalização.",
     )
+    # Modelo de capa usado quando o job não escolhe nenhum (ex.: auto-fetch da Factory, que não tem formulário).
+    default_thumb_template_short = models.ForeignKey(
+        "BrandAsset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Modelo de capa padrão dos shorts (asset THUMB_SHORT desta marca).",
+    )
+    default_thumb_template_long = models.ForeignKey(
+        "BrandAsset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Modelo de capa padrão dos longs (asset THUMB_LONG desta marca).",
+    )
 
     class Meta:
         constraints = [
@@ -495,10 +512,62 @@ class BrandAsset(models.Model):
         ("THUMB_LONG", "Thumb Longs"),
     ]
 
+    THUMB_ASSET_TYPES = ("THUMB_SHORT", "THUMB_LONG")
+
+    TEXT_ALIGN_CHOICES = [
+        ("left", "Esquerda"),
+        ("center", "Centro"),
+        ("right", "Direita"),
+    ]
+    TEXT_VALIGN_CHOICES = [
+        ("top", "Topo"),
+        ("middle", "Meio"),
+        ("bottom", "Base"),
+    ]
+
     brand = models.ForeignKey(Brand, on_delete=models.CASCADE, related_name="assets")
     asset_type = models.CharField(max_length=16, choices=ASSET_TYPES)
     file = models.FileField(upload_to="brands/assets/")
     label = models.CharField(max_length=120, blank=True, default="")
+
+    # Zona onde o título é escrito na capa, em % da imagem. Só se aplica a THUMB_SHORT/THUMB_LONG.
+    # Padrão = lateral direita (medido em docs/cortes_sala_modelo.png: a arte escura termina em ~60% da largura).
+    text_zone_x = models.PositiveSmallIntegerField(
+        default=60, help_text="Borda esquerda da caixa de texto, em % da largura."
+    )
+    text_zone_y = models.PositiveSmallIntegerField(
+        default=8, help_text="Topo da caixa de texto, em % da altura."
+    )
+    text_zone_w = models.PositiveSmallIntegerField(
+        default=38, help_text="Largura da caixa de texto, em % da largura."
+    )
+    text_zone_h = models.PositiveSmallIntegerField(
+        default=84, help_text="Altura da caixa de texto, em % da altura."
+    )
+    text_align = models.CharField(
+        max_length=6, choices=TEXT_ALIGN_CHOICES, default="center",
+        help_text="Alinhamento horizontal das linhas dentro da caixa.",
+    )
+    text_valign = models.CharField(
+        max_length=6, choices=TEXT_VALIGN_CHOICES, default="middle",
+        help_text="Onde o bloco de texto encosta na caixa.",
+    )
+    text_color = models.CharField(
+        max_length=7, blank=True, default="",
+        help_text="Cor do texto (#RRGGBB). Vazio = cor da marca.",
+    )
+    stroke_enabled = models.BooleanField(
+        default=False,
+        help_text="Contorno no texto. Desligado por padrão: a arte do modelo já dá o contraste.",
+    )
+    stroke_color = models.CharField(
+        max_length=7, blank=True, default="",
+        help_text="Cor do contorno (#RRGGBB). Vazio = cor da marca.",
+    )
+    font = models.CharField(
+        max_length=20, blank=True, default="", choices=Brand.THUMBNAIL_FONT_CHOICES,
+        help_text="Fonte do texto. Vazio = fonte da marca.",
+    )
 
     class Meta:
         unique_together = ("brand", "asset_type", "label")
