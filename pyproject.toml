@@ -10,21 +10,20 @@ addopts = [
   "-ra",
   # Overrides DJANGO_SETTINGS_MODULE in the environment (e.g. Docker/Postgres in .env)
   "--ds=social_automation.settings_test",
-  # Coverage only for these packages (pytest-cov ignores the rest of the repo)
-  "--cov=apps.jobs.services.job_actions",
-  "--cov=apps.social.services.youtube_description",
-  "--cov=apps.social.services.secret_crypto",
-  "--cov=apps.brands.models",
-  "--cov=apps.cuts.models",
-  "--cov=apps.mediahub.models",
-  "--cov=apps.auto_cuts.models",
-  "--cov=apps.jobs.models",
-  "--cov=apps.api.urls",
-  "--cov=social_automation.settings",
-  "--cov=social_automation.settings_test",
-  "--cov=social_automation.urls",
-  "--cov-report=term-missing",
-  "--cov-fail-under=70",
+  # Coverage over the whole codebase. A narrow module list here used to report 70% while
+  # measuring 7.5% of the code, leaving the files that concentrate the bug fixes unmeasured.
+  "--cov=apps",
+  "--cov=social_automation",
+  "--cov-report=term-missing:skip-covered",
+  # Ratchet: this is coverage MEASURED in CI, not a target. Raise it whenever the real
+  # number goes up; never lower it to make a red build green.
+  # Always take the number from the CI run, never from a local one: the local suite reads
+  # ~0.2pp higher because some branches (settings.py, upload_post_analytics_client.py)
+  # depend on env vars and optional deps that differ between the two.
+  # 42,0 = medido em bb05fb8 (R-04) · 45,0 = medido em 46,46% no CI de 14/08, com 1,46pp
+  # de folga deixada de propósito para o R-08, que é movimentação pura de código bem
+  # coberto e tende a puxar o total para baixo sem que nada tenha piorado.
+  "--cov-fail-under=45.0",
 ]
 filterwarnings = [
   "ignore::DeprecationWarning",
@@ -32,6 +31,14 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
+# Test files would count as 100% covered and inflate the number (51% instead of 41%).
+omit = [
+  "*/tests/*",
+  "*/migrations/*",
+  "*/__pycache__/*",
+  "conftest.py",
+  "manage.py",
+]
 
 [tool.coverage.report]
 exclude_lines = [

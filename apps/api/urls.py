@@ -7,6 +7,7 @@ from .views import (
     AutoCutCorteViewSet,
     AutoCutSuggestionViewSet,
     BrandAssetViewSet,
+    BrandCategoryViewSet,
     BrandSocialAccountViewSet,
     BrandViewSet,
     BrandYouTubeCredentialViewSet,
@@ -17,6 +18,7 @@ from .views import (
     FactoryYoutubeDashboardView,
     FactoryYoutubeVideosView,
     JobViewSet,
+    MultipleCreatorViewSet,
     PostedVideoLogViewSet,
     RegisterViewSet,
     ScheduledPostViewSet,
@@ -29,6 +31,7 @@ router = DefaultRouter()
 router.register("factories", FactoryViewSet, basename="factory")
 router.register("search-channels", SearchChannelViewSet, basename="search-channel")
 router.register("brands", BrandViewSet, basename="brand")
+router.register("brand-categories", BrandCategoryViewSet, basename="brand-category")
 router.register("brand-assets", BrandAssetViewSet, basename="brand-asset")
 router.register("social-accounts", BrandSocialAccountViewSet, basename="social-account")
 router.register("brand-youtube-credentials", BrandYouTubeCredentialViewSet, basename="brand-youtube-credential")
@@ -43,6 +46,7 @@ router.register("auto-cut-cortes", AutoCutCorteViewSet, basename="auto-cut-corte
 router.register("video-inventory", VideoInventoryItemViewSet, basename="video-inventory")
 router.register("factory-schedules", FactoryPostingScheduleViewSet, basename="factory-schedule")
 router.register("posted-videos", PostedVideoLogViewSet, basename="posted-videos")
+router.register("multiple-creator", MultipleCreatorViewSet, basename="multiple-creator")
 
 urlpatterns = [
     path("dashboard-metrics/", DashboardMetricsView.as_view(), name="dashboard-metrics"),

@@ -474,6 +474,8 @@ class VideoInventoryItem(models.Model):
         Factory,
         on_delete=models.CASCADE,
         related_name="video_inventory_items",
+        null=True,
+        blank=True,
     )
     brand = models.ForeignKey(
         Brand,
@@ -638,6 +640,8 @@ class FactoryPostingSchedule(models.Model):
         Factory,
         on_delete=models.CASCADE,
         related_name="posting_schedules",
+        null=True,
+        blank=True,
     )
     brand = models.ForeignKey(
         Brand,
@@ -710,6 +714,8 @@ class PostedVideoLog(models.Model):
         Factory,
         on_delete=models.CASCADE,
         related_name="posted_video_logs",
+        null=True,
+        blank=True,
     )
     brand = models.ForeignKey(
         Brand,

@@ -34,6 +34,21 @@ FIRST_COMMENT_DELAY_MIN_SECONDS = 30
 FIRST_COMMENT_DELAY_MAX_SECONDS = 180
 
 
+def _is_immediate_prepublish(post: ScheduledPost | None) -> bool:
+    """O post veio do botão "Postar Imediato" (upload antecipado, publicação no slot)?
+
+    Marcado em `factory_scheduler.allocate_inventory_item_to_slot`. Serve para duas
+    decisões neste módulo, ambas sobre não deixar o vídeo ir ao ar antes da hora.
+
+    A checagem de `dict` não é preciosismo: `post` é `MagicMock` em vários testes, e
+    `mock.external_ids.get(...)` devolveria um mock verdadeiro.
+    """
+    external_ids = getattr(post, "external_ids", None)
+    if not isinstance(external_ids, dict):
+        return False
+    return bool(external_ids.get("immediate_prepublish"))
+
+
 def _sanitize_youtube_title(title: str, fallback: str = "Vídeo") -> str:
     """
     Sanitiza título para a API do YouTube.
@@ -98,17 +113,8 @@ class YouTubePublisher(BasePublisher):
         tags = (post.tags if post else []) or []
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
-        privacy = (post.privacy_status if post else "private") or "private"
-        if privacy not in ("public", "private", "unlisted"):
-            privacy = "private"
         made_for_kids = bool(getattr(account.brand, "youtube_made_for_kids", False))
-        publish_at, privacy_override = self._resolve_publish_mode(post, account)
-        if privacy_override:
-            privacy = privacy_override
-        # Slots fixos já espaçam as postagens; não verificamos mais intervalo mínimo.
-        # Padrão para agendamento futuro no YouTube: privado + publishAt.
-        if publish_at:
-            privacy = "private"
+        publish_at, privacy = self._resolve_publish_at_and_privacy(post, account)
         snippet = {
             "title": title,
             "description": description[:5000],
@@ -343,6 +349,38 @@ class YouTubePublisher(BasePublisher):
             return None
         return scheduled_at.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
+    def _resolve_publish_at_and_privacy(
+        self, post: ScheduledPost | None, account: BrandSocialAccount
+    ) -> tuple[str | None, str]:
+        """`publishAt` e `privacyStatus` finais do corpo do `videos.insert`.
+
+        Saiu de dentro de `publish` para poder ser testado sem a API do Google — a decisão
+        de privacidade é o que separa "vídeo no ar na hora certa" de "vídeo invisível para
+        sempre", e estava sem cobertura.
+
+        Ordem: privacidade do post → override do sorteio de longos → `publishAt` obriga
+        `private` (é assim que o YouTube guarda o vídeo até a hora) → e, sem `publishAt` num
+        envio antecipado, `public`, porque nada no repositório volta para abrir um vídeo
+        privado depois.
+        """
+        privacy = (post.privacy_status if post else "private") or "private"
+        if privacy not in ("public", "private", "unlisted"):
+            privacy = "private"
+        publish_at, privacy_override = self._resolve_publish_mode(post, account)
+        if privacy_override:
+            privacy = privacy_override
+        # Slots fixos já espaçam as postagens; não verificamos mais intervalo mínimo.
+        # Padrão para agendamento futuro no YouTube: privado + publishAt.
+        if publish_at:
+            privacy = "private"
+        elif _is_immediate_prepublish(post):
+            # Envio antecipado que perdeu o publishAt — o slot ficou a menos de 30s
+            # enquanto o post esperava na fila. Subir privado aqui seria vídeo invisível
+            # para sempre: não existe nenhum videos().update() de privacidade no
+            # repositório. Publicar na hora é o menor dos dois males.
+            privacy = "public"
+        return publish_at, privacy
+
     def _resolve_publish_mode(
         self, post: ScheduledPost | None, account: BrandSocialAccount
     ) -> tuple[str | None, str | None]:
@@ -353,11 +391,17 @@ class YouTubePublisher(BasePublisher):
         publica direto como public (sem publishAt). Reduz o padrao de todo
         upload usar agendamento nativo.
         Retorna (publish_at, privacy_override). privacy_override=None preserva o valor atual.
+
+        O sorteio fica de fora quando o upload é antecipado ("Postar Imediato"): lá o vídeo
+        sobe horas ou dias antes do slot, e descartar o publishAt colocaria o vídeo no ar
+        no momento do upload — que é exatamente o que o botão deixou de fazer. No fluxo
+        normal o upload acontece no máximo 1h antes do slot, e a antecipação é aceita.
         """
         publish_at = self._get_publish_at(post)
         if (
             publish_at
             and account.platform == "YTB"
+            and not _is_immediate_prepublish(post)
             and random.random() < LONG_DIRECT_PUBLIC_PROBABILITY
         ):
             return None, "public"

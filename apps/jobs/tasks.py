@@ -1,5 +1,4 @@
 import logging
-import os
 import tempfile
 from pathlib import Path
 
@@ -45,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 def _whisper_workload_type() -> str:
     """Return 'cpu' or 'gpu' based on the same device-selection logic as generate_subtitles."""
-    env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    env_device = settings.WHISPER_DEVICE
     force_cpu = getattr(settings, "WHISPER_FORCE_CPU", False) or env_device == "cpu"
     return "cpu" if force_cpu else "gpu"
 

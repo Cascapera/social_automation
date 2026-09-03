@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     Brand,
     BrandAsset,
+    BrandCategory,
     BrandSocialAccount,
     BrandYouTubeCredential,
     Factory,
@@ -82,10 +83,33 @@ class BrandAdmin(admin.ModelAdmin):
     def brand_id_display(self, obj):
         return f"brand_{obj.id}" if obj.id else "-"
 
+@admin.register(BrandCategory)
+class BrandCategoryAdmin(admin.ModelAdmin):
+    list_display = ("factory", "code", "label", "is_active", "updated_at")
+    list_filter = ("factory", "is_active")
+    search_fields = ("code", "label")
+    readonly_fields = ("code", "created_at", "updated_at")
+
+
 @admin.register(BrandAsset)
 class BrandAssetAdmin(admin.ModelAdmin):
     list_display = ("brand", "asset_type", "label", "file")
     list_filter = ("brand", "asset_type")
+    fieldsets = (
+        (None, {"fields": ("brand", "asset_type", "label", "file")}),
+        (
+            "Zona de texto (só para Thumb Shorts/Longs)",
+            {
+                "fields": (
+                    ("text_zone_x", "text_zone_y", "text_zone_w", "text_zone_h"),
+                    ("text_align", "text_valign"),
+                    ("font", "text_color"),
+                    ("stroke_enabled", "stroke_color"),
+                ),
+                "description": "Posição da caixa onde o título é escrito, em % da imagem.",
+            },
+        ),
+    )
 
 
 @admin.register(BrandSocialAccount)

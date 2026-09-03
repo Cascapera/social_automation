@@ -10,9 +10,11 @@ import EditarVideos from './pages/EditarVideos'
 import Agendamento from './pages/Agendamento'
 import IntroOutro from './pages/IntroOutro'
 import CortesAutomaticos from './pages/CortesAutomaticos'
+import MultipleCreator from './pages/MultipleCreator'
 import CanaisBusca from './pages/CanaisBusca'
 import Contas from './pages/Contas'
 import BancoVideos from './pages/BancoVideos'
+import FactoryConfig from './pages/FactoryConfig'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -41,7 +43,9 @@ export default function App() {
         <Route path="canais-busca" element={<CanaisBusca />} />
         <Route path="banco-videos" element={<BancoVideos />} />
         <Route path="midias-marca" element={<IntroOutro />} />
+        <Route path="factory-config" element={<FactoryConfig />} />
         <Route path="cortes-automaticos" element={<CortesAutomaticos />} />
+        <Route path="multiple-creator" element={<MultipleCreator />} />
         <Route path="contas" element={<Contas />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

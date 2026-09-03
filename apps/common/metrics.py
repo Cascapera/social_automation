@@ -11,25 +11,32 @@ try:
     from prometheus_client import Counter, Histogram
 except ImportError:  # e.g. image not rebuilt after requirements.txt change
 
-    class _NoOpChild:
-        def inc(self, amount: int = 1) -> None:
+    class _NoOpMetric:
+        """Stand-in for Counter/Histogram covering the surface used in this codebase.
+
+        ``labels()`` returns ``self`` on purpose: a single class means the labelled and
+        unlabelled paths can never drift apart (a previous split let ``observe()`` exist
+        only on the labelled side, so ``publish_duration_ms.observe()`` raised
+        ``AttributeError`` in the very scenario this fallback exists for).
+        """
+
+        def __init__(self, labelnames=()):
+            self._labelnames = tuple(labelnames)
+
+        def labels(self, *args, **kwargs):
+            return self
+
+        def inc(self, amount: float = 1) -> None:
             pass
 
         def observe(self, value: float) -> None:
             pass
 
-    class _NoOpMetric:
-        def labels(self, *args, **kwargs):
-            return _NoOpChild()
+    def Counter(name, documentation="", labelnames=(), **kwargs):
+        return _NoOpMetric(labelnames)
 
-        def inc(self, amount: int = 1) -> None:
-            pass
-
-    def Counter(*args, **kwargs):
-        return _NoOpMetric()
-
-    def Histogram(*args, **kwargs):
-        return _NoOpMetric()
+    def Histogram(name, documentation="", labelnames=(), **kwargs):
+        return _NoOpMetric(labelnames)
 
 # Buckets for durations stored as milliseconds (observed values are ms).
 _DURATION_MS_BUCKETS = (
@@ -183,5 +190,27 @@ grok_request_duration_ms = Histogram(
     "grok_request_duration_ms",
     "Grok API request duration in milliseconds",
     ("model",),
+    buckets=_DURATION_MS_BUCKETS,
+)
+
+# --- Multiple-Creator (Fase 7) ---
+multiple_creator_jobs_total = Counter(
+    "multiple_creator_jobs_total",
+    "MultipleCreatorJob terminados (DONE/PARTIAL/ERROR)",
+    ("result",),
+)
+multiple_creator_brand_executions_total = Counter(
+    "multiple_creator_brand_executions_total",
+    "MultipleCreatorBrandExecution terminadas (DONE/ERROR)",
+    ("result",),
+)
+multiple_creator_duration_ms = Histogram(
+    "multiple_creator_duration_ms",
+    "Duracao total do MultipleCreatorJob (criacao -> status terminal)",
+    buckets=_DURATION_MS_BUCKETS,
+)
+multiple_creator_transcription_savings_ms = Histogram(
+    "multiple_creator_transcription_savings_ms",
+    "Tempo economizado pela transcricao unica vs. abordagem antiga: duration * (n_brands - 1)",
     buckets=_DURATION_MS_BUCKETS,
 )

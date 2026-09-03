@@ -1,9 +1,10 @@
 """Download de videos do YouTube via yt-dlp."""
 
 import logging
-import os
 import time
 from pathlib import Path
+
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ def _yt_dlp_youtube_extractor_options(*, has_cookies: bool) -> dict:
     Sem cookies: tenta android/web/ios.
     EJS: precisa de runtime JS (Deno no Dockerfile) + pip install 'yt-dlp[default]' (yt-dlp-ejs).
     """
-    raw = (os.getenv("YTDLP_YOUTUBE_PLAYER_CLIENTS") or "").strip()
+    raw = settings.YTDLP_YOUTUBE_PLAYER_CLIENTS
     if raw:
         clients = [x.strip() for x in raw.split(",") if x.strip()]
     elif has_cookies:
@@ -38,7 +39,7 @@ def _yt_dlp_js_runtime_options() -> dict:
     Por omissão o yt-dlp já usa Deno (js_runtimes=['deno']). Só sobrescreve com YTDLP_JS_RUNTIMES
     (ex.: 'node', 'deno,node', 'node:/usr/bin/node'). Valores separados por vírgula.
     """
-    raw = (os.getenv("YTDLP_JS_RUNTIMES") or "").strip()
+    raw = settings.YTDLP_JS_RUNTIMES
     if not raw:
         return {}
     parts = [p.strip() for p in raw.split(",") if p.strip()]
@@ -55,7 +56,7 @@ def _yt_dlp_cookie_options() -> dict:
     Ver: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
     """
     opts: dict = {}
-    cookiefile = (os.getenv("YTDLP_COOKIES_FILE") or "").strip()
+    cookiefile = settings.YTDLP_COOKIES_FILE
     if cookiefile:
         p = Path(cookiefile).expanduser()
         if p.is_file():
@@ -67,7 +68,7 @@ def _yt_dlp_cookie_options() -> dict:
             p,
         )
 
-    browser = (os.getenv("YTDLP_COOKIES_FROM_BROWSER") or "").strip()
+    browser = settings.YTDLP_COOKIES_FROM_BROWSER
     if not browser:
         return opts
 
@@ -91,12 +92,8 @@ def _youtube_format_candidates() -> list[str]:
     YTDLP_MIN_VIDEO_HEIGHT (ex.: 720, 1080): tenta primeiro vídeo com altura >= N px.
     Use 0 para desativar o filtro e manter só o comportamento antigo (melhor disponível).
     """
-    raw = (os.getenv("YTDLP_MIN_VIDEO_HEIGHT") or "").strip()
-    try:
-        min_h = int(raw) if raw else 720
-    except ValueError:
-        min_h = 720
-    min_h = max(0, min_h)
+    # Já normalizada no settings: default 720, tolera valor inválido, piso em 0.
+    min_h = settings.YTDLP_MIN_VIDEO_HEIGHT
 
     # Fallbacks sem filtro de altura (se o vídeo não tiver 720p/1080p, ainda baixa o melhor possível).
     base = [

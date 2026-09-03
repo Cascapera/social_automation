@@ -9,52 +9,72 @@ from zoneinfo import ZoneInfo
 
 from celery import shared_task
 from django.conf import settings
-from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from apps.brands.models import Brand, BrandSocialAccount, BrandYouTubeCredential, Factory
+from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk
+from apps.brands.models import (
+    Brand,
+    BrandAsset,
+    BrandSocialAccount,
+    BrandYouTubeCredential,
+    Factory,
+)
 from apps.common.metrics import (
     publish_attempts_total,
-    publish_duration_ms,
     publish_failures_total,
-    publish_quota_exhaustion_attempts_total,
     publish_reconciliation_duration_ms,
     publish_reconciliation_failures_total,
     publish_reconciliation_runs_total,
-    upload_post_reconciliation_completed_total,
-    upload_post_reconciliation_runs_total,
-    upload_post_unknown_results_total,
 )
 from apps.common.task_observability import instrument_celery_task
+from apps.cuts.models import Cut
 from apps.jobs.logging_utils import (
     Timer,
     log_event,
     new_correlation_id,
-    resolve_scheduled_post_correlation_id,
 )
 from apps.jobs.models import (
-    DailyPostingPlanItem,
     FactoryPostingAttemptLog,
     FactoryPostingSchedule,
     Job,
-    PostedVideoLog,
     RenderOutput,
     ScheduledPost,
     VideoInventoryItem,
 )
 from apps.jobs.services.factory_scheduler import (
-    allocate_inventory_item_to_slot,
     generate_daily_schedule_for_factory,
-    pick_inventory_item_for_slot,
 )
-from apps.social.services.idempotency import (
-    acquire_idempotency_key,
-    get_existing_idempotency_result,
-    mark_idempotency_failed,
-    mark_idempotency_success,
+from apps.mediahub.models import SourceVideo
+from apps.social.publishers import get_publisher
+from apps.social.publishers.youtube import YouTubePublisher
+from apps.social.services.posting_state import mark_posted, mark_still_scheduled
+from apps.social.services.publish_targets import (
+    _first_youtube_platform,
+    _list_ordered_youtube_credentials,
+    _platforms_are_youtube_only,
+    _resolve_brand_youtube_account,
+    _resolve_post_target_brand,
+    _resolve_social_account_for_platform,
+    _should_remove_missing_by_verify_error,
+    _youtube_verify_exists_with_credential_fallback,
 )
+from apps.social.services.publishing.finalize import FinalizeContext, finalize_publish
+from apps.social.services.publishing.idempotency_keys import (
+    _build_upload_post_platforms,
+)
+from apps.social.services.publishing.preflight import EarlyExit, preflight
+from apps.social.services.publishing.slots import (
+    _cleanup_local_media_if_possible,
+    _fail_expired_factory_slot,
+    _remove_schedule_records_missing_on_youtube,
+    _sync_factory_posting_schedule,
+    _youtube_day_video_index,
+)
+from apps.social.services.publishing.upload_post import publish_via_upload_post
+from apps.social.services.publishing.youtube_native import publish_native_platforms
+from apps.social.services.youtube_credentials import get_credentials
 
 logger = logging.getLogger(__name__)
 YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
@@ -62,856 +82,35 @@ YOUTUBE_PLATFORM_CODES = {"YT", "YTB"}
 UPLOAD_POST_LONG_MAX_BYTES = 250 * 1024 * 1024
 BATCH_LIMIT_PER_TICK = 20
 YOUTUBE_VERIFY_GRACE_SECONDS = 600
-YOUTUBE_CHECK_CLIENT_ENABLED = bool(
-    (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
-    and (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
-)
+# YOUTUBE_CHECK_CLIENT_ENABLED vivia aqui, lido no import. O refactor.md o registrava como
+# "área intestável" e como o ramo que o R-04 não conseguiu cobrir — mas era CÓDIGO MORTO:
+# nada no repositório o lia. Removido no R-17; a configuração agora é settings.YOUTUBE_CHECK_*
+# e quem decide se o cliente de check está ligado é o próprio ponto de uso.
 SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS = 1
 
 
-def _cleanup_local_media_if_possible(post: ScheduledPost) -> None:
-    """
-    Remove local files after successful posting to save storage.
-    Only cleans when there are no other active schedules for the same source.
-    """
-    try:
-        active_statuses = ["PENDING", "POSTING"]
-        if post.job_id:
-            has_other_active = ScheduledPost.objects.filter(
-                job_id=post.job_id,
-                status__in=active_statuses,
-            ).exclude(id=post.id).exists()
-            if has_other_active:
-                return
-            try:
-                output = post.job.output
-            except Exception:
-                output = None
-            if output and output.file:
-                output.file.delete(save=True)
-            return
 
-        if post.auto_cut_corte_id:
-            has_other_active = ScheduledPost.objects.filter(
-                auto_cut_corte_id=post.auto_cut_corte_id,
-                status__in=active_statuses,
-            ).exclude(id=post.id).exists()
-            if has_other_active:
-                return
-            corte = post.auto_cut_corte
-            if corte and corte.file:
-                corte.file.delete(save=False)
-                corte.file = None
-            if corte and getattr(corte, "thumbnail", None):
-                corte.thumbnail.delete(save=False)
-                corte.thumbnail = None
-            if corte:
-                corte.save(update_fields=["file", "thumbnail"])
-    except Exception:
-        logger.exception("Failed to clean local media for ScheduledPost=%s", post.id)
 
 
-def _platforms_are_youtube_only(platforms) -> bool:
-    codes = {str(code).strip().upper() for code in (platforms or []) if str(code).strip()}
-    return bool(codes) and codes.issubset(YOUTUBE_PLATFORM_CODES)
 
 
-def _first_youtube_platform(platforms) -> str | None:
-    for code in (platforms or []):
-        normalized = str(code).strip().upper()
-        if normalized in YOUTUBE_PLATFORM_CODES:
-            return normalized
-    return None
 
 
-def _youtube_channel_key_and_interval(post) -> tuple[str | None, int]:
-    """
-    For YouTube posts, returns (channel_key, min_interval_seconds) for serialization.
-    channel_key identifies the channel; min_interval is minimum spacing in seconds.
-    For non-YouTube returns (None, 0).
-    """
-    platform = _first_youtube_platform(post.platforms or [])
-    if not platform:
-        return None, 0
-    brand = _resolve_post_target_brand(post) or (getattr(post, "job", None) and getattr(post.job, "brand", None))
-    if not brand:
-        return None, 0
-    account = _resolve_social_account_for_platform(post, brand, platform)
-    if not account:
-        from apps.brands.models import BrandSocialAccount
 
-        account = (
-            BrandSocialAccount.objects.filter(
-                brand=brand,
-                platform__in=["YT", "YTB"],
-            )
-            .order_by("id")
-            .first()
-        )
-    channel_id = (getattr(account, "channel_id", None) or "").strip() if account else ""
-    channel_key = f"yt_{channel_id}" if channel_id else f"yt_brand_{brand.id}_{platform}"
-    # Defaults: shorts 60 min, long-form 180 min (fixed slots already space; interval is for send queue)
-    minutes = 60 if platform == "YT" else 180
-    return channel_key, minutes * 60
 
 
-def _resolve_social_account_for_platform(post: ScheduledPost, brand, platform: str):
-    if post.social_account and post.social_account.platform in (platform, "YT", "YTB"):
-        return post.social_account
-    from apps.brands.models import BrandSocialAccount
 
-    candidates = [platform]
-    if platform == "YT":
-        candidates.append("YTB")
-    elif platform == "YTB":
-        candidates.append("YT")
-    return (
-        BrandSocialAccount.objects.filter(brand=brand, platform__in=candidates)
-        .order_by("id")
-        .first()
-    )
 
 
-def _resolve_post_target_brand(post: ScheduledPost):
-    """
-    Resolve the effective publishing brand.
-    Prefers FactoryPostingSchedule brand (factory routing destination).
-    """
-    try:
-        schedule = getattr(post, "factory_schedule", None)
-    except Exception:
-        schedule = None
-    if schedule and getattr(schedule, "brand_id", None):
-        return schedule.brand
-    if post.job_id:
-        return post.job.brand
-    if post.auto_cut_corte_id:
-        corte = post.auto_cut_corte
-        return corte.analysis.brand if corte and corte.analysis_id else None
-    return None
 
-
-def _list_ordered_youtube_credentials(brand):
-    if not brand:
-        return []
-    return list(
-        BrandYouTubeCredential.objects.filter(brand=brand, is_active=True)
-        .order_by("order_index", "id")
-    )
-
-
-def _source_media_exists(post: ScheduledPost) -> bool:
-    try:
-        if post.job_id:
-            output = getattr(post.job, "output", None)
-            return bool(output and output.file and output.file.name)
-        if post.auto_cut_corte_id:
-            corte = post.auto_cut_corte
-            return bool(corte and corte.file and corte.file.name)
-    except Exception:
-        return False
-    return False
-
-
-def _youtube_video_exists_on_channel(account, video_id: str, youtube_credential=None) -> tuple[bool, dict]:
-    """
-    Check whether the video exists on the authenticated channel.
-    """
-    from googleapiclient.discovery import build
-    from googleapiclient.errors import HttpError
-
-    from apps.social.services.youtube_credentials import get_credentials
-
-    # Use same OAuth client that issued the token (brand/global). Check client causes unauthorized_client.
-    creds = get_credentials(
-        account,
-        youtube_credential=youtube_credential,
-        use_check_client=False,
-    )
-    youtube = build("youtube", "v3", credentials=creds)
-    try:
-        resp = youtube.videos().list(part="id,snippet,status", id=video_id).execute()
-    except HttpError as e:
-        status_code = getattr(getattr(e, "resp", None), "status", None)
-        return False, {"error": f"youtube_api_http_{status_code or 'unknown'}"}
-    except Exception as e:
-        return False, {"error": f"youtube_api_error:{e}"}
-    items = (resp or {}).get("items") or []
-    if not items:
-        return False, {"error": "video_not_found"}
-    item = items[0]
-    channel_id = str((item.get("snippet") or {}).get("channelId") or "")
-    expected_channel = str(getattr(account, "channel_id", "") or "")
-    if expected_channel and channel_id and expected_channel != channel_id:
-        return False, {"error": "channel_mismatch", "channel_id": channel_id}
-    return True, {
-        "channel_id": channel_id,
-        "privacy_status": (item.get("status") or {}).get("privacyStatus"),
-        "publish_at": (item.get("status") or {}).get("publishAt"),
-    }
-
-
-def _youtube_verify_exists_with_credential_fallback(account, brand, video_id: str) -> tuple[bool, dict]:
-    """
-    Verify YouTube existence using default account then brand credentials as fallback.
-    """
-    # 1) try default flow for linked social account
-    exists, data = _youtube_video_exists_on_channel(account, video_id)
-    if exists:
-        return True, data
-
-    # 2) on auth/token error, try brand YouTube credentials
-    err = str((data or {}).get("error") or "").lower()
-    is_auth_related = any(
-        token in err
-        for token in ("unauthorized_client", "invalid_grant", "oauth", "token", "credential", "403", "401")
-    )
-    if not is_auth_related:
-        return False, data
-
-    last_data = data or {}
-    for yt_cred in _list_ordered_youtube_credentials(brand):
-        if not (str(getattr(yt_cred, "refresh_token", "") or "").strip()):
-            continue
-        exists2, data2 = _youtube_video_exists_on_channel(account, video_id, youtube_credential=yt_cred)
-        if exists2:
-            return True, data2
-        last_data = data2 or last_data
-    return False, last_data
-
-
-def _should_remove_missing_by_verify_error(verify_data: dict) -> bool:
-    """
-    Only remove from schedule when we have evidence of real absence on YouTube.
-    Auth/network/temporary errors do NOT remove.
-    """
-    err = str((verify_data or {}).get("error") or "").strip().lower()
-    if not err:
-        return False
-    return err in {"video_not_found", "channel_mismatch"}
-
-
-def _resolve_brand_youtube_account(brand):
-    from apps.brands.models import BrandSocialAccount
-
-    return (
-        BrandSocialAccount.objects.filter(brand=brand, platform__in=["YTB", "YT"])
-        .order_by("id")
-        .first()
-    )
-
-
-def _youtube_day_video_index(
-    account,
-    day_start_utc: datetime,
-    day_end_utc: datetime,
-    youtube_credential=None,
-) -> dict[str, dict]:
-    """
-    Index channel videos for the day (published and scheduled).
-    """
-    from googleapiclient.discovery import build
-
-    from apps.social.services.youtube_credentials import get_credentials
-
-    # Same OAuth client that issued the token (brand/global); check client causes unauthorized_client.
-    creds = get_credentials(
-        account,
-        youtube_credential=youtube_credential,
-        use_check_client=False,
-    )
-    youtube = build("youtube", "v3", credentials=creds)
-    # Discover uploads playlist for authenticated account.
-    ch_resp = youtube.channels().list(part="contentDetails", mine=True, maxResults=1).execute()
-    ch_items = (ch_resp or {}).get("items") or []
-    if not ch_items:
-        return {}
-    uploads_playlist = (
-        ((ch_items[0] or {}).get("contentDetails") or {})
-        .get("relatedPlaylists", {})
-        .get("uploads", "")
-    )
-    if not uploads_playlist:
-        return {}
-
-    video_ids: list[str] = []
-    page_token = None
-    # Conservative limit to avoid excessive quota use.
-    max_pages = max(1, min(12, int(os.getenv("YOUTUBE_FULL_SCAN_MAX_PAGES", "4") or "4")))
-    for _ in range(max_pages):
-        pl_resp = youtube.playlistItems().list(
-            part="snippet,contentDetails",
-            playlistId=uploads_playlist,
-            maxResults=50,
-            pageToken=page_token,
-        ).execute()
-        items = (pl_resp or {}).get("items") or []
-        if not items:
-            break
-        for item in items:
-            vid = (
-                ((item.get("contentDetails") or {}).get("videoId"))
-                or ((item.get("snippet") or {}).get("resourceId") or {}).get("videoId")
-                or ""
-            )
-            if vid:
-                video_ids.append(str(vid))
-        page_token = (pl_resp or {}).get("nextPageToken")
-        if not page_token:
-            break
-
-    # Load status/publishAt details in batches.
-    index: dict[str, dict] = {}
-    for start in range(0, len(video_ids), 50):
-        batch_ids = video_ids[start:start + 50]
-        if not batch_ids:
-            continue
-        v_resp = youtube.videos().list(
-            part="snippet,status",
-            id=",".join(batch_ids),
-            maxResults=50,
-        ).execute()
-        for item in (v_resp or {}).get("items") or []:
-            vid = str(item.get("id") or "")
-            if not vid:
-                continue
-            snippet = item.get("snippet") or {}
-            status_data = item.get("status") or {}
-            publish_at_raw = status_data.get("publishAt")
-            uploaded_at_raw = snippet.get("publishedAt")
-            publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
-            uploaded_at = parse_datetime(str(uploaded_at_raw or "")) if uploaded_at_raw else None
-            if publish_at and timezone.is_naive(publish_at):
-                publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-            if uploaded_at and timezone.is_naive(uploaded_at):
-                uploaded_at = timezone.make_aware(uploaded_at, timezone.get_current_timezone())
-
-            # In window: use publishAt when present else upload date.
-            ref_dt = publish_at or uploaded_at
-            if not ref_dt:
-                continue
-            if ref_dt < day_start_utc or ref_dt > day_end_utc:
-                continue
-
-            index[vid] = {
-                "title": str(snippet.get("title") or ""),
-                "privacy_status": str(status_data.get("privacyStatus") or ""),
-                "publish_at": publish_at_raw or "",
-                "uploaded_at": uploaded_at_raw or "",
-            }
-    return index
-
-
-def _sync_factory_posting_schedule(post: ScheduledPost) -> None:
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
-        "inventory_item", "factory", "brand"
-    ).first()
-    if not schedule:
-        return
-    item = schedule.inventory_item
-    now = timezone.now()
-    is_youtube = _platforms_are_youtube_only(post.platforms)
-    if post.status == "DONE":
-        if is_youtube:
-            # YouTube: successful upload means video is on channel (public or scheduled).
-            # Mark POSTED for Posted Videos list and skip re-check (saves quota).
-            schedule.status = "DONE"
-            schedule.attempt_count = int(post.retry_count or 0)
-            schedule.next_retry_at = None
-            schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-            item.status = "POSTED"
-            item.posted_at = post.posted_at or now
-            item.scheduled_for = post.scheduled_at
-            item.last_error = ""
-            item.attempt_count = int(post.retry_count or 0)
-            item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-            external_video_id = ""
-            for code in (post.platforms or []):
-                external_video_id = str((post.external_ids or {}).get(code) or "")
-                if external_video_id:
-                    break
-            if external_video_id and not PostedVideoLog.objects.filter(
-                inventory_item=item,
-                external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
-                external_video_id=external_video_id,
-            ).exists():
-                PostedVideoLog.objects.create(
-                    factory=schedule.factory,
-                    brand=schedule.brand,
-                    inventory_item=item,
-                    external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
-                    external_video_id=external_video_id,
-                    posted_at=post.posted_at or now,
-                    metadata_snapshot={
-                        "scheduled_post_id": post.id,
-                        "platforms": post.platforms or [],
-                        "external_ids": post.external_ids or {},
-                    },
-                )
-            return
-        schedule.status = "DONE"
-        schedule.attempt_count = int(post.retry_count or 0)
-        schedule.next_retry_at = None
-        schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        item.status = "POSTED"
-        item.posted_at = post.posted_at or now
-        item.scheduled_for = post.scheduled_at  # fills schedule time once YouTube confirmed
-        item.last_error = ""
-        item.attempt_count = int(post.retry_count or 0)
-        item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-        external_video_id = ""
-        for code in (post.platforms or []):
-            external_video_id = str((post.external_ids or {}).get(code) or "")
-            if external_video_id:
-                break
-        PostedVideoLog.objects.create(
-            factory=schedule.factory,
-            brand=schedule.brand,
-            inventory_item=item,
-            external_platform=((post.platforms or ["YT"])[0] if post.platforms else "YT"),
-            external_video_id=external_video_id,
-            posted_at=post.posted_at or now,
-            metadata_snapshot={
-                "scheduled_post_id": post.id,
-                "platforms": post.platforms or [],
-                "external_ids": post.external_ids or {},
-            },
-        )
-        return
-    if post.status == "FAILED":
-        quota_attempts = int(getattr(post, "youtube_quota_retry_count", 0) or 0)
-        attempts = int(post.retry_count or 0) + quota_attempts
-        schedule.status = "FAILED"
-        schedule.attempt_count = attempts
-        schedule.next_retry_at = None
-        schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        is_standalone = schedule.daily_plan_item_id is None
-        item.status = "FAILED" if is_standalone else "AVAILABLE"
-        item.scheduled_for = schedule.scheduled_at if is_standalone else None
-        item.last_error = post.error or ""
-        item.attempt_count = attempts
-        item.save(update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-        return
-    quota_retries = int(getattr(post, "youtube_quota_retry_count", 0) or 0)
-    if post.status == "PENDING" and (int(post.retry_count or 0) > 0 or quota_retries > 0):
-        schedule.status = "PLANNED"
-        schedule.attempt_count = int(post.retry_count or 0) + quota_retries
-        schedule.next_retry_at = post.scheduled_at
-        schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-        item.status = "SCHEDULED"
-        item.last_error = post.error or ""
-        item.attempt_count = int(post.retry_count or 0) + quota_retries
-        item.save(update_fields=["status", "last_error", "attempt_count", "updated_at"])
-
-
-def _factory_slot_deadline(post: ScheduledPost) -> datetime | None:
-    try:
-        schedule = getattr(post, "factory_schedule", None)
-    except Exception:
-        schedule = None
-    # Publicação avulsa (sem daily_plan_item): não tem deadline de slot.
-    if schedule and getattr(schedule, "daily_plan_item_id", None) is None:
-        return None
-    if schedule and getattr(schedule, "scheduled_at", None):
-        return schedule.scheduled_at
-    if not getattr(post, "id", None):
-        return None
-    schedule = (
-        FactoryPostingSchedule.objects.filter(scheduled_post_id=post.id)
-        .only("scheduled_at", "daily_plan_item_id")
-        .first()
-    )
-    if not schedule or schedule.daily_plan_item_id is None:
-        return None
-    return schedule.scheduled_at
-
-
-def _fail_expired_factory_slot(
-    post: ScheduledPost,
-    *,
-    correlation_id: str,
-    brand_id: int | None,
-    current_attempt: int,
-    duration_ms: float,
-    reason: str,
-    check_time: datetime | None = None,
-) -> dict | None:
-    deadline = _factory_slot_deadline(post)
-    if not deadline:
-        return None
-    when = check_time or timezone.now()
-    if when <= deadline:
-        return None
-
-    ext = dict(post.external_ids or {})
-    ext["slot_expired"] = True
-    ext["slot_expired_at"] = timezone.now().isoformat()
-    ext["slot_deadline_at"] = deadline.isoformat()
-    ext.pop("upload_post_reconciliation_state", None)
-    ext.pop("upload_post_no_provider_id_check_count", None)
-    ext.pop("upload_post_resend_count", None)
-
-    post.status = "FAILED"
-    post.external_ids = ext
-    post.error = (
-        f"Janela de postagem expirada para o slot {deadline.isoformat()}. "
-        f"{(reason or '').strip()[:260]}".strip()
-    )
-    post.save(update_fields=["status", "external_ids", "error"])
-
-    try:
-        FactoryPostingAttemptLog.objects.create(
-            posting_schedule=post.factory_schedule,
-            attempt_number=current_attempt,
-            started_at=timezone.now(),
-            finished_at=timezone.now(),
-            result="ERROR",
-            error_message=post.error,
-            provider_response={
-                "external_ids": post.external_ids or {},
-                "slot_deadline_at": deadline.isoformat(),
-                "checked_at": when.isoformat(),
-            },
-        )
-    except Exception:
-        pass
-
-    publish_failures_total.inc()
-    log_event(
-        logger,
-        event="publish_window_expired",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=brand_id,
-        platform="youtube",
-        slot_deadline_at=deadline.isoformat(),
-        checked_at=when.isoformat(),
-        status="error",
-    )
-    log_event(
-        logger,
-        event="publish_finished",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=brand_id,
-        platform="youtube",
-        status="error",
-        duration_ms=duration_ms,
-        attempt_number=current_attempt,
-        error=post.error,
-    )
-    _sync_factory_posting_schedule(post)
-    return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
-
-
-@transaction.atomic
-def _replace_ambiguous_short_slot(
-    post: ScheduledPost,
-    *,
-    current_attempt: int,
-    correlation_id: str,
-    duration_ms: float,
-    provider_not_found: bool,
-    detail: str,
-    external_ids: dict,
-) -> dict | None:
-    try:
-        schedule = (
-            FactoryPostingSchedule.objects.select_for_update()
-            .select_related("inventory_item", "factory", "brand")
-            .get(scheduled_post_id=post.id)
-        )
-    except FactoryPostingSchedule.DoesNotExist:
-        return None
-
-    if schedule.video_type != "SHORT" or not schedule.inventory_item_id:
-        return None
-    # Publicação avulsa: o usuário escolheu este vídeo; não substitui por outro.
-    if schedule.daily_plan_item_id is None:
-        return None
-
-    inventory_item = VideoInventoryItem.objects.select_for_update().get(pk=schedule.inventory_item_id)
-    replacement_count = int((external_ids or {}).get("short_slot_replacement_count", 0) or 0)
-    attempts = int(post.retry_count or 0) + int(getattr(post, "youtube_quota_retry_count", 0) or 0)
-    detail_text = (detail or "").strip()
-    reason_prefix = (
-        "Upload Post: request_id/job_id não localizado no provedor para este short."
-        if provider_not_found
-        else "Upload Post: reconciliação inconclusiva para este short."
-    )
-    old_external_ids = dict(external_ids or {})
-    old_external_ids.pop("upload_post_reconciliation_state", None)
-    old_external_ids.pop("upload_post_no_provider_id_check_count", None)
-    old_external_ids.pop("upload_post_resend_count", None)
-    plan_item = (
-        DailyPostingPlanItem.objects.filter(pk=schedule.daily_plan_item_id).first()
-        if schedule.daily_plan_item_id
-        else None
-    )
-
-    replacement_item = None
-    if replacement_count < SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS:
-        replacement_item = pick_inventory_item_for_slot(
-            factory=schedule.factory,
-            brand=schedule.brand,
-            video_type="SHORT",
-            exclude_item_ids={inventory_item.id},
-        )
-
-    if replacement_item:
-        post_error = (
-            f"{reason_prefix} Slot trocado automaticamente para outro vídeo. {detail_text[:220]}"
-            if detail_text
-            else f"{reason_prefix} Slot trocado automaticamente para outro vídeo."
-        )
-        old_external_ids["upload_post_last_status"] = (
-            "provider_not_found_replaced" if provider_not_found else "no_provider_id_replaced"
-        )
-        post.status = "FAILED"
-        post.error = post_error
-        post.external_ids = old_external_ids
-        post.save(update_fields=["status", "error", "external_ids"])
-
-        inventory_item.status = "FAILED"
-        inventory_item.scheduled_for = None
-        inventory_item.last_error = post_error
-        inventory_item.attempt_count = attempts
-        inventory_item.save(
-            update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"]
-        )
-
-        replacement_external_ids = {
-            "short_slot_replacement_count": replacement_count + 1,
-            "short_slot_replaced_from_post_id": post.id,
-            "short_slot_replaced_from_inventory_item_id": inventory_item.id,
-        }
-        replacement_post, schedule = allocate_inventory_item_to_slot(
-            factory=schedule.factory,
-            brand=schedule.brand,
-            item=replacement_item,
-            video_type="SHORT",
-            scheduled_at=schedule.scheduled_at,
-            schedule=schedule,
-            plan_item=plan_item,
-            correlation_id=post.correlation_id or "",
-            external_ids=replacement_external_ids,
-        )
-
-        try:
-            FactoryPostingAttemptLog.objects.create(
-                posting_schedule=schedule,
-                attempt_number=current_attempt,
-                started_at=timezone.now(),
-                finished_at=timezone.now(),
-                result="ERROR",
-                error_message=post_error,
-                provider_response={
-                    "external_ids": old_external_ids,
-                    "replacement_post_id": replacement_post.id,
-                    "replacement_inventory_item_id": replacement_item.id,
-                    "failed_inventory_item_id": inventory_item.id,
-                },
-            )
-        except Exception:
-            pass
-
-        publish_failures_total.inc()
-        log_event(
-            logger,
-            event="upload_post_short_slot_replaced",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            replacement_post_id=replacement_post.id,
-            replacement_inventory_item_id=replacement_item.id,
-            failed_inventory_item_id=inventory_item.id,
-            provider_status="not_found" if provider_not_found else "unknown_no_provider_id",
-        )
-        log_event(
-            logger,
-            event="publish_finished",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            brand_id=schedule.brand_id,
-            platform="youtube",
-            status="error",
-            duration_ms=duration_ms,
-            attempt_number=current_attempt,
-            error=post_error,
-        )
-        return {
-            "status": replacement_post.status,
-            "skipped": "short_slot_replaced",
-            "replacement_post_id": replacement_post.id,
-            "replacement_inventory_item_id": replacement_item.id,
-        }
-
-    terminal_reason = (
-        "Já houve uma substituição automática anterior para este slot."
-        if replacement_count >= SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS
-        else "Não havia outro short disponível para assumir o slot."
-    )
-    post_error = (
-        f"{reason_prefix} {terminal_reason} {detail_text[:220]}"
-        if detail_text
-        else f"{reason_prefix} {terminal_reason}"
-    )
-    old_external_ids["upload_post_last_status"] = (
-        "provider_not_found_terminal" if provider_not_found else "no_provider_id_terminal"
-    )
-    post.status = "FAILED"
-    post.error = post_error
-    post.external_ids = old_external_ids
-    post.save(update_fields=["status", "error", "external_ids"])
-
-    schedule.status = "FAILED"
-    schedule.attempt_count = attempts
-    schedule.next_retry_at = None
-    schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-
-    inventory_item.status = "FAILED"
-    inventory_item.scheduled_for = None
-    inventory_item.last_error = post_error
-    inventory_item.attempt_count = attempts
-    inventory_item.save(
-        update_fields=["status", "scheduled_for", "last_error", "attempt_count", "updated_at"]
-    )
-
-    try:
-        FactoryPostingAttemptLog.objects.create(
-            posting_schedule=schedule,
-            attempt_number=current_attempt,
-            started_at=timezone.now(),
-            finished_at=timezone.now(),
-            result="ERROR",
-            error_message=post_error,
-            provider_response={"external_ids": old_external_ids},
-        )
-    except Exception:
-        pass
-
-    publish_failures_total.inc()
-    log_event(
-        logger,
-        event="upload_post_short_slot_failed",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=schedule.brand_id,
-        platform="youtube",
-        reason=(
-            "replacement_limit_reached"
-            if replacement_count >= SHORT_SLOT_MAX_AUTOMATIC_REPLACEMENTS
-            else "no_replacement_short_available"
-        ),
-    )
-    log_event(
-        logger,
-        event="publish_finished",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=schedule.brand_id,
-        platform="youtube",
-        status="error",
-        duration_ms=duration_ms,
-        attempt_number=current_attempt,
-        error=post_error,
-    )
-    return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
-
-
-def _mark_factory_posting_verified(post: ScheduledPost, *, platform: str, external_video_id: str, metadata: dict | None = None) -> None:
-    """
-    Mark schedule/inventory as confirmed on the platform.
-    Set ScheduledPost to DONE to leave waiting list and move to posted.
-    """
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
-        "inventory_item", "factory", "brand"
-    ).first()
-    if not schedule:
-        return
-    item = schedule.inventory_item
-    now = timezone.now()
-    post.status = "DONE"
-    post.posted_at = post.posted_at or now
-    post.error = ""
-    post.save(update_fields=["status", "posted_at", "error", "updated_at"])
-    schedule.status = "DONE"
-    schedule.attempt_count = int(post.retry_count or 0)
-    schedule.next_retry_at = None
-    schedule.save(update_fields=["status", "attempt_count", "next_retry_at", "updated_at"])
-    item.status = "POSTED"
-    item.posted_at = post.posted_at or now
-    item.scheduled_for = post.scheduled_at
-    item.last_error = ""
-    item.attempt_count = int(post.retry_count or 0)
-    item.save(update_fields=["status", "posted_at", "scheduled_for", "last_error", "attempt_count", "updated_at"])
-    if not PostedVideoLog.objects.filter(
-        inventory_item=item,
-        external_platform=platform,
-        external_video_id=external_video_id,
-    ).exists():
-        PostedVideoLog.objects.create(
-            factory=schedule.factory,
-            brand=schedule.brand,
-            inventory_item=item,
-            external_platform=platform,
-            external_video_id=external_video_id,
-            posted_at=post.posted_at or now,
-            metadata_snapshot={
-                "scheduled_post_id": post.id,
-                "platforms": post.platforms or [],
-                "external_ids": post.external_ids or {},
-                "youtube_verify": metadata or {},
-            },
-        )
-
-
-def _mark_factory_posting_still_scheduled(post: ScheduledPost, *, publish_at_raw: str | None, note: str = "") -> None:
-    """
-    Keep internal status as scheduled on channel (not published yet), without confirming POSTED.
-    """
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
-        "inventory_item"
-    ).first()
-    if not schedule:
-        return
-    item = schedule.inventory_item
-    next_check = timezone.now() + timedelta(minutes=15)
-    publish_at = parse_datetime(str(publish_at_raw or "")) if publish_at_raw else None
-    if publish_at:
-        if timezone.is_naive(publish_at):
-            publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
-        # Re-check shortly after actual publish time on channel.
-        next_check = max(next_check, publish_at + timedelta(minutes=5))
-
-    schedule.status = "PLANNED"
-    schedule.next_retry_at = next_check
-    schedule.save(update_fields=["status", "next_retry_at", "updated_at"])
-    item.status = "SCHEDULED"
-    item.last_error = note or "Agendado no YouTube. Aguardando publicação no canal."
-    item.save(update_fields=["status", "last_error", "updated_at"])
-
-
-def _remove_schedule_records_missing_on_youtube(post: ScheduledPost, reason: str) -> None:
-    """
-    Remove from internal schedule when item does not exist on YouTube.
-    """
-    schedule = FactoryPostingSchedule.objects.filter(scheduled_post=post).select_related(
-        "inventory_item"
-    ).first()
-    if schedule:
-        item = schedule.inventory_item
-        item.status = "AVAILABLE"
-        item.scheduled_for = None
-        item.last_error = f"Removido da agenda: ausente no YouTube ({reason})."
-        item.save(update_fields=["status", "scheduled_for", "last_error", "updated_at"])
-        schedule.delete()
-    post.delete()
 
 
 UPLOAD_INTERVAL_SECONDS = 60  # One video per minute on send queue
 THUMBNAIL_BATCH_DELAY_SEC = 120  # Buffer after last video before thumbnail uploads
 UPLOAD_POST_RETRY_COUNT = 2  # Max retries for Upload Post
 UPLOAD_POST_RETRY_DELAY_SEC = 10  # Seconds between retries
+UPLOAD_POST_PROVIDER_BUSY_STATUS_CODES = {499, 504}
+UPLOAD_POST_PROVIDER_BUSY_RETRY_COUNT = 1
 UPLOAD_POST_RECONCILE_BASE_DELAY_SEC = 90
 UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC = 120
 UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND = 1
@@ -922,6 +121,8 @@ DAILY_SCHEDULE_GENERATION_HOURS = (9, 11, 13)  # janelas locais: tentativa princ
 # YouTube API quotaExceeded: no máximo 2 retries (3 tentativas no total); depois FAILED e inventário AVAILABLE.
 YOUTUBE_QUOTA_MAX_RETRIES = 2
 IDEMPOTENCY_IN_PROGRESS_DELAY_SEC = 60
+
+
 
 
 @shared_task(
@@ -938,8 +139,9 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     post_ids: batch post IDs (optional; if empty, all DONE for brand).
     Shorts (YT): do not send cover to YouTube (local generation still; saves quota).
     Long-form (YTB): send cover when cut has thumbnail.
-    Skips posts with external_ids.youtube_via_upload_post (YouTube entregue pelo Upload Post;
-    capa não deve ser enviada pela API nativa — evita quota e chamadas redundantes).
+    Skips posts with external_ids.youtube_via_upload_post: nesse caminho a capa já é
+    enviada no mesmo multipart do Upload-Post (campo ``thumbnail``), então o reenvio
+    pela API nativa seria redundante e consumiria quota desnecessariamente.
     """
     try:
         brand = Brand.objects.select_related("factory").get(id=brand_id)
@@ -1007,8 +209,6 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
 
     from googleapiclient.discovery import build
 
-    from apps.social.publishers import get_publisher
-    from apps.social.services.youtube_credentials import get_credentials
 
     publisher = get_publisher("YT")
     if not publisher:
@@ -1051,740 +251,28 @@ def upload_thumbnails_after_batch_task(brand_id: int, post_ids: list[int] | None
     }
 
 
-def _build_upload_post_platforms(brand, post) -> list[str]:
-    """Return platform list for Upload Post when enabled on brand."""
-    platforms: list[str] = []
-    post_platforms = post.platforms or []
-    is_short = "YT" in post_platforms and "YTB" not in post_platforms
-    is_youtube = "YT" in post_platforms or "YTB" in post_platforms
-
-    # Shorts: TikTok, X, Instagram (Reels) + YouTube when enabled
-    if is_short:
-        if getattr(brand, "upload_post_tiktok_enabled", False):
-            platforms.append("TIKTOK")
-        if getattr(brand, "upload_post_x_enabled", False):
-            platforms.append("X")
-        if getattr(brand, "upload_post_instagram_enabled", False):
-            platforms.append("INSTAGRAM")
-    # Long-form: YouTube only (TikTok/Instagram have duration limits)
-    if is_youtube and getattr(brand, "upload_post_youtube_enabled", False):
-        platforms.append("YOUTUBE")
-    return platforms
 
 
-def _logical_upload_post_platform(post: ScheduledPost, upload_post_platform: str) -> str:
-    normalized = str(upload_post_platform).strip().upper()
-    if normalized == "YOUTUBE":
-        return "YT" if ("YT" in (post.platforms or []) and "YTB" not in (post.platforms or [])) else "YTB"
-    return {
-        "TIKTOK": "TT",
-        "INSTAGRAM": "IG",
-        "X": "X",
-    }[normalized]
 
 
-def _resolve_publish_target_identity(
-    post: ScheduledPost,
-    brand,
-    platform: str,
-    *,
-    account=None,
-) -> str:
-    normalized = str(platform).strip().upper()
-    resolved_account = account
-    if resolved_account is None and normalized in YOUTUBE_PLATFORM_CODES:
-        resolved_account = _resolve_social_account_for_platform(post, brand, normalized)
-    channel_id = str(getattr(resolved_account, "channel_id", "") or "").strip()
-    if channel_id:
-        return channel_id
-    account_id = getattr(resolved_account, "id", None)
-    if account_id:
-        return f"social_account_{account_id}"
-    return f"brand_{brand.id}_{normalized}"
 
 
-def _build_publish_idempotency_key(
-    post: ScheduledPost,
-    brand,
-    platform: str,
-    upload_fingerprint: str,
-    *,
-    account=None,
-) -> str:
-    target_identity = _resolve_publish_target_identity(
-        post,
-        brand,
-        platform,
-        account=account,
-    )
-    return f"publish:{platform}:{target_identity}:{upload_fingerprint}"
 
 
-def _build_upload_post_provider_keys(
-    upload_post_platforms: list[str],
-    upload_post_keys_by_platform: dict[str, str],
-) -> tuple[str, str]:
-    """
-    Gera os identificadores estáveis enviados ao Upload Post.
-
-    Reaproveita as chaves de idempotência locais já calculadas para que retries após
-    timeout/rede consultem o mesmo job remoto em vez de abrir uma nova postagem.
-    """
-    normalized_platforms = sorted(
-        {
-            str(platform).strip().upper()
-            for platform in (upload_post_platforms or [])
-            if str(platform).strip()
-        }
-    )
-    seed_parts = [
-        upload_post_keys_by_platform.get(platform) or platform
-        for platform in normalized_platforms
-    ]
-    seed = "|".join(seed_parts)
-    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    return f"upreq-{digest[:32]}", f"upidem-{digest}"
 
 
-def _apply_idempotency_result(external_ids: dict, result_payload: dict | None) -> None:
-    payload = result_payload or {}
-    for key in payload.get("remove_external_ids") or []:
-        external_ids.pop(str(key), None)
-    for key, value in (payload.get("external_ids") or {}).items():
-        if value is None or value == "":
-            continue
-        external_ids[str(key)] = value
 
 
-def _build_idempotency_retryable_error(platform: str) -> dict:
-    return {
-        "message": f"{platform}: publicação já está em andamento para esta chave idempotente",
-        "retry_after_seconds": IDEMPOTENCY_IN_PROGRESS_DELAY_SEC,
-        "reason": "idempotencyInProgress",
-    }
 
 
-def _upload_post_pending_idempotency_without_provider_ids(result_payload: dict | None) -> bool:
-    """
-    Unknown/pending Upload Post sem ``request_id``/``job_id`` não é um replay reutilizável para
-    um novo ScheduledPost. Esse caso deve voltar ao fluxo normal de envio.
-    """
-    payload = result_payload or {}
-    if not bool(payload.get("upload_post_reconciliation_pending")):
-        return False
-    ext = (payload.get("external_ids") or {}) if isinstance(payload, dict) else {}
-    request_id = str(ext.get("upload_post_request_id") or "").strip()
-    job_id = str(ext.get("upload_post_job_id") or "").strip()
-    return not request_id and not job_id
 
 
-def _upload_post_end_of_queue_delay_seconds(
-    post: ScheduledPost,
-    brand: Brand | None,
-    *,
-    minimum_seconds: int,
-) -> int:
-    """
-    Reagenda para o fim aproximado da fila da brand, em vez de reconsultar imediatamente.
-    """
-    if not brand:
-        return max(int(minimum_seconds or 0), UPLOAD_INTERVAL_SECONDS)
-    brand_scope = (
-        Q(factory_schedule__brand_id=brand.id)
-        | Q(job__brand_id=brand.id)
-        | Q(auto_cut_corte__analysis__brand_id=brand.id)
-    )
-    pending_count = (
-        ScheduledPost.objects.filter(status="PENDING")
-        .filter(brand_scope)
-        .exclude(id=post.id)
-        .distinct()
-        .count()
-    )
-    return max(int(minimum_seconds or 0), UPLOAD_INTERVAL_SECONDS * max(1, pending_count))
 
 
-def _schedule_upload_post_unknown_reconciliation(
-    post: ScheduledPost,
-    *,
-    brand: Brand | None,
-    correlation_id: str,
-    brand_id: int | None,
-    current_attempt: int,
-    _timer: Timer,
-    upload_fingerprint: str,
-    external_ids: dict,
-    upload_post_keys_by_platform: dict[str, str],
-    provider_request_id: str | None = None,
-    client_request_id: str | None = None,
-    job_id: str | None = None,
-    status_code: int | None = None,
-    last_status: str,
-    detail: str,
-) -> dict | None:
-    upload_post_unknown_results_total.inc()
-
-    provider_request_id = str(provider_request_id or "").strip() or None
-    client_request_id = str(client_request_id or "").strip() or None
-    job_id = str(job_id or "").strip() or None
-    detail = (detail or "").strip()
-    has_provider_reference = bool(provider_request_id or job_id)
-    unknown_delay = _upload_post_end_of_queue_delay_seconds(
-        post,
-        brand,
-        minimum_seconds=UPLOAD_POST_END_OF_QUEUE_MIN_DELAY_SEC,
-    )
-
-    if provider_request_id:
-        external_ids["upload_post_request_id"] = provider_request_id
-    else:
-        external_ids.pop("upload_post_request_id", None)
-    if client_request_id:
-        external_ids[UPLOAD_POST_CLIENT_REQUEST_ID_KEY] = client_request_id
-    if job_id:
-        external_ids["upload_post_job_id"] = job_id
-    else:
-        external_ids.pop("upload_post_job_id", None)
-    external_ids["upload_post_reconciliation_state"] = "pending"
-    external_ids["upload_post_last_status"] = last_status
-    external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
-    if not has_provider_reference:
-        external_ids["upload_post_no_provider_id_check_count"] = 0
-    else:
-        external_ids.pop("upload_post_no_provider_id_check_count", None)
-
-    idem_snapshot = {
-        k: external_ids[k]
-        for k in (
-            "upload_post_request_id",
-            UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
-            "upload_post_job_id",
-            "upload_post_reconciliation_state",
-            "upload_post_last_status",
-            "upload_post_last_checked_at",
-            "upload_post_no_provider_id_check_count",
-            "upload_post_resend_count",
-        )
-        if k in external_ids
-    }
-    for idempotency_key in upload_post_keys_by_platform.values():
-        if has_provider_reference:
-            mark_idempotency_success(
-                key=idempotency_key,
-                result_payload={
-                    "publisher": "upload_post",
-                    "upload_post_reconciliation_pending": True,
-                    "external_ids": idem_snapshot,
-                },
-            )
-        else:
-            mark_idempotency_failed(
-                key=idempotency_key,
-                error_message=(
-                    "Upload Post aceitou/retornou resultado incerto sem request_id/job_id do provedor; "
-                    "não reutilizar este estado para posts novos"
-                ),
-                result_payload={
-                    "publisher": "upload_post",
-                    "upload_post_reconciliation_pending": True,
-                    "external_ids": idem_snapshot,
-                },
-            )
-
-    log_event(
-        logger,
-        event="upload_post_unknown_result",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=brand_id,
-        platform="youtube",
-        status="unknown",
-        status_code=status_code,
-        detail=detail[:400],
-    )
-    log_event(
-        logger,
-        event="upload_post_reconciliation_scheduled",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        delay_seconds=unknown_delay,
-    )
-    next_check_at = timezone.now() + timedelta(seconds=unknown_delay)
-    expired_result = _fail_expired_factory_slot(
-        post,
-        correlation_id=correlation_id,
-        brand_id=brand_id,
-        current_attempt=current_attempt,
-        duration_ms=_timer.elapsed_ms(),
-        reason=(
-            "O resultado incerto do Upload Post só seria reavaliado depois do horário do slot."
-            if has_provider_reference
-            else "A confirmação do Upload Post sem IDs do provedor só seria reavaliada depois do horário do slot."
-        ),
-        check_time=next_check_at,
-    )
-    if expired_result is not None:
-        return expired_result
-
-    post.status = "PENDING"
-    post.scheduled_at = next_check_at
-    if has_provider_reference:
-        post.error = (
-            "Upload Post: resultado incerto (timeout/rede/código intermediário). "
-            "Confirmando status no provedor no fim da fila antes de nova ação."
-        )
-    else:
-        post.error = (
-            "Upload Post: confirmação recebida sem request_id/job_id do provedor. "
-            "Reavaliando no fim da fila antes de nova ação."
-        )
-    post.upload_fingerprint = upload_fingerprint
-    post.external_ids = external_ids
-    post.save(
-        update_fields=[
-            "status",
-            "scheduled_at",
-            "error",
-            "upload_fingerprint",
-            "external_ids",
-        ]
-    )
-    _sync_factory_posting_schedule(post)
-    log_event(
-        logger,
-        event="publish_finished",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=brand_id,
-        platform="youtube",
-        status="waiting",
-        duration_ms=_timer.elapsed_ms(),
-        attempt_number=current_attempt,
-    )
-    return {
-        "status": post.status,
-        "skipped": "upload_post_unknown_awaiting_reconciliation",
-        "external_ids": external_ids,
-    }
 
 
-def _native_youtube_fallback_available(post: ScheduledPost, brand: Brand | None) -> bool:
-    if not brand:
-        return False
-    yt_platform = _first_youtube_platform(post.platforms or [])
-    if not yt_platform:
-        return False
-    if _resolve_social_account_for_platform(post, brand, yt_platform):
-        return True
-    return bool(_list_ordered_youtube_credentials(brand))
 
 
-def _try_pending_upload_post_reconciliation(
-    post: ScheduledPost,
-    brand: Brand | None,
-    *,
-    correlation_id: str,
-    brand_id: int | None,
-    current_attempt: int,
-    _timer: Timer,
-) -> dict | None:
-    """
-    Quando o post está PENDING com upload_post_reconciliation_state=pending, consulta o Upload Post
-    antes de tomar POSTING e reenviar vídeo.
-    """
-    from apps.social.services.upload_post_reconciliation import (
-        EXT_UPLOAD_POST_RECONCILIATION_STATE,
-        RECONCILIATION_STATE_PENDING,
-        ReconcileDecision,
-        apply_external_ids_patch,
-        merge_completed_upload_status_into_external_ids,
-        reconcile_upload_post_status,
-    )
-
-    ext = dict(post.external_ids or {})
-    if ext.get(EXT_UPLOAD_POST_RECONCILIATION_STATE) != RECONCILIATION_STATE_PENDING:
-        return None
-
-    expired_result = _fail_expired_factory_slot(
-        post,
-        correlation_id=correlation_id,
-        brand_id=brand_id,
-        current_attempt=current_attempt,
-        duration_ms=_timer.elapsed_ms(),
-        reason="O horário do slot já passou antes de concluir a reconciliação do Upload Post.",
-    )
-    if expired_result is not None:
-        return expired_result
-
-    upload_post_reconciliation_runs_total.inc()
-    up_list = _build_upload_post_platforms(brand, post) if brand else []
-    needs_youtube = "YOUTUBE" in up_list
-
-    outcome = reconcile_upload_post_status(external_ids=ext, needs_youtube=needs_youtube)
-    apply_external_ids_patch(ext, outcome.external_ids_patch)
-    next_delay = _upload_post_end_of_queue_delay_seconds(
-        post,
-        brand,
-        minimum_seconds=max(UPLOAD_POST_RECONCILE_BASE_DELAY_SEC, int(outcome.next_delay_seconds or 90)),
-    )
-
-    log_event(
-        logger,
-        event="upload_post_reconciliation_completed",
-        correlation_id=correlation_id,
-        scheduled_post_id=post.id,
-        brand_id=brand_id,
-        platform="youtube",
-        status=getattr(outcome.decision, "value", str(outcome.decision)),
-        detail=(outcome.detail or "")[:400],
-    )
-
-    if outcome.decision == ReconcileDecision.WAIT:
-        next_check_at = timezone.now() + timedelta(seconds=next_delay)
-        expired_result = _fail_expired_factory_slot(
-            post,
-            correlation_id=correlation_id,
-            brand_id=brand_id,
-            current_attempt=current_attempt,
-            duration_ms=_timer.elapsed_ms(),
-            reason="A reconciliação do Upload Post só teria nova tentativa depois do horário do slot.",
-            check_time=next_check_at,
-        )
-        if expired_result is not None:
-            return expired_result
-        log_event(
-            logger,
-            event="upload_post_fallback_blocked",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            reason="provider_status_pending_or_transient",
-        )
-        post.external_ids = ext
-        post.error = (
-            f"Upload Post: confirmação pendente. {(outcome.detail or '')[:220]} "
-            f"Nova verificação em {next_delay}s."
-        )
-        post.scheduled_at = next_check_at
-        post.save(update_fields=["external_ids", "scheduled_at", "error"])
-        log_event(
-            logger,
-            event="publish_finished",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            brand_id=brand_id,
-            platform="youtube",
-            status="waiting",
-            duration_ms=_timer.elapsed_ms(),
-            attempt_number=current_attempt,
-        )
-        return {"status": post.status, "skipped": "upload_post_reconciliation_wait"}
-
-    if outcome.decision in (ReconcileDecision.NO_PROVIDER_ID, ReconcileDecision.PROVIDER_NOT_FOUND):
-        provider_not_found = outcome.decision == ReconcileDecision.PROVIDER_NOT_FOUND
-        no_provider_id_checks = int(ext.get("upload_post_no_provider_id_check_count", 0) or 0) + 1
-        resend_count = int(ext.get("upload_post_resend_count", 0) or 0)
-        ext["upload_post_no_provider_id_check_count"] = no_provider_id_checks
-        unknown_result_detail = (
-            "request_id_not_found_in_provider" if provider_not_found else "no_request_id_or_job_id"
-        )
-        log_event(
-            logger,
-            event="upload_post_unknown_result",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            detail=unknown_result_detail,
-        )
-        if resend_count >= UPLOAD_POST_MAX_CONTROLLED_RESENDS:
-            short_replacement_result = _replace_ambiguous_short_slot(
-                post,
-                current_attempt=current_attempt,
-                correlation_id=correlation_id,
-                duration_ms=_timer.elapsed_ms(),
-                provider_not_found=provider_not_found,
-                detail=outcome.detail or "",
-                external_ids=ext,
-            )
-            if short_replacement_result is not None:
-                return short_replacement_result
-            if _native_youtube_fallback_available(post, brand):
-                ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
-                ext.pop("upload_post_no_provider_id_check_count", None)
-                ext["upload_post_last_status"] = (
-                    "provider_not_found_fallback_native"
-                    if provider_not_found
-                    else "no_provider_id_fallback_native"
-                )
-                ext["upload_post_last_checked_at"] = timezone.now().isoformat()
-                ext["upload_post_youtube_terminal_failure"] = True
-                ext["upload_post_skip_after_unknown_no_id"] = True
-                post.external_ids = ext
-                post.error = (
-                    "Upload Post: request_id/job_id não localizado no provedor após novo envio controlado. "
-                    "Tentando fallback nativo do YouTube."
-                    if provider_not_found
-                    else
-                    "Upload Post: resultado incerto sem request_id/job_id após novo envio controlado. "
-                    "Tentando fallback nativo do YouTube."
-                )
-                post.save(update_fields=["external_ids", "error"])
-                log_event(
-                    logger,
-                    event="upload_post_fallback_allowed",
-                    correlation_id=correlation_id,
-                    scheduled_post_id=post.id,
-                    brand_id=brand_id,
-                    platform="youtube",
-                    reason=(
-                        "provider_not_found_after_resend"
-                        if provider_not_found
-                        else "unknown_no_provider_id_after_resend"
-                    ),
-                )
-                return None
-            ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
-            ext.pop("upload_post_no_provider_id_check_count", None)
-            ext["upload_post_last_status"] = (
-                "provider_not_found_terminal" if provider_not_found else "no_provider_id_terminal"
-            )
-            ext["upload_post_last_checked_at"] = timezone.now().isoformat()
-            post.status = "FAILED"
-            post.external_ids = ext
-            post.error = (
-                "Upload Post: request_id/job_id não localizado no provedor mesmo após novo envio controlado. "
-                "Vídeo devolvido ao inventário para evitar loop infinito."
-                if provider_not_found
-                else
-                "Upload Post: resultado incerto sem request_id/job_id mesmo após novo envio controlado. "
-                "Vídeo devolvido ao inventário para evitar loop infinito."
-            )
-            post.save(update_fields=["status", "external_ids", "error"])
-            try:
-                FactoryPostingAttemptLog.objects.create(
-                    posting_schedule=post.factory_schedule,
-                    attempt_number=current_attempt,
-                    started_at=timezone.now(),
-                    finished_at=timezone.now(),
-                    result="ERROR",
-                    error_message=post.error,
-                    provider_response={"external_ids": post.external_ids or {}},
-                )
-            except Exception:
-                pass
-            publish_failures_total.inc()
-            log_event(
-                logger,
-                event="upload_post_reconciliation_abandoned",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                brand_id=brand_id,
-                platform="youtube",
-                resend_count=resend_count,
-            )
-            log_event(
-                logger,
-                event="publish_finished",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                brand_id=brand_id,
-                platform="youtube",
-                status="error",
-                duration_ms=_timer.elapsed_ms(),
-                attempt_number=current_attempt,
-                error=post.error,
-            )
-            _sync_factory_posting_schedule(post)
-            return {"status": post.status, "error": post.error, "external_ids": post.external_ids or {}}
-
-        if no_provider_id_checks > UPLOAD_POST_NO_PROVIDER_ID_RECHECKS_BEFORE_RESEND:
-            ext["upload_post_resend_count"] = resend_count + 1
-            ext["upload_post_no_provider_id_check_count"] = 0
-            ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
-            ext.pop("upload_post_last_status", None)
-            ext.pop("upload_post_last_checked_at", None)
-            ext.pop("upload_post_request_id", None)
-            ext.pop("upload_post_job_id", None)
-            post.external_ids = ext
-            post.error = (
-                "Upload Post: request_id/job_id não localizado no provedor; iniciando novo envio controlado."
-                if provider_not_found
-                else
-                "Upload Post: sem request_id/job_id após confirmação tardia; iniciando novo envio controlado."
-            )
-            post.scheduled_at = timezone.now()
-            post.save(update_fields=["external_ids", "scheduled_at", "error"])
-            log_event(
-                logger,
-                event="upload_post_reconciliation_resend_started",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                brand_id=brand_id,
-                platform="youtube",
-                resend_count=ext["upload_post_resend_count"],
-            )
-            return None
-        next_check_at = timezone.now() + timedelta(seconds=next_delay)
-        expired_result = _fail_expired_factory_slot(
-            post,
-            correlation_id=correlation_id,
-            brand_id=brand_id,
-            current_attempt=current_attempt,
-            duration_ms=_timer.elapsed_ms(),
-            reason="O slot expiraria antes de uma nova checagem do resultado incerto do Upload Post.",
-            check_time=next_check_at,
-        )
-        if expired_result is not None:
-            return expired_result
-        post.external_ids = ext
-        post.error = (
-            "Upload Post: request_id/job_id não localizado no provedor; "
-            f"nova tentativa de verificação no fim da fila em {next_delay}s."
-            if provider_not_found
-            else
-            "Upload Post: resultado incerto e sem request_id/job_id persistido; "
-            f"nova tentativa de verificação no fim da fila em {next_delay}s."
-        )
-        post.scheduled_at = next_check_at
-        post.save(update_fields=["external_ids", "scheduled_at", "error"])
-        log_event(
-            logger,
-            event="publish_finished",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            brand_id=brand_id,
-            platform="youtube",
-            status="waiting",
-            duration_ms=_timer.elapsed_ms(),
-            attempt_number=current_attempt,
-        )
-        return {
-            "status": post.status,
-            "skipped": "upload_post_provider_not_found" if provider_not_found else "upload_post_no_provider_id",
-        }
-
-    if outcome.decision == ReconcileDecision.CONFIRMED_FAILURE:
-        upload_post_reconciliation_completed_total.inc()
-        ext.pop("upload_post_no_provider_id_check_count", None)
-        ext.pop("upload_post_resend_count", None)
-        ext["upload_post_youtube_terminal_failure"] = True
-        ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
-        post.external_ids = ext
-        post.save(update_fields=["external_ids"])
-        log_event(
-            logger,
-            event="upload_post_fallback_allowed",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            reason="upload_post_confirmed_failure",
-        )
-        return None
-
-    if outcome.decision == ReconcileDecision.CONFIRMED_SUCCESS:
-        upload_post_reconciliation_completed_total.inc()
-        if not up_list:
-            ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
-            ext.pop("upload_post_no_provider_id_check_count", None)
-            ext.pop("upload_post_resend_count", None)
-            ext.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
-            post.external_ids = ext
-            post.save(update_fields=["external_ids"])
-            return None
-        raw = outcome.raw_status_payload or {}
-        post_pf = list(post.platforms or [])
-        _, all_filled = merge_completed_upload_status_into_external_ids(
-            raw,
-            post_platforms=post_pf,
-            upload_post_platforms=up_list,
-            external_ids=ext,
-        )
-        if outcome.youtube_video_id and needs_youtube:
-            yp = _first_youtube_platform(post_pf)
-            if yp:
-                ext[yp] = outcome.youtube_video_id
-        ext["youtube_via_upload_post"] = True
-        ext.pop(EXT_UPLOAD_POST_RECONCILIATION_STATE, None)
-        ext.pop("upload_post_no_provider_id_check_count", None)
-        ext.pop("upload_post_resend_count", None)
-        ext.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
-
-        if up_list and not all_filled:
-            next_check_at = timezone.now() + timedelta(seconds=next_delay)
-            expired_result = _fail_expired_factory_slot(
-                post,
-                correlation_id=correlation_id,
-                brand_id=brand_id,
-                current_attempt=current_attempt,
-                duration_ms=_timer.elapsed_ms(),
-                reason="O Upload Post concluiu parcialmente, mas a próxima verificação cairia depois do horário do slot.",
-                check_time=next_check_at,
-            )
-            if expired_result is not None:
-                return expired_result
-            ext[EXT_UPLOAD_POST_RECONCILIATION_STATE] = RECONCILIATION_STATE_PENDING
-            post.external_ids = ext
-            post.error = "Upload Post: processamento concluído parcialmente; aguardando IDs de todas as plataformas."
-            post.scheduled_at = next_check_at
-            post.save(update_fields=["external_ids", "scheduled_at", "error"])
-            log_event(
-                logger,
-                event="upload_post_fallback_blocked",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                reason="partial_platform_ids",
-            )
-            return {"status": post.status, "skipped": "upload_post_partial_ids"}
-
-        post.external_ids = ext
-        post.status = "DONE"
-        post.retry_count = 0
-        post.youtube_quota_retry_count = 0
-        post.posted_at = timezone.now()
-        post.error = ""
-        post.save(
-            update_fields=[
-                "status",
-                "error",
-                "posted_at",
-                "external_ids",
-                "retry_count",
-                "youtube_quota_retry_count",
-            ]
-        )
-        try:
-            FactoryPostingAttemptLog.objects.create(
-                posting_schedule=post.factory_schedule,
-                attempt_number=current_attempt,
-                started_at=timezone.now(),
-                finished_at=timezone.now(),
-                result="SUCCESS",
-                error_message="",
-                provider_response={"external_ids": post.external_ids or {}},
-            )
-        except Exception:
-            pass
-        publish_duration_ms.observe(_timer.elapsed_ms())
-        log_event(
-            logger,
-            event="publish_finished",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            brand_id=brand_id,
-            platform="youtube",
-            status="success",
-            duration_ms=_timer.elapsed_ms(),
-            attempt_number=current_attempt,
-            external_video_id=str(
-                (post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or ""
-            ),
-        )
-        _sync_factory_posting_schedule(post)
-        return {
-            "status": "DONE",
-            "errors": [],
-            "error": "",
-            "external_ids": post.external_ids or {},
-        }
-
-    return None
 
 
 @shared_task(
@@ -2014,12 +502,15 @@ def check_scheduled_posts_task():
     }
 
 
+
+
+
+
 def _factory_local_day_bounds(factory: Factory, target_date_local) -> tuple[datetime, datetime]:
     tz = ZoneInfo(factory.timezone or "America/Sao_Paulo")
     day_start_local = datetime.combine(target_date_local, time(0, 0)).replace(tzinfo=tz)
     day_end_local = (day_start_local + timedelta(days=1)) - timedelta(microseconds=1)
     return day_start_local.astimezone(UTC), day_end_local.astimezone(UTC)
-
 
 def _factory_has_schedule_for_local_day(factory: Factory, target_date_local) -> bool:
     day_start_utc, day_end_utc = _factory_local_day_bounds(factory, target_date_local)
@@ -2173,11 +664,11 @@ def reconcile_youtube_schedules_task():
                 # Confirmed on YouTube (already published or scheduled): mark POSTED
                 # and skip re-check to save API quota.
                 confirmed += 1
-                _mark_factory_posting_verified(
+                mark_posted(
                     post,
                     platform=platform,
                     external_video_id=video_id,
-                    metadata=verify_data,
+                    log_metadata={"youtube_verify": verify_data or {}},
                 )
                 _cleanup_local_media_if_possible(post)
                 continue
@@ -2188,7 +679,7 @@ def reconcile_youtube_schedules_task():
                 continue
             # Temporary error (auth/network/etc): keep scheduled and revalidate next cycle.
             skipped += 1
-            _mark_factory_posting_still_scheduled(
+            mark_still_scheduled(
                 post,
                 publish_at_raw=None,
                 note=f"Falha temporária na confirmação YouTube: {verify_data.get('error', 'unknown')}",
@@ -2408,7 +899,7 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                 if publish_at and timezone.is_naive(publish_at):
                     publish_at = timezone.make_aware(publish_at, timezone.get_current_timezone())
                 if publish_at and publish_at > timezone.now():
-                    _mark_factory_posting_still_scheduled(
+                    mark_still_scheduled(
                         post,
                         publish_at_raw=publish_at_raw,
                         note="Agendado no YouTube (full scan).",
@@ -2416,11 +907,11 @@ def reconcile_youtube_full_scan_task(factory_id: int | None = None, day_iso: str
                     summary["still_scheduled"] += 1
                     brand_still_scheduled += 1
                 else:
-                    _mark_factory_posting_verified(
+                    mark_posted(
                         post,
                         platform=platform,
                         external_video_id=video_id,
-                        metadata={"full_scan": True, **yt_item},
+                        log_metadata={"youtube_verify": {"full_scan": True, **yt_item}},
                     )
                     summary["confirmed"] += 1
                     brand_confirmed += 1
@@ -2450,98 +941,18 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
     Posting logic (direct call or via task).
     Do not call post_to_platforms_task.apply() from inside another task (deadlock).
     """
-    _timer = Timer()
+    resultado = preflight(scheduled_post_id)
+    if isinstance(resultado, EarlyExit):
+        return resultado.payload
 
-    try:
-        post = ScheduledPost.objects.select_related(
-            "job",
-            "job__brand",
-            "social_account",
-            "auto_cut_corte",
-            "auto_cut_corte__analysis",
-            "auto_cut_corte__suggestion",
-            "factory_schedule",
-        ).get(id=scheduled_post_id)
-    except ScheduledPost.DoesNotExist:
-        return {"error": "ScheduledPost não encontrado"}
-
-    correlation_id = resolve_scheduled_post_correlation_id(post)
-
-    if post.status != "PENDING":
-        return {"skipped": "status não é PENDING"}
-
-    current_attempt = int(post.retry_count or 0) + 1
-    brand = None
-    video_path = ""
-    job_obj = post.job
-
-    if post.job_id:
-        brand = post.job.brand
-        if not brand:
-            post.status = "FAILED"
-            post.error = "Job sem marca"
-            post.save(update_fields=["status", "error"])
-            return {"error": "Job sem marca"}
-        output = post.job.output
-        if not output or not output.file:
-            post.status = "FAILED"
-            post.error = "Job sem vídeo final"
-            post.save(update_fields=["status", "error"])
-            return {"error": "Job sem vídeo final"}
-        video_path = output.file.path
-    elif post.auto_cut_corte_id:
-        corte = post.auto_cut_corte
-        brand = corte.analysis.brand if corte and corte.analysis_id else None
-        if not brand:
-            post.status = "FAILED"
-            post.error = "AutoCut sem marca"
-            post.save(update_fields=["status", "error"])
-            return {"error": "AutoCut sem marca"}
-        if not corte.file:
-            post.status = "FAILED"
-            post.error = "AutoCut sem vídeo finalizado"
-            post.save(update_fields=["status", "error"])
-            return {"error": "AutoCut sem vídeo finalizado"}
-        video_path = corte.file.path
-    else:
-        post.status = "FAILED"
-        post.error = "ScheduledPost sem origem (job/corte)"
-        post.save(update_fields=["status", "error"])
-        return {"error": "ScheduledPost sem origem"}
-
-    # In factory context, prefer schedule destination brand for account/credential.
-    target_brand = _resolve_post_target_brand(post)
-    if target_brand:
-        brand = target_brand
-
+    post = resultado.post
+    brand = resultado.brand
+    job_obj = resultado.job
+    video_path = resultado.video_path
+    correlation_id = resultado.correlation_id
+    current_attempt = resultado.current_attempt
+    _timer = resultado.timer
     _brand_id = brand.id if brand else None
-
-    expired_result = _fail_expired_factory_slot(
-        post,
-        correlation_id=correlation_id,
-        brand_id=_brand_id,
-        current_attempt=current_attempt,
-        duration_ms=_timer.elapsed_ms(),
-        reason="O horário do slot já passou antes de iniciar uma nova tentativa de publicação.",
-    )
-    if expired_result is not None:
-        return expired_result
-
-    early_reconcile = _try_pending_upload_post_reconciliation(
-        post,
-        brand,
-        correlation_id=correlation_id,
-        brand_id=_brand_id,
-        current_attempt=current_attempt,
-        _timer=_timer,
-    )
-    if early_reconcile is not None:
-        return early_reconcile
-
-    claimed = ScheduledPost.objects.filter(id=post.id, status="PENDING").update(status="POSTING")
-    if not claimed:
-        return {"skipped": "status não é PENDING"}
-    post.status = "POSTING"
     # Upload Post targets (TIKTOK, X, INSTAGRAM, YOUTUBE) — same list later passed to the API.
     upload_post_platforms = _build_upload_post_platforms(brand, post) if brand else []
     _post_platforms = list(post.platforms or [])
@@ -2664,957 +1075,59 @@ def _run_post_to_platforms(scheduled_post_id: int) -> dict:
                 UPLOAD_POST_LONG_MAX_BYTES / (1024 * 1024),
             )
     if not errors and brand and video_path and upload_post_platforms:
-        import time as _time
-
-        from apps.social.publishers.upload_post import (
-            UploadPostErrorKind,
-            UploadPostPublishError,
-            publish_to_upload_post,
-        )
-
-        title = (post.title or "").strip() or "Vídeo"
-        desc_by_platform = {}
-        for p in upload_post_platforms:
-            extra = ""
-            if p == "TIKTOK":
-                extra = (getattr(brand, "upload_post_tiktok_extra_description", "") or "").strip()
-            elif p == "X":
-                extra = (getattr(brand, "upload_post_x_extra_description", "") or "").strip()
-            elif p == "INSTAGRAM":
-                extra = (getattr(brand, "upload_post_instagram_extra_description", "") or "").strip()
-            elif p == "YOUTUBE":
-                extra = (getattr(brand, "youtube_description_extra", "") or "").strip()
-            desc_by_platform[p] = f"{title}\n\n{extra}".strip() if extra else title
-        tz_name = "America/Sao_Paulo"
-        if getattr(brand, "factory_id", None) and getattr(brand, "factory", None):
-            tz_name = (brand.factory.timezone or "").strip() or tz_name
-
-        upload_post_keys_by_platform: dict[str, str] = {}
-        upload_post_platforms_to_execute: list[str] = []
-        for up_platform in upload_post_platforms:
-            logical_platform = _logical_upload_post_platform(post, up_platform)
-            idempotency_key = _build_publish_idempotency_key(
-                post,
-                brand,
-                logical_platform,
-                upload_fingerprint,
-            )
-            acquire_result = acquire_idempotency_key(
-                key=idempotency_key,
-                operation_name="publish",
-                aggregate_type="ScheduledPost",
-                aggregate_id=post.id,
-            )
-            if acquire_result.outcome == "succeeded":
-                existing_payload = get_existing_idempotency_result(idempotency_key) or acquire_result.record.result_payload
-                if _upload_post_pending_idempotency_without_provider_ids(existing_payload):
-                    logger.warning(
-                        "[UploadPost] Ignoring stale pending idempotency replay without provider ids "
-                        "(post_id=%s logical_platform=%s)",
-                        post.id,
-                        logical_platform,
-                    )
-                    mark_idempotency_failed(
-                        key=idempotency_key,
-                        error_message=(
-                            "Upload Post pending replay sem request_id/job_id não é reutilizável "
-                            "para um novo ScheduledPost"
-                        ),
-                        result_payload=existing_payload,
-                    )
-                    reacquire_result = acquire_idempotency_key(
-                        key=idempotency_key,
-                        operation_name="publish",
-                        aggregate_type="ScheduledPost",
-                        aggregate_id=post.id,
-                    )
-                    if reacquire_result.outcome == "in_progress":
-                        retryable_errors.append(_build_idempotency_retryable_error(logical_platform))
-                        continue
-                    if reacquire_result.outcome == "succeeded":
-                        existing_payload = (
-                            get_existing_idempotency_result(idempotency_key) or reacquire_result.record.result_payload
-                        )
-                        _apply_idempotency_result(external_ids, existing_payload)
-                        existing_external_ids = (existing_payload or {}).get("external_ids") or {}
-                        if logical_platform in YOUTUBE_PLATFORM_CODES and (
-                            existing_external_ids.get("youtube_via_upload_post")
-                            or existing_external_ids.get(logical_platform)
-                        ):
-                            upload_post_youtube_ok = True
-                        continue
-                    upload_post_keys_by_platform[up_platform] = idempotency_key
-                    upload_post_platforms_to_execute.append(up_platform)
-                    continue
-                _apply_idempotency_result(external_ids, existing_payload)
-                existing_external_ids = (existing_payload or {}).get("external_ids") or {}
-                if logical_platform in YOUTUBE_PLATFORM_CODES and (
-                    existing_external_ids.get("youtube_via_upload_post") or existing_external_ids.get(logical_platform)
-                ):
-                    upload_post_youtube_ok = True
-                continue
-            if acquire_result.outcome == "in_progress":
-                retryable_errors.append(_build_idempotency_retryable_error(logical_platform))
-                continue
-            upload_post_keys_by_platform[up_platform] = idempotency_key
-            upload_post_platforms_to_execute.append(up_platform)
-
-        up_success = False
-        last_up_error = None
-        if upload_post_platforms_to_execute:
-            desc_by_platform = {
-                key: value
-                for key, value in desc_by_platform.items()
-                if key in upload_post_platforms_to_execute
-            }
-            upload_post_request_id, upload_post_provider_idempotency_key = _build_upload_post_provider_keys(
-                upload_post_platforms_to_execute,
-                upload_post_keys_by_platform,
-            )
-            upload_post_result_keys = {
-                "TIKTOK": "tiktok",
-                "X": "x",
-                "INSTAGRAM": "instagram",
-                "YOUTUBE": "youtube",
-            }
-            for attempt in range(UPLOAD_POST_RETRY_COUNT + 1):
-                try:
-                    result = publish_to_upload_post(
-                        video_path=video_path,
-                        brand_id=brand.id,
-                        platforms=upload_post_platforms_to_execute,
-                        title=title,
-                        description_by_platform=desc_by_platform,
-                        scheduled_at=post.scheduled_at,
-                        timezone_name=tz_name,
-                        request_id=upload_post_request_id,
-                        idempotency_key=upload_post_provider_idempotency_key,
-                    )
-                    if result.get("success"):
-                        for key in (
-                            "upload_post_reconciliation_state",
-                            "upload_post_no_provider_id_check_count",
-                            "upload_post_resend_count",
-                            "upload_post_youtube_terminal_failure",
-                        ):
-                            external_ids.pop(key, None)
-                        external_ids.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
-                        provider_request_id = str(result.get("provider_request_id") or "").strip()
-                        client_request_id = str(
-                            result.get(UPLOAD_POST_CLIENT_REQUEST_ID_KEY) or result.get("client_request_id") or ""
-                        ).strip()
-                        if not client_request_id:
-                            client_request_id = upload_post_request_id
-                        request_id = provider_request_id or client_request_id
-                        job_id_out = str(result.get("job_id") or "").strip()
-                        request_id_source = str(result.get("request_id_source") or "").strip()
-                        logger.info(
-                            "[UploadPost] Posting confirmation received (id %s)",
-                            request_id or "ok",
-                        )
-                        if provider_request_id:
-                            external_ids["upload_post_request_id"] = provider_request_id
-                        if job_id_out:
-                            external_ids["upload_post_job_id"] = job_id_out
-                        external_ids["upload_post_last_status"] = "submitted"
-                        external_ids["upload_post_last_checked_at"] = timezone.now().isoformat()
-                        up_results = (result.get("data") or {}).get("results") or {}
-                        youtube_provider_reference = bool(provider_request_id or job_id_out)
-                        youtube_platform_result_id = False
-                        for up_platform in upload_post_platforms_to_execute:
-                            logical_platform = _logical_upload_post_platform(post, up_platform)
-                            plat_data = up_results.get(upload_post_result_keys[up_platform]) or {}
-                            external_ids_delta: dict[str, str | bool] = {}
-                            if provider_request_id:
-                                external_ids_delta["upload_post_request_id"] = provider_request_id
-                            if job_id_out:
-                                external_ids_delta["upload_post_job_id"] = job_id_out
-                            if plat_data.get("success"):
-                                vid = plat_data.get("video_id") or plat_data.get("publish_id")
-                                if vid:
-                                    external_ids[logical_platform] = str(vid)
-                                    external_ids_delta[logical_platform] = str(vid)
-                            if logical_platform in YOUTUBE_PLATFORM_CODES and external_ids_delta.get(logical_platform):
-                                youtube_platform_result_id = True
-                            if logical_platform in YOUTUBE_PLATFORM_CODES and (
-                                youtube_provider_reference or external_ids_delta.get(logical_platform)
-                            ):
-                                upload_post_youtube_ok = True
-                                external_ids["youtube_via_upload_post"] = True
-                                external_ids_delta["youtube_via_upload_post"] = True
-                        if (
-                            "YOUTUBE" in upload_post_platforms_to_execute
-                            and not youtube_provider_reference
-                            and not youtube_platform_result_id
-                        ):
-                            logger.warning(
-                                "[UploadPost] Success without provider request_id/job_id; "
-                                "holding post for controlled reconciliation (post_id=%s request_id_source=%s)",
-                                post.id,
-                                request_id_source or "unknown",
-                            )
-                            pending_result = _schedule_upload_post_unknown_reconciliation(
-                                post,
-                                brand=brand,
-                                correlation_id=correlation_id,
-                                brand_id=_brand_id,
-                                current_attempt=current_attempt,
-                                _timer=_timer,
-                                upload_fingerprint=upload_fingerprint,
-                                external_ids=external_ids,
-                                upload_post_keys_by_platform=upload_post_keys_by_platform,
-                                provider_request_id=provider_request_id or None,
-                                client_request_id=client_request_id or None,
-                                job_id=job_id_out or None,
-                                last_status="accepted_without_provider_ids",
-                                status_code=None,
-                                detail="Upload Post confirmou o envio sem request_id/job_id rastreável do provedor.",
-                            )
-                            if pending_result is not None:
-                                return pending_result
-                        up_success = True
-                        for up_platform in upload_post_platforms_to_execute:
-                            logical_platform = _logical_upload_post_platform(post, up_platform)
-                            plat_data = up_results.get(upload_post_result_keys[up_platform]) or {}
-                            external_ids_delta: dict[str, str | bool] = {}
-                            if provider_request_id:
-                                external_ids_delta["upload_post_request_id"] = provider_request_id
-                            if job_id_out:
-                                external_ids_delta["upload_post_job_id"] = job_id_out
-                            if external_ids.get(logical_platform):
-                                external_ids_delta[logical_platform] = str(external_ids[logical_platform])
-                            if logical_platform in YOUTUBE_PLATFORM_CODES and (
-                                youtube_provider_reference or external_ids_delta.get(logical_platform)
-                            ):
-                                external_ids_delta["youtube_via_upload_post"] = True
-                            mark_idempotency_success(
-                                key=upload_post_keys_by_platform[up_platform],
-                                result_payload={
-                                    "platform": logical_platform,
-                                    "publisher": "upload_post",
-                                    "external_ids": external_ids_delta,
-                                    "provider_response": plat_data,
-                                    "request_id": request_id,
-                                },
-                            )
-                        break
-                    last_up_error = str(result.get("error") or "error")
-                except UploadPostPublishError as e:
-                    last_up_error = str(e)
-                    if e.kind == UploadPostErrorKind.UNKNOWN_PENDING_CONFIRMATION:
-                        provider_request_id = None
-                        client_request_id = None
-                        if e.request_id_source == "provider":
-                            provider_request_id = e.request_id or external_ids.get("upload_post_request_id")
-                        else:
-                            client_request_id = e.request_id or external_ids.get(UPLOAD_POST_CLIENT_REQUEST_ID_KEY)
-                            if not client_request_id:
-                                client_request_id = upload_post_request_id
-                        pending_result = _schedule_upload_post_unknown_reconciliation(
-                            post,
-                            brand=brand,
-                            correlation_id=correlation_id,
-                            brand_id=_brand_id,
-                            current_attempt=current_attempt,
-                            _timer=_timer,
-                            upload_fingerprint=upload_fingerprint,
-                            external_ids=external_ids,
-                            upload_post_keys_by_platform=upload_post_keys_by_platform,
-                            provider_request_id=provider_request_id,
-                            client_request_id=client_request_id,
-                            job_id=e.job_id or external_ids.get("upload_post_job_id"),
-                            status_code=e.status_code,
-                            last_status=f"unknown_http_{e.status_code or 'na'}",
-                            detail=last_up_error,
-                        )
-                        if pending_result is not None:
-                            return pending_result
-                    if attempt < UPLOAD_POST_RETRY_COUNT and e.retriable:
-                        logger.warning(
-                            "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
-                            attempt + 1,
-                            UPLOAD_POST_RETRY_COUNT + 1,
-                            UPLOAD_POST_RETRY_DELAY_SEC,
-                            last_up_error,
-                        )
-                        _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
-                    else:
-                        logger.warning(
-                            "[UploadPost] Failed after %s attempts: %s",
-                            UPLOAD_POST_RETRY_COUNT + 1,
-                            last_up_error,
-                        )
-                        if "YOUTUBE" in upload_post_platforms_to_execute:
-                            log_event(
-                                logger,
-                                event="upload_post_fallback_allowed",
-                                correlation_id=correlation_id,
-                                scheduled_post_id=post.id,
-                                reason="confirmed_upload_post_failure",
-                            )
-                            logger.info("[UploadPost] Falling back to YouTube API (confirmed failure)")
-                except Exception as e:
-                    last_up_error = str(e)
-                    if attempt < UPLOAD_POST_RETRY_COUNT:
-                        logger.warning(
-                            "[UploadPost] Error (attempt %s/%s), retry in %s seconds: %s",
-                            attempt + 1,
-                            UPLOAD_POST_RETRY_COUNT + 1,
-                            UPLOAD_POST_RETRY_DELAY_SEC,
-                            last_up_error,
-                        )
-                        _time.sleep(UPLOAD_POST_RETRY_DELAY_SEC)
-                    else:
-                        logger.warning(
-                            "[UploadPost] Failed after %s attempts: %s",
-                            UPLOAD_POST_RETRY_COUNT + 1,
-                            last_up_error,
-                        )
-                        if "YOUTUBE" in upload_post_platforms_to_execute:
-                            log_event(
-                                logger,
-                                event="upload_post_fallback_allowed",
-                                correlation_id=correlation_id,
-                                scheduled_post_id=post.id,
-                                reason="confirmed_upload_post_exception",
-                            )
-                            logger.info("[UploadPost] Falling back to YouTube API (confirmed failure)")
-
-        if not up_success and last_up_error:
-            for idempotency_key in upload_post_keys_by_platform.values():
-                mark_idempotency_failed(key=idempotency_key, error_message=last_up_error)
-            if "YOUTUBE" not in upload_post_platforms_to_execute:
-                warnings.append(f"Upload-Post: {last_up_error}")
-
-    for platform in post.platforms:
-        # If YouTube was already handled via Upload Post, skip native API (avoid duplicate Short).
-        # upload_post_youtube_ok is True with async (request_id only, no video_id yet) — do not require external_ids.
-        if platform in ("YT", "YTB") and upload_post_youtube_ok:
-            logger.info(
-                "[POSTING] YouTube via Upload Post already applied; skipping publisher API (post_id=%s platform=%s)",
-                post.id,
-                platform,
-            )
-            continue
-        account = post.social_account
-        if not account or account.platform != platform:
-            from apps.brands.models import BrandSocialAccount
-
-            # YouTube Shorts (YT) and long-form (YTB) share the same OAuth.
-            # If no account for exact code, try alternate code.
-            platform_candidates = [platform]
-            if platform == "YT":
-                platform_candidates.append("YTB")
-            elif platform == "YTB":
-                platform_candidates.append("YT")
-
-            account = (
-                BrandSocialAccount.objects.filter(
-                    brand=brand,
-                    platform__in=platform_candidates,
-                )
-                .order_by("id")
-                .first()
-            )
-        if not account:
-            if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and _list_ordered_youtube_credentials(brand):
-                account = SimpleNamespace(
-                    brand=brand,
-                    platform=platform,
-                    channel_id="",
-                    access_token="",
-                    refresh_token="",
-                )
-            else:
-                errors.append(f"{platform}: nenhuma conta conectada")
-                continue
-        if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and external_ids.get(
-            "upload_post_reconciliation_state"
-        ) == "pending":
-            log_event(
-                logger,
-                event="upload_post_fallback_blocked",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                reason="reconciliation_pending_native_skipped",
-            )
-            retryable_errors.append(
-                {
-                    "message": f"{platform}: aguardando confirmação do Upload Post antes do fallback nativo",
-                    "retry_after_seconds": 120,
-                    "reason": "uploadPostReconciliationPending",
-                }
-            )
-            continue
-        if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and external_ids.get("youtube_native_invalid_grant"):
-            msg_ig = "YouTube OAuth inválido (invalid_grant); atualize a credencial."
-            errors.append(f"{platform}: {msg_ig}")
-            log_event(
-                logger,
-                event="youtube_native_invalid_grant",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                brand_id=_brand_id,
-                platform="youtube",
-                status="credential_failure",
-            )
-            continue
-        # SimpleNamespace is only for publishing with BrandYouTubeCredential; FK requires BrandSocialAccount.
-        if not post.social_account_id and isinstance(account, BrandSocialAccount):
-            post.social_account = account
-            social_account_changed = True
-        idempotency_key = _build_publish_idempotency_key(
+        up = publish_via_upload_post(
             post,
             brand,
-            platform,
-            upload_fingerprint,
-            account=account,
+            video_path=video_path,
+            upload_post_platforms=upload_post_platforms,
+            upload_fingerprint=upload_fingerprint,
+            external_ids=external_ids,
+            correlation_id=correlation_id,
+            brand_id=_brand_id,
+            current_attempt=current_attempt,
+            timer=_timer,
+            upload_post_youtube_ok=upload_post_youtube_ok,
         )
-        acquire_result = acquire_idempotency_key(
-            key=idempotency_key,
-            operation_name="publish",
-            aggregate_type="ScheduledPost",
-            aggregate_id=post.id,
-        )
-        if acquire_result.outcome == "succeeded":
-            existing_payload = get_existing_idempotency_result(idempotency_key) or acquire_result.record.result_payload
-            _apply_idempotency_result(external_ids, existing_payload)
-            continue
-        if acquire_result.outcome == "in_progress":
-            retryable_errors.append(_build_idempotency_retryable_error(platform))
-            continue
-        # Extra deduplication: avoid accidental duplicate upload for same channel/platform.
-        if upload_fingerprint and platform in ("YT", "YTB"):
-            done_posts = ScheduledPost.objects.filter(
-                status="DONE",
-                upload_fingerprint=upload_fingerprint,
-            ).exclude(id=post.id).select_related("social_account")
-            duplicated = False
-            for done_post in done_posts:
-                done_platforms = done_post.platforms or []
-                same_platform = platform in done_platforms
-                same_channel = (
-                    done_post.social_account_id
-                    and account.channel_id
-                    and done_post.social_account.channel_id == account.channel_id
-                )
-                if same_platform and same_channel:
-                    duplicated = True
-                    break
-            if duplicated:
-                duplicate_message = f"{platform}: upload duplicado detectado (mesmo arquivo e canal)"
-                mark_idempotency_failed(key=idempotency_key, error_message=duplicate_message)
-                errors.append(duplicate_message)
-                continue
-        from apps.social.publishers import get_publisher
+        if up.early_return is not None:
+            return up.early_return
+        errors.extend(up.errors)
+        warnings.extend(up.warnings)
+        retryable_errors.extend(up.retryable_errors)
+        upload_post_youtube_ok = up.upload_post_youtube_ok
 
-        publisher = get_publisher(platform)
-        if not publisher:
-            error_message = f"{platform}: publisher não implementado"
-            mark_idempotency_failed(key=idempotency_key, error_message=error_message)
-            errors.append(error_message)
-            continue
-        is_youtube_platform = str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES
-        ordered_youtube_credentials = _list_ordered_youtube_credentials(brand) if is_youtube_platform else []
-        if is_youtube_platform and ordered_youtube_credentials:
-            now = timezone.now()
-            available_credentials = [
-                cred
-                for cred in ordered_youtube_credentials
-                if not cred.quota_exceeded_until or cred.quota_exceeded_until <= now
-            ]
-            if not available_credentials:
-                next_available_at = min(
-                    [cred.quota_exceeded_until for cred in ordered_youtube_credentials if cred.quota_exceeded_until]
-                )
-                delay = max(60, int((next_available_at - now).total_seconds()))
-                retryable_errors.append(
-                    {
-                        "message": (
-                            f"{platform}: todas as credenciais YouTube da brand estão sem cota. "
-                            "Aguardando reset automático."
-                        ),
-                        "retry_after_seconds": delay,
-                        "reason": "quotaExceeded",
-                    }
-                )
-                mark_idempotency_failed(
-                    key=idempotency_key,
-                    error_message=(
-                        f"{platform}: todas as credenciais YouTube da brand estão sem cota. "
-                        "Aguardando reset automático."
-                    ),
-                )
-                continue
-
-            published = False
-            last_exception = None
-            last_is_retriable = False
-            last_reason = ""
-            for _cred_idx, yt_cred in enumerate(available_credentials, 1):
-                _attempt_timer = Timer()
-                log_event(
-                    logger,
-                    event="publish_attempt_started",
-                    correlation_id=correlation_id,
-                    scheduled_post_id=post.id,
-                    brand_id=_brand_id,
-                    platform="youtube",
-                    status="started",
-                    attempt_number=_cred_idx,
-                    youtube_credential_id=yt_cred.id,
-                )
-                try:
-                    result = publisher.publish(
-                        account,
-                        video_path,
-                        job_obj,
-                        scheduled_post=post,
-                        youtube_credential=yt_cred,
-                    )
-                    video_id = (result or {}).get("video_id")
-                    if video_id:
-                        external_ids[platform] = video_id
-                        external_ids.pop("youtube_via_upload_post", None)
-                        external_ids.pop("upload_post_youtube_terminal_failure", None)
-                        external_ids.pop("upload_post_skip_after_unknown_no_id", None)
-                        external_ids.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
-                    warning = (result or {}).get("warning")
-                    if warning:
-                        warnings.append(f"{platform}: {warning}")
-                    if yt_cred.quota_exceeded_until or yt_cred.last_error:
-                        yt_cred.quota_exceeded_until = None
-                        yt_cred.last_error = ""
-                        yt_cred.save(update_fields=["quota_exceeded_until", "last_error", "updated_at"])
-                    log_event(
-                        logger,
-                        event="publish_attempt_succeeded",
-                        correlation_id=correlation_id,
-                        scheduled_post_id=post.id,
-                        brand_id=_brand_id,
-                        platform="youtube",
-                        status="success",
-                        attempt_number=_cred_idx,
-                        duration_ms=_attempt_timer.elapsed_ms(),
-                        external_video_id=video_id or "",
-                        youtube_credential_id=yt_cred.id,
-                    )
-                    published = True
-                    mark_idempotency_success(
-                        key=idempotency_key,
-                        result_payload={
-                            "platform": platform,
-                            "publisher": "native",
-                            "external_ids": (
-                                {platform: str(video_id)}
-                                if video_id
-                                else {}
-                            ),
-                            "remove_external_ids": [
-                                "youtube_via_upload_post",
-                                "upload_post_youtube_terminal_failure",
-                                "upload_post_skip_after_unknown_no_id",
-                                UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
-                            ],
-                            "provider_response": result or {},
-                        },
-                    )
-                    break
-                except Exception as e:
-                    reason = str(getattr(e, "reason", "") or "").strip()
-                    is_retriable = bool(getattr(e, "retriable", False))
-                    msg = str(e)
-                    last_exception = e
-                    last_is_retriable = is_retriable
-                    last_reason = reason
-                    log_event(
-                        logger,
-                        event="publish_attempt_failed",
-                        correlation_id=correlation_id,
-                        scheduled_post_id=post.id,
-                        brand_id=_brand_id,
-                        platform="youtube",
-                        status="error",
-                        attempt_number=_cred_idx,
-                        duration_ms=_attempt_timer.elapsed_ms(),
-                        error=msg,
-                        reason=reason,
-                        retriable=is_retriable,
-                        youtube_credential_id=yt_cred.id,
-                    )
-                    if "invalid_grant" in msg.lower() or str(reason).lower() in (
-                        "invalidgrant",
-                        "invalid_grant",
-                    ):
-                        external_ids["youtube_native_invalid_grant"] = True
-                        external_ids["youtube_native_invalid_grant_at"] = timezone.now().isoformat()
-                        log_event(
-                            logger,
-                            event="youtube_native_invalid_grant",
-                            correlation_id=correlation_id,
-                            scheduled_post_id=post.id,
-                            brand_id=_brand_id,
-                            platform="youtube",
-                            status="credential_failure",
-                            youtube_credential_id=yt_cred.id,
-                        )
-                    if not is_retriable and (
-                        "sem tokens" in msg.lower()
-                        or "oauth do youtube não configurado" in msg.lower()
-                        or "oauth do youtube nao configurado" in msg.lower()
-                    ):
-                        yt_cred.last_error = f"Credencial ignorada: {msg}"
-                        yt_cred.save(update_fields=["last_error", "updated_at"])
-                        continue
-                    if is_retriable and reason == "quotaExceeded":
-                        delay = int(getattr(e, "retry_after_seconds", 0) or 3600)
-                        yt_cred.quota_exceeded_until = timezone.now() + timedelta(seconds=max(delay, 300))
-                        yt_cred.last_error = f"quotaExceeded: {e}"
-                        yt_cred.save(update_fields=["quota_exceeded_until", "last_error", "updated_at"])
-                        continue
-                    # Any other error: save on credential and try next
-                    yt_cred.last_error = f"{reason or 'erro'}: {msg}"[:500]
-                    yt_cred.save(update_fields=["last_error", "updated_at"])
-                    continue
-
-            if published:
-                continue
-            # All credentials failed: schedule retry or mark error
-            if last_exception is not None:
-                if last_is_retriable:
-                    mark_idempotency_failed(
-                        key=idempotency_key,
-                        error_message=f"{platform}: {last_exception}",
-                    )
-                    retryable_errors.append(
-                        {
-                            "message": f"{platform}: {last_exception}",
-                            "retry_after_seconds": getattr(last_exception, "retry_after_seconds", None),
-                            "reason": last_reason,
-                        }
-                    )
-                else:
-                    error_message = f"{platform}: {last_exception}"
-                    mark_idempotency_failed(key=idempotency_key, error_message=error_message)
-                    errors.append(error_message)
-            continue
-
-            next_available_at = min(
-                [cred.quota_exceeded_until for cred in ordered_youtube_credentials if cred.quota_exceeded_until]
-            )
-            delay = max(60, int((next_available_at - timezone.now()).total_seconds()))
-            retryable_errors.append(
-                {
-                    "message": (
-                        f"{platform}: cota excedida em todas as credenciais da brand. "
-                        "Postagem pausada até o reset da cota."
-                    ),
-                    "retry_after_seconds": delay,
-                    "reason": "quotaExceeded",
-                }
-            )
-            continue
-
-        try:
-            result = publisher.publish(account, video_path, job_obj, scheduled_post=post)
-            video_id = (result or {}).get("video_id")
-            if video_id:
-                external_ids[platform] = video_id
-                if platform in ("YT", "YTB"):
-                    external_ids.pop("youtube_via_upload_post", None)
-                    external_ids.pop("upload_post_youtube_terminal_failure", None)
-                    external_ids.pop("upload_post_skip_after_unknown_no_id", None)
-                    external_ids.pop(UPLOAD_POST_CLIENT_REQUEST_ID_KEY, None)
-            warning = (result or {}).get("warning")
-            if warning:
-                warnings.append(f"{platform}: {warning}")
-            mark_idempotency_success(
-                key=idempotency_key,
-                result_payload={
-                    "platform": platform,
-                    "publisher": "native",
-                    "external_ids": (
-                        {platform: str(video_id)}
-                        if video_id
-                        else {}
-                    ),
-                    "remove_external_ids": (
-                        [
-                            "youtube_via_upload_post",
-                            "upload_post_youtube_terminal_failure",
-                            "upload_post_skip_after_unknown_no_id",
-                            UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
-                        ]
-                        if platform in ("YT", "YTB")
-                        else []
-                    ),
-                    "provider_response": result or {},
-                },
-            )
-        except Exception as e:
-            msg = str(e)
-            reason = str(getattr(e, "reason", "") or "").strip()
-            if str(platform).strip().upper() in YOUTUBE_PLATFORM_CODES and (
-                "invalid_grant" in msg.lower()
-                or str(reason).lower() in ("invalidgrant", "invalid_grant")
-            ):
-                external_ids["youtube_native_invalid_grant"] = True
-                external_ids["youtube_native_invalid_grant_at"] = timezone.now().isoformat()
-                log_event(
-                    logger,
-                    event="youtube_native_invalid_grant",
-                    correlation_id=correlation_id,
-                    scheduled_post_id=post.id,
-                    brand_id=_brand_id,
-                    platform="youtube",
-                    status="credential_failure",
-                )
-            if getattr(e, "retriable", False):
-                mark_idempotency_failed(key=idempotency_key, error_message=f"{platform}: {e}")
-                retryable_errors.append(
-                    {
-                        "message": f"{platform}: {e}",
-                        "retry_after_seconds": getattr(e, "retry_after_seconds", None),
-                        "reason": str(getattr(e, "reason", "") or ""),
-                    }
-                )
-            else:
-                error_message = f"{platform}: {e}"
-                mark_idempotency_failed(key=idempotency_key, error_message=error_message)
-                errors.append(error_message)
-    if retryable_errors and not errors:
-        has_quota_exceeded = any(
-            (item.get("reason") or "").strip() == "quotaExceeded"
-            for item in retryable_errors
-        )
-        has_upload_limit_exceeded = any(
-            (item.get("reason") or "").strip() == "uploadLimitExceeded"
-            for item in retryable_errors
-        )
-        has_min_interval_not_reached = any(
-            (item.get("reason") or "").strip() == "minIntervalNotReached"
-            for item in retryable_errors
-        )
-        has_idempotency_in_progress = any(
-            (item.get("reason") or "").strip() == "idempotencyInProgress"
-            for item in retryable_errors
-        )
-        has_upload_post_reconciliation_pending = any(
-            (item.get("reason") or "").strip() == "uploadPostReconciliationPending"
-            for item in retryable_errors
-        )
-        if has_quota_exceeded:
-            q = int(getattr(post, "youtube_quota_retry_count", 0) or 0) + 1
-            post.youtube_quota_retry_count = q
-            publish_quota_exhaustion_attempts_total.inc()
-            if q > YOUTUBE_QUOTA_MAX_RETRIES:
-                errors.extend([item["message"] for item in retryable_errors])
-        next_retry = int(post.retry_count or 0) + 1
-        should_not_consume_attempt = (
-            has_quota_exceeded
-            or has_upload_limit_exceeded
-            or has_min_interval_not_reached
-            or has_idempotency_in_progress
-            or has_upload_post_reconciliation_pending
-        )
-        # One retry for upload/title errors; token/quota errors do not consume attempt
-        if not errors and not should_not_consume_attempt and next_retry > 1:
-            errors.extend([item["message"] for item in retryable_errors])
-        elif not errors:
-            requested_delays = [
-                int(item["retry_after_seconds"])
-                for item in retryable_errors
-                if item.get("retry_after_seconds")
-            ]
-            # quotaExceeded / uploadLimitExceeded: wait for reset (no hard failure).
-            if has_quota_exceeded:
-                delay = max([3600] + requested_delays)
-            elif has_upload_limit_exceeded:
-                delay = max([24 * 3600] + requested_delays)
-            elif has_min_interval_not_reached:
-                delay = max([60] + requested_delays)
-            elif has_idempotency_in_progress:
-                delay = max([IDEMPOTENCY_IN_PROGRESS_DELAY_SEC] + requested_delays)
-            elif has_upload_post_reconciliation_pending:
-                delay = max([120] + requested_delays)
-            else:
-                delay = max([300] + requested_delays)
-            msg = " ; ".join([item["message"] for item in retryable_errors])
-            next_retry_at = timezone.now() + timedelta(seconds=delay)
-            expired_result = _fail_expired_factory_slot(
-                post,
-                correlation_id=correlation_id,
-                brand_id=_brand_id,
-                current_attempt=current_attempt,
-                duration_ms=_timer.elapsed_ms(),
-                reason="A próxima tentativa automática cairia depois do horário do slot.",
-                check_time=next_retry_at,
-            )
-            if expired_result is not None:
-                return expired_result
-            post.status = "PENDING"
-            if should_not_consume_attempt:
-                post.retry_count = int(post.retry_count or 0)
-            else:
-                post.retry_count = next_retry
-            post.scheduled_at = next_retry_at
-            if has_quota_exceeded:
-                post.error = (
-                    "Cota do YouTube excedida (quotaExceeded). "
-                    f"Nova tentativa automática em {delay}s. {msg}"
-                )
-            elif has_min_interval_not_reached:
-                post.error = (
-                    "Intervalo mínimo entre publicações ainda não cumprido. "
-                    f"Nova tentativa automática em {delay}s. {msg}"
-                )
-            elif has_idempotency_in_progress:
-                post.error = (
-                    "Publicação aguardando conclusão de uma execução idempotente já iniciada. "
-                    f"Nova tentativa automática em {delay}s. {msg}"
-                )
-            elif has_upload_post_reconciliation_pending:
-                post.error = (
-                    "Aguardando reconciliação do Upload Post antes do fallback nativo. "
-                    f"Nova tentativa em {delay}s. {msg}"
-                )
-            else:
-                post.error = f"Falha temporária. 1 tentativa automática em {delay}s. Reagende manualmente se persistir. {msg}"
-            post.upload_fingerprint = upload_fingerprint
-            post.external_ids = external_ids
-            retry_fields = [
-                "status",
-                "retry_count",
-                "youtube_quota_retry_count",
-                "scheduled_at",
-                "error",
-                "upload_fingerprint",
-                "external_ids",
-            ]
-            if social_account_changed:
-                retry_fields.append("social_account")
-            post.save(update_fields=retry_fields)
-            try:
-                FactoryPostingAttemptLog.objects.create(
-                    posting_schedule=post.factory_schedule,
-                    attempt_number=current_attempt,
-                    started_at=timezone.now(),
-                    finished_at=timezone.now(),
-                    result="ERROR",
-                    error_message=msg,
-                    provider_response={},
-                )
-            except Exception:
-                pass
-            log_event(
-                logger,
-                event="publish_failed",
-                correlation_id=correlation_id,
-                scheduled_post_id=post.id,
-                brand_id=_brand_id,
-                platform="youtube",
-                status="error",
-                duration_ms=_timer.elapsed_ms(),
-                error=msg,
-                attempt_number=current_attempt,
-                retry_scheduled_in_seconds=delay,
-            )
-            _sync_factory_posting_schedule(post)
-            return {
-                "status": post.status,
-                "retry_scheduled_in_seconds": delay,
-                "errors": [item["message"] for item in retryable_errors],
-            }
-    if errors:
-        post.status = "FAILED"
-        all_errors = errors + warnings
-        post.error = "; ".join(all_errors)
-    else:
-        post.status = "DONE"
-        post.retry_count = 0
-        post.youtube_quota_retry_count = 0
-        post.posted_at = timezone.now()
-        if warnings:
-            post.error = "; ".join(warnings)
-    post.upload_fingerprint = upload_fingerprint
-    post.external_ids = external_ids
-    update_fields = [
-        "status",
-        "error",
-        "posted_at",
-        "upload_fingerprint",
-        "external_ids",
-        "retry_count",
-        "youtube_quota_retry_count",
-    ]
-    if social_account_changed:
-        update_fields.append("social_account")
-    post.save(update_fields=update_fields)
-    try:
-        FactoryPostingAttemptLog.objects.create(
-            posting_schedule=post.factory_schedule,
-            attempt_number=current_attempt,
-            started_at=timezone.now(),
-            finished_at=timezone.now(),
-            result="SUCCESS" if post.status == "DONE" else "ERROR",
-            error_message=post.error or "",
-            provider_response={"external_ids": post.external_ids or {}},
-        )
-    except Exception:
-        pass
-    _external_video_id = str(
-        (post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or ""
+    nativo = publish_native_platforms(
+        post,
+        brand,
+        video_path=video_path,
+        job=job_obj,
+        correlation_id=correlation_id,
+        brand_id=_brand_id,
+        upload_fingerprint=upload_fingerprint,
+        upload_post_youtube_ok=upload_post_youtube_ok,
+        external_ids=external_ids,
+        upload_post_client_request_id_key=UPLOAD_POST_CLIENT_REQUEST_ID_KEY,
     )
-    if post.status == "DONE":
-        publish_duration_ms.observe(_timer.elapsed_ms())
-        log_event(
-            logger,
-            event="publish_finished",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            brand_id=_brand_id,
-            platform="youtube",
-            status="success",
-            duration_ms=_timer.elapsed_ms(),
-            attempt_number=current_attempt,
-            external_video_id=_external_video_id,
-        )
-    else:
-        publish_failures_total.inc()
-        log_event(
-            logger,
-            event="publish_finished",
-            correlation_id=correlation_id,
-            scheduled_post_id=post.id,
-            brand_id=_brand_id,
-            platform="youtube",
-            status="error",
-            duration_ms=_timer.elapsed_ms(),
-            attempt_number=current_attempt,
-            error=post.error or "",
-        )
-    _sync_factory_posting_schedule(post)
+    errors.extend(nativo.errors)
+    warnings.extend(nativo.warnings)
+    retryable_errors.extend(nativo.retryable_errors)
+    social_account_changed = social_account_changed or nativo.social_account_changed
 
-    # Manual posts (retry, run_scheduled_posts_now): schedule cover upload (long-form only)
-    if post.status == "DONE" and _platforms_are_youtube_only(post.platforms):
-        brand = _resolve_post_target_brand(post)
-        platforms = post.platforms or []
-        is_short = "YT" in platforms and "YTB" not in platforms
-        qualifies = not is_short
-        if qualifies and brand and post.auto_cut_corte_id and getattr(post.auto_cut_corte, "thumbnail", None):
-            video_id = str((post.external_ids or {}).get("YT") or (post.external_ids or {}).get("YTB") or "")
-            if video_id:
-                upload_thumbnails_after_batch_task.apply_async(
-                    args=[brand.id],
-                    kwargs={"post_ids": [post.id]},
-                    countdown=THUMBNAIL_BATCH_DELAY_SEC,
-                )
-    return {
-        "status": post.status,
-        "errors": errors,
-        "error": post.error or ("; ".join(errors) if errors else ""),
-        "external_ids": external_ids,
-    }
+    return finalize_publish(
+        FinalizeContext(
+            post=post,
+            brand=brand,
+            errors=errors,
+            warnings=warnings,
+            retryable_errors=retryable_errors,
+            external_ids=external_ids,
+            upload_fingerprint=upload_fingerprint,
+            social_account_changed=social_account_changed,
+            correlation_id=correlation_id,
+            brand_id=_brand_id,
+            current_attempt=current_attempt,
+            timer=_timer,
+        )
+    )
 
 
 @shared_task(
@@ -3640,10 +1153,6 @@ def _get_referenced_media_paths() -> set:
     Collect all file paths referenced in the database.
     Returns set of paths relative to MEDIA_ROOT, normalized.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte, AutoCutReadyChunk
-    from apps.brands.models import BrandAsset
-    from apps.cuts.models import Cut
-    from apps.mediahub.models import SourceVideo
 
     refs = set()
     # AutoCutAnalysis.file
@@ -3760,8 +1269,6 @@ def post_youtube_first_comment_task(self, scheduled_post_id: int, video_id: str)
     """
     from googleapiclient.discovery import build
 
-    from apps.social.publishers.youtube import YouTubePublisher
-    from apps.social.services.youtube_credentials import get_credentials
 
     if not scheduled_post_id or not video_id:
         return {"skipped": "missing_args"}
@@ -3804,7 +1311,9 @@ def post_youtube_first_comment_task(self, scheduled_post_id: int, video_id: str)
 
     post.external_ids = dict(post.external_ids or {})
     post.external_ids["first_comment_posted"] = True
-    post.save(update_fields=["external_ids", "updated_at"])
+    # ScheduledPost não tem updated_at — incluí-lo aqui impedia a gravação do flag
+    # first_comment_posted, quebrando a idempotência prometida na docstring.
+    post.save(update_fields=["external_ids"])
     return {"ok": True, "post_id": scheduled_post_id, "video_id": video_id}
 
 
@@ -3820,7 +1329,6 @@ def cleanup_posted_media_task():
     - Orphan files: delete files under storage/media with no DB row
     Does not delete Jobs or available/scheduled videos.
     """
-    from apps.auto_cuts.models import AutoCutAnalysis, AutoCutCorte
 
     summary = {
         "cortes_cleaned": 0,

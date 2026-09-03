@@ -185,6 +185,22 @@ class AutoCutAnalysis(models.Model):
         related_name="+",
         help_text="Asset OVERLAY_LONG da brand; usado só se long_overlay_enabled.",
     )
+    thumb_template_short = models.ForeignKey(
+        BrandAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Modelo de capa dos shorts (THUMB_SHORT). Nulo = padrão da brand ou faixa inferior.",
+    )
+    thumb_template_long = models.ForeignKey(
+        BrandAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Modelo de capa dos longs (THUMB_LONG). Nulo = padrão da brand ou faixa inferior.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -237,13 +253,6 @@ class AutoCutSuggestion(models.Model):
         ("short", "Curto (Reels/TikTok/Shorts)"),
         ("long", "Longo (YouTube)"),
     ]
-    THEME_CATEGORY_CHOICES = [
-        ("BUSINESS_MONEY", "Negócios / Dinheiro"),
-        ("PSYCHOLOGY_RELATIONSHIPS", "Psicologia / Relacionamentos"),
-        ("STORIES_CURIOSITIES", "Histórias e Curiosidades"),
-        ("CONTROVERSIES_DEBATE", "Polêmicas / Debate"),
-        ("COMEDY_HUMOR", "Comédia / Humor"),
-    ]
 
     analysis = models.ForeignKey(
         AutoCutAnalysis,
@@ -259,10 +268,9 @@ class AutoCutSuggestion(models.Model):
     virality_score = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-10
     theme_category = models.CharField(
         max_length=40,
-        choices=THEME_CATEGORY_CHOICES,
         blank=True,
         default="",
-        help_text="Categoria temática retornada pela LLM (metadado obrigatório no novo fluxo).",
+        help_text="Code da BrandCategory (por factory) retornado pela LLM.",
     )
     source_asset_id = models.CharField(
         max_length=120,

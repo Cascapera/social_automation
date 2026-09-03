@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "apps.jobs",
     "apps.api",
     "apps.auto_cuts",
+    "apps.multiple_creator",
     "apps.social",
 ]
 
@@ -235,6 +236,9 @@ CELERY_TASK_ROUTES = {
     # Transcription (CPU) can run while another worker encodes on GPU (render queue)
     "apps.auto_cuts.tasks.analyze_auto_cuts_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
     "apps.jobs.tasks.generate_subtitles_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    "apps.multiple_creator.tasks.multiple_creator_transcribe_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    "apps.multiple_creator.tasks.multiple_creator_fanout_task": {"queue": CELERY_QUEUE_TRANSCRIPTION},
+    "apps.multiple_creator.tasks.cleanup_terminal_job_files_task": {"queue": "processing"},
     # FFmpeg / NVENC final output (GPU when available)
     "apps.auto_cuts.tasks.finalizar_auto_cut_task": {"queue": CELERY_QUEUE_RENDER},
     "apps.jobs.tasks.process_job": {"queue": CELERY_QUEUE_RENDER},
@@ -243,6 +247,134 @@ CELERY_TASK_ROUTES = {
 # Whisper: always CPU so GPU is free for NVENC (set WHISPER_FORCE_CPU=0 to allow .env / CUDA)
 WHISPER_FORCE_CPU = os.getenv("WHISPER_FORCE_CPU", "1").lower() in ("1", "true", "yes")
 
+# Whisper: modelo e device (refactor.md R-17 lote 2 / D-08 — fonte única de configuração)
+# ⚠ WHISPER_MODEL tem DOIS defaults no código, e eles são diferentes entre si. Não é
+# engano de digitação recente: a transcrição fatiada (vídeo longo, um bloco por vez) usa
+# "small" e a de passada única usa "large-v3". Migrar para uma setting só apagaria essa
+# diferença em produção, então as duas viram settings separadas, com o mesmo env var por
+# trás. Quem quiser unificar: é decisão de qualidade × custo, não de refatoração.
+_whisper_model_env = (os.getenv("WHISPER_MODEL", "") or "").strip()
+WHISPER_MODEL_FULL = _whisper_model_env or "large-v3"
+WHISPER_MODEL_CHUNKED = _whisper_model_env or "small"
+# "cpu" força CPU mesmo com CUDA disponível; vazio deixa a decisão para WHISPER_FORCE_CPU.
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "").strip().lower()
+# Sem .lower() de propósito: era assim que os leitores comparavam, e "TRUE" não ligava.
+WHISPER_DEBUG_GPU = os.getenv("WHISPER_DEBUG_GPU", "").strip() in ("1", "true", "yes")
+
+# LLM (refactor.md R-17 lote 3 / D-08 — fonte única de configuração)
+# As settings guardam o valor CRU já normalizado; a precedência entre elas continua em
+# `services/grok.py:_build_llm_client`, que é onde ela sempre esteve e onde os avisos de
+# depreciação são emitidos (uma vez por chamada, como antes).
+LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or "xai").strip().lower()
+LLM_API_KEY = (os.getenv("LLM_API_KEY") or "").strip()
+# Depreciada: usada só como fallback de LLM_API_KEY, com aviso no log.
+XAI_API_KEY = (os.getenv("XAI_API_KEY") or "").strip()
+LLM_MODEL = (os.getenv("LLM_MODEL") or "").strip()
+LLM_MODEL_LIGHT = (os.getenv("LLM_MODEL_LIGHT") or "").strip()
+# Depreciada: fallback de LLM_MODEL/LLM_MODEL_LIGHT, com aviso no log.
+GROK_MODEL = (os.getenv("GROK_MODEL") or "").strip()
+LLM_BASE_URL = (os.getenv("LLM_BASE_URL") or "").strip()
+# Limites interpolados no prompt no momento da chamada. Valor inválido derruba o boot em
+# vez de fazer cada análise falhar com ValueError no meio da task — é de propósito.
+# Teto absoluto de candidatos pedidos ao LLM. Não é a quantidade: a quantidade sai do
+# alvo do job multiplicado pela margem, e estes valores só limitam o resultado.
+LLM_MAX_SHORTS = max(1, int(os.getenv("LLM_MAX_SHORTS", "10")))
+LLM_MAX_LONGS = max(1, int(os.getenv("LLM_MAX_LONGS", "5")))
+# Margem sobre o alvo do job. O backend descarta candidato por duração, por categoria
+# sem brand mapeada e (a partir do filtro de nota) por score — pedir exatamente o alvo
+# faz o job entregar menos do que pediu sempre que qualquer um desses filtra algo.
+LLM_CANDIDATE_MARGIN = max(1.0, float(os.getenv("LLM_CANDIDATE_MARGIN", "1.5")))
+# Nota mínima para um corte ser criado. 0 desliga o filtro — é o default, e mantém o
+# comportamento de antes de ele existir. Depende da calibração de nota estar nos prompts:
+# sem faixas ancoradas, a nota é ordenação relativa e um limiar fixo não significa nada.
+AUTO_CUT_MIN_VIRALITY_SCORE = max(0, min(100, int(os.getenv("AUTO_CUT_MIN_VIRALITY_SCORE", "0") or 0)))
+# Override de tabela de preço do LLM, em JSON. Vazio = usa GROK_PRICING.
+GROK_PRICING_JSON = (os.getenv("GROK_PRICING_JSON") or "").strip()
+# Depuração: salva a resposta parseada do LLM em MEDIA_ROOT/grok_responses.
+GROK_SAVE_RESPONSE_JSON = (os.getenv("GROK_SAVE_RESPONSE_JSON") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+# Upload-Post (refactor.md R-17 lote 4 / D-08 — fonte única de configuração)
+# ⚠ Guardada CRUA, sem `.strip()`. O publisher (`publishers/upload_post.py`) usava o valor
+# como veio e o cliente de analytics aplicava `.strip()` no seu próprio acessor. Normalizar
+# aqui mudaria o que o publisher manda no header — se for para arrumar, é item próprio.
+UPLOAD_POST_API_KEY = os.getenv("UPLOAD_POST_API_KEY") or ""
+# Throttle do cliente de analytics: intervalo mínimo entre requisições, pausa global após
+# 429/5xx (evita bloqueio de borda) e teto de espera dentro de uma única chamada.
+UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC = float(
+    os.getenv("UPLOAD_POST_ANALYTICS_MIN_INTERVAL_SEC", "0.6")
+)
+UPLOAD_POST_ANALYTICS_COOLDOWN_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_COOLDOWN_SEC", "30"))
+UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC = float(os.getenv("UPLOAD_POST_ANALYTICS_MAX_WAIT_SEC", "5"))
+# Pausa extra entre marcas no painel da factory, além do throttle do cliente HTTP.
+UPLOAD_POST_FACTORY_BRAND_DELAY_SEC = float(
+    os.getenv("UPLOAD_POST_FACTORY_BRAND_DELAY_SEC", "0.15")
+)
+
+# OAuth de Contas e YouTube Data API (refactor.md R-17 lote 6 / D-08)
+# ⚠ Este redirect é o do OAuth de **Contas**. O do factory-check é o
+# YOUTUBE_CHECK_REDIRECT_URI, mais abaixo — trocar um pelo outro quebra o fluxo em
+# produção sem erro visível no código.
+YOUTUBE_REDIRECT_URI = os.getenv(
+    "YOUTUBE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback/"
+)
+# Chave da YouTube Data API v3. GOOGLE_API_KEY é o nome antigo; a precedência entre as
+# duas continua no leitor (`services/youtube_fetch.py`).
+YOUTUBE_API_KEY = (os.getenv("YOUTUBE_API_KEY") or "").strip()
+GOOGLE_API_KEY = (os.getenv("GOOGLE_API_KEY") or "").strip()
+# Páginas de 50 vídeos por varredura completa do canal. Teto de 12 para não torrar a quota.
+YOUTUBE_FULL_SCAN_MAX_PAGES = max(1, min(12, int(os.getenv("YOUTUBE_FULL_SCAN_MAX_PAGES", "4") or "4")))
+
+# Criptografia de segredos em banco (refactor.md R-17 lote 6 / D-08)
+# Vazia = `secret_crypto` levanta com mensagem própria; a API traduz para 400 legível.
+SOCIAL_ENCRYPTION_KEY = (os.getenv("SOCIAL_ENCRYPTION_KEY") or "").strip()
+
+# URL do frontend para redirect pós-OAuth (refactor.md R-17 lote 6 / D-08)
+# ⚠ Esta é a leitura COM default de dev. As outras duas de `FRONTEND_URL` neste arquivo
+# (ALLOWED_HOSTS e CORS) tratam ausência como "não acrescenta nada" — e é o certo: sem a
+# variável, não há host extra a liberar, mas ainda tem que haver para onde redirecionar.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# yt-dlp (refactor.md R-17 lote 5 / D-08 — fonte única de configuração)
+# Todas vazias por omissão: cada uma liga um comportamento opcional do download.
+YTDLP_YOUTUBE_PLAYER_CLIENTS = (os.getenv("YTDLP_YOUTUBE_PLAYER_CLIENTS") or "").strip()
+YTDLP_JS_RUNTIMES = (os.getenv("YTDLP_JS_RUNTIMES") or "").strip()
+YTDLP_COOKIES_FILE = (os.getenv("YTDLP_COOKIES_FILE") or "").strip()
+YTDLP_COOKIES_FROM_BROWSER = (os.getenv("YTDLP_COOKIES_FROM_BROWSER") or "").strip()
+# Altura mínima desejada do vídeo. `0` desliga o filtro. Valor inválido cai em 720 em vez
+# de derrubar o boot — a tolerância é do código de origem e foi preservada aqui, porque
+# esta é preferência de qualidade, não credencial: errar o número não impede o download.
+_ytdlp_min_height_raw = (os.getenv("YTDLP_MIN_VIDEO_HEIGHT") or "").strip()
+try:
+    _ytdlp_min_height = int(_ytdlp_min_height_raw) if _ytdlp_min_height_raw else 720
+except ValueError:
+    _ytdlp_min_height = 720
+YTDLP_MIN_VIDEO_HEIGHT = max(0, _ytdlp_min_height)
+
+# Multiple-Creator: retencao do video original apos job terminal (DONE/PARTIAL/ERROR).
+# Apos esse periodo, cleanup_terminal_job_files_task remove o file (mantem a row).
+MULTIPLE_CREATOR_FILE_RETAIN_HOURS = int(os.getenv("MULTIPLE_CREATOR_FILE_RETAIN_HOURS", "24"))
+
+
+# YouTube OAuth (refactor.md R-17 / D-08 — fonte única de configuração)
+# Cliente "check": credencial separada, usada só para CONSULTAR o canal (reconciliação e
+# busca de vídeos). Vazio = recurso desligado, e quem lê trata isso explicitamente.
+# Já vem com .strip() para que o ponto de uso não precise repetir a normalização — era
+# ela, copiada em 3 arquivos, que fazia a diferença entre "não configurado" e "espaço".
+YOUTUBE_CHECK_CLIENT_ID = (os.getenv("YOUTUBE_CHECK_CLIENT_ID") or "").strip()
+YOUTUBE_CHECK_CLIENT_SECRET = (os.getenv("YOUTUBE_CHECK_CLIENT_SECRET") or "").strip()
+# Callback próprio do factory-check; NÃO reaproveitar YOUTUBE_REDIRECT_URI (é o de Contas).
+YOUTUBE_CHECK_REDIRECT_URI = (
+    (os.getenv("YOUTUBE_CHECK_REDIRECT_URI") or "").strip()
+    or "http://127.0.0.1:8000/api/youtube/factory-check-callback/"
+)
+# Fallback global de OAuth quando a brand não tem cliente próprio. None quando ausente —
+# o ponto de uso depende disso ser falsy, não string vazia.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 
 # FFmpeg
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")

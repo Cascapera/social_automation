@@ -14,6 +14,7 @@ import {
   createBrandYoutubeCredential,
   updateBrandYoutubeCredential,
   deleteBrandYoutubeCredential,
+  getBrandCategories,
 } from '../api'
 import './IntroOutro.css'
 
@@ -27,13 +28,20 @@ const ASSET_TYPES = [
   { id: 'THUMB_LONG', label: 'Thumb Longs' },
 ]
 
-const THEME_CATEGORY_OPTIONS = [
-  { id: 'BUSINESS_MONEY', label: 'Negócios / Dinheiro' },
-  { id: 'PSYCHOLOGY_RELATIONSHIPS', label: 'Psicologia / Relacionamentos' },
-  { id: 'STORIES_CURIOSITIES', label: 'Histórias e Curiosidades' },
-  { id: 'CONTROVERSIES_DEBATE', label: 'Polêmicas / Debate' },
-  { id: 'COMEDY_HUMOR', label: 'Comédia / Humor' },
-]
+const isThumbType = (id) => id === 'THUMB_SHORT' || id === 'THUMB_LONG'
+
+/** Zona onde o título é escrito na capa, em % da imagem. Padrão = lateral direita. */
+const DEFAULT_TEXT_ZONE = {
+  text_zone_x: 60,
+  text_zone_y: 8,
+  text_zone_w: 38,
+  text_zone_h: 84,
+  text_align: 'center',
+  text_valign: 'middle',
+  text_color: '',
+  stroke_enabled: false,
+  font: '',
+}
 
 /** Fuso fixo do scheduler (sem edição na UI). */
 const SCHEDULER_TIMEZONE_DEFAULT = 'America/Sao_Paulo'
@@ -296,6 +304,123 @@ function SchedulerPlanFields({ schedule, setSchedule }) {
   )
 }
 
+/** Campos da zona de texto do modelo de capa, com prévia do retângulo sobre a imagem enviada. */
+function TextZoneFields({ zone, onChange, onReset, preview }) {
+  const num = (field) => Number(zone[field]) || 0
+  const passaBorda =
+    num('text_zone_x') + num('text_zone_w') > 100 || num('text_zone_y') + num('text_zone_h') > 100
+
+  return (
+    <div className="text-zone-fields">
+      <div className="text-zone-header">
+        <h3>Zona do texto</h3>
+        <button type="button" className="btn-link" onClick={onReset}>
+          Restaurar padrão (lateral direita)
+        </button>
+      </div>
+      <p className="form-hint">
+        Onde o título é escrito, em % da imagem. O padrão já corresponde a modelos com a arte à
+        esquerda e o vazio à direita.
+      </p>
+
+      {preview ? (
+        <div className="text-zone-preview">
+          <img src={preview} alt="Modelo de capa enviado" />
+          <div
+            className="text-zone-rect"
+            style={{
+              left: `${num('text_zone_x')}%`,
+              top: `${num('text_zone_y')}%`,
+              width: `${num('text_zone_w')}%`,
+              height: `${num('text_zone_h')}%`,
+            }}
+          >
+            <span>título aqui</span>
+          </div>
+        </div>
+      ) : (
+        <p className="empty-msg">Escolha o arquivo acima para ver a zona sobre o modelo.</p>
+      )}
+
+      {passaBorda && (
+        <p className="form-error">A caixa passa da borda da imagem — reduza a largura ou a altura.</p>
+      )}
+
+      <div className="form-row">
+        {[
+          ['text_zone_x', 'Esquerda (%)'],
+          ['text_zone_y', 'Topo (%)'],
+          ['text_zone_w', 'Largura (%)'],
+          ['text_zone_h', 'Altura (%)'],
+        ].map(([field, rotulo]) => (
+          <div className="form-group" key={field}>
+            <label>{rotulo}</label>
+            <input
+              type="number"
+              min={field === 'text_zone_w' || field === 'text_zone_h' ? 1 : 0}
+              max={100}
+              value={zone[field]}
+              onChange={(e) => onChange(field, e.target.value === '' ? '' : Number(e.target.value))}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="form-row">
+        <div className="form-group">
+          <label>Alinhamento</label>
+          <select value={zone.text_align} onChange={(e) => onChange('text_align', e.target.value)}>
+            <option value="left">Esquerda</option>
+            <option value="center">Centro</option>
+            <option value="right">Direita</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Posição vertical</label>
+          <select value={zone.text_valign} onChange={(e) => onChange('text_valign', e.target.value)}>
+            <option value="top">Topo</option>
+            <option value="middle">Meio</option>
+            <option value="bottom">Base</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Fonte</label>
+          <select value={zone.font} onChange={(e) => onChange('font', e.target.value)}>
+            <option value="">Usar a fonte da marca</option>
+            <option value="impact">Impact</option>
+            <option value="anton">Anton</option>
+            <option value="bebas">Bebas Neue</option>
+            <option value="montserrat">Montserrat ExtraBold</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="form-row">
+        <div className="form-group">
+          <label>Cor do texto</label>
+          <input
+            type="text"
+            value={zone.text_color}
+            onChange={(e) => onChange('text_color', e.target.value)}
+            placeholder="Vazio = cor da marca"
+            maxLength={7}
+          />
+        </div>
+        <div className="form-group">
+          <label>Contorno no texto</label>
+          <select
+            value={zone.stroke_enabled ? 'yes' : 'no'}
+            onChange={(e) => onChange('stroke_enabled', e.target.value === 'yes')}
+          >
+            <option value="no">Não (a arte já dá contraste)</option>
+            <option value="yes">Sim</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ColorField({ label, value, onChange }) {
   return (
     <div className="form-group color-field">
@@ -344,6 +469,8 @@ export default function IntroOutro() {
   const [assetType, setAssetType] = useState('INTRO')
   const [label, setLabel] = useState('')
   const [file, setFile] = useState(null)
+  const [textZone, setTextZone] = useState(DEFAULT_TEXT_ZONE)
+  const [filePreview, setFilePreview] = useState('')
   const [overlayLongLabel, setOverlayLongLabel] = useState('')
   const [overlayLongFile, setOverlayLongFile] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -368,6 +495,10 @@ export default function IntroOutro() {
   const [editingBrand, setEditingBrand] = useState(false)
   const [deletingBrand, setDeletingBrand] = useState(false)
   const [editThemeCategory, setEditThemeCategory] = useState('')
+  const [editBrandName, setEditBrandName] = useState('')
+  const [brandCategories, setBrandCategories] = useState([])
+  const [editDefaultThumbShort, setEditDefaultThumbShort] = useState('')
+  const [editDefaultThumbLong, setEditDefaultThumbLong] = useState('')
   const [editThumbnailFont, setEditThumbnailFont] = useState('impact')
   const [editBandColor, setEditBandColor] = useState('#E12E20')
   const [editTextColor, setEditTextColor] = useState('#0A0A0A')
@@ -441,7 +572,10 @@ export default function IntroOutro() {
     setYoutubeDescriptionExtra(selected?.youtube_description_extra || '')
     setYoutubeMadeForKids(!!selected?.youtube_made_for_kids)
     setEditThemeCategory(selected?.theme_category || '')
+    setEditBrandName(selected?.name || '')
     setEditThumbnailFont(selected?.thumbnail_font || 'impact')
+    setEditDefaultThumbShort(selected?.default_thumb_template_short || '')
+    setEditDefaultThumbLong(selected?.default_thumb_template_long || '')
     setEditBandColor(selected?.thumbnail_band_color || '#E12E20')
     setEditTextColor(selected?.thumbnail_text_color || '#0A0A0A')
     setEditEffectColor(selected?.thumbnail_effect_color || '#FFEBDC')
@@ -456,6 +590,24 @@ export default function IntroOutro() {
     setUploadPostInstagramExtra(selected?.upload_post_instagram_extra_description || '')
     setUploadPostYoutubeEnabled(!!selected?.upload_post_youtube_enabled)
   }, [brandId, brands])
+
+  // Carrega categorias ativas da factory relevante (brand selecionada OU factory ativa OU
+  // factory escolhida no cadastro de nova brand).
+  useEffect(() => {
+    const selected = brands.find((b) => String(b.id) === String(brandId))
+    const fid =
+      (selected && selected.factory) ||
+      (viewMode === 'factory' ? factoryId : null) ||
+      newBrandFactoryId ||
+      null
+    if (!fid) {
+      setBrandCategories([])
+      return
+    }
+    getBrandCategories(fid)
+      .then((items) => setBrandCategories(items || []))
+      .catch(() => setBrandCategories([]))
+  }, [brandId, brands, viewMode, factoryId, newBrandFactoryId])
 
   async function handleAddOverlay(e) {
     e.preventDefault()
@@ -477,6 +629,19 @@ export default function IntroOutro() {
     }
   }
 
+  // Prévia local do modelo, para acertar a zona sem ter de subir e olhar a capa gerada.
+  useEffect(() => {
+    if (!file || !isThumbType(assetType)) {
+      setFilePreview('')
+      return undefined
+    }
+    const url = URL.createObjectURL(file)
+    setFilePreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file, assetType])
+
+  const updateZone = (field, value) => setTextZone((prev) => ({ ...prev, [field]: value }))
+
   async function handleAdd(e) {
     e.preventDefault()
     if (!brandId || !file) {
@@ -492,15 +657,17 @@ export default function IntroOutro() {
           await deleteBrandAsset(logo.id)
         }
       }
-      if (assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') {
-        const existing = assets.filter((a) => a.asset_type === assetType)
-        for (const a of existing) {
-          await deleteBrandAsset(a.id)
-        }
-      }
-      await createBrandAsset(brandId, assetType, file, label.trim())
+      // Modelos de capa acumulam: a marca pode ter vários e o job escolhe qual usar.
+      await createBrandAsset(
+        brandId,
+        assetType,
+        file,
+        label.trim(),
+        isThumbType(assetType) ? textZone : {},
+      )
       setFile(null)
       setLabel('')
+      setTextZone(DEFAULT_TEXT_ZONE)
       getBrandAssets(brandId).then(setAssets)
     } catch (e) {
       setError(e.message)
@@ -589,10 +756,16 @@ export default function IntroOutro() {
   async function handleSaveBrandScheduling(e) {
     e.preventDefault()
     if (!brandId) return
+    const trimmedName = (editBrandName || '').trim()
+    if (!trimmedName) {
+      setError('O nome da brand não pode ficar vazio.')
+      return
+    }
     setEditingBrand(true)
     setError('')
     try {
       await updateBrand(brandId, {
+        name: trimmedName,
         theme_category: editThemeCategory || '',
         thumbnail_font: editThumbnailFont || 'impact',
         thumbnail_band_color: (editBandColor || '').trim(),
@@ -601,6 +774,8 @@ export default function IntroOutro() {
         ...scheduleToPayload(editSchedule),
         long_slot_times: normalizeLongSlotTimesList(editLongSlotTimes),
         vertical_mode: editVerticalMode || 'zoom_crop',
+        default_thumb_template_short: editDefaultThumbShort ? Number(editDefaultThumbShort) : null,
+        default_thumb_template_long: editDefaultThumbLong ? Number(editDefaultThumbLong) : null,
       })
       const fetcher = () => getBrands(viewMode === 'factory' && factoryId ? factoryId : null)
       await refreshBrands(fetcher)
@@ -745,6 +920,10 @@ export default function IntroOutro() {
     return ASSET_TYPES.find((t) => t.id === id)?.label || id
   }
 
+  const isDefaultTemplate = (asset) =>
+    (!!editDefaultThumbShort && String(asset.id) === String(editDefaultThumbShort)) ||
+    (!!editDefaultThumbLong && String(asset.id) === String(editDefaultThumbLong))
+
   return (
     <div className="intro-outro">
       <h1>{viewMode === 'factory' ? 'Brands' : 'Mídias da marca'}</h1>
@@ -793,8 +972,8 @@ export default function IntroOutro() {
                     required={viewMode === 'factory'}
                   >
                     <option value="">Selecione</option>
-                    {THEME_CATEGORY_OPTIONS.map((t) => (
-                      <option key={t.id} value={t.id}>{t.label}</option>
+                    {brandCategories.map((t) => (
+                      <option key={t.id} value={t.code}>{t.label}</option>
                     ))}
                   </select>
                 </div>
@@ -928,6 +1107,19 @@ export default function IntroOutro() {
             <form onSubmit={handleSaveBrandScheduling} className="brand-create-form">
               <div className="form-row">
                 <div className="form-group">
+                  <label>Nome da brand</label>
+                  <input
+                    type="text"
+                    value={editBrandName}
+                    onChange={(e) => setEditBrandName(e.target.value)}
+                    placeholder="Nome da brand"
+                    required
+                  />
+                  <p className="form-hint">Renomear não altera o identificador interno da brand (brand_id) — canais e integrações existentes continuam válidos.</p>
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
                   <label>Fonte da thumbnail</label>
                   <select value={editThumbnailFont} onChange={(e) => setEditThumbnailFont(e.target.value)}>
                     <option value="impact">Impact</option>
@@ -942,6 +1134,40 @@ export default function IntroOutro() {
               </div>
               <div className="form-row">
                 <div className="form-group">
+                  <label>Modelo de capa padrão — shorts</label>
+                  <select
+                    value={editDefaultThumbShort}
+                    onChange={(e) => setEditDefaultThumbShort(e.target.value)}
+                  >
+                    <option value="">Nenhum (faixa inferior)</option>
+                    {assets
+                      .filter((a) => a.asset_type === 'THUMB_SHORT')
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>{a.label || `#${a.id}`}</option>
+                      ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Modelo de capa padrão — longs</label>
+                  <select
+                    value={editDefaultThumbLong}
+                    onChange={(e) => setEditDefaultThumbLong(e.target.value)}
+                  >
+                    <option value="">Nenhum (faixa inferior)</option>
+                    {assets
+                      .filter((a) => a.asset_type === 'THUMB_LONG')
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>{a.label || `#${a.id}`}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              <p className="form-hint">
+                Usado nos jobs que nascem sem formulário (busca automática da Factory) e como padrão
+                do formulário de cortes. O job pode escolher outro.
+              </p>
+              <div className="form-row">
+                <div className="form-group">
                   <label>Categoria da brand</label>
                   <select
                     value={editThemeCategory}
@@ -949,10 +1175,11 @@ export default function IntroOutro() {
                     required={viewMode === 'factory'}
                   >
                     <option value="">Selecione</option>
-                    {THEME_CATEGORY_OPTIONS.map((t) => (
-                      <option key={t.id} value={t.id}>{t.label}</option>
+                    {brandCategories.map((t) => (
+                      <option key={t.id} value={t.code}>{t.label}</option>
                     ))}
                   </select>
+                  <p className="form-hint">Categorias são gerenciadas em &quot;Factory Config&quot;.</p>
                 </div>
                 <div className="form-group">
                   <label>Modo de edição de shorts</label>
@@ -1278,9 +1505,12 @@ export default function IntroOutro() {
                 Ao enviar um novo logo, o sistema remove automaticamente os logos anteriores desta brand.
               </p>
             )}
-            {(assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') && (
+            {isThumbType(assetType) && (
               <p className="form-hint">
-                Modelo de capa sobreposto ao frame. PNG com transparência. Dimensões: Thumb Shorts 1080×1920 px, Thumb Longs 1920×1080 px. O título é desenhado por cima na faixa inferior.
+                Modelo de capa sobreposto ao frame. Dimensões: Thumb Shorts 1080×1920 px, Thumb Longs
+                1920×1080 px. Envie o modelo <strong>sem texto</strong>: o título é escrito por cima,
+                na zona marcada abaixo. Podem existir vários modelos por marca — o rótulo é o que os
+                distingue, e o job escolhe qual usar.
               </p>
             )}
             <form onSubmit={handleAdd}>
@@ -1294,24 +1524,33 @@ export default function IntroOutro() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Rótulo (opcional)</label>
+                  <label>Rótulo {isThumbType(assetType) ? '(obrigatório)' : '(opcional)'}</label>
                   <input
                     type="text"
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
-                    placeholder="Ex: Intro 15s"
+                    placeholder={isThumbType(assetType) ? 'Ex: sala ao vivo' : 'Ex: Intro 15s'}
+                    required={isThumbType(assetType)}
                   />
                 </div>
               </div>
               <div className="form-group">
-                <label>Arquivo {(assetType === 'LOGO' || assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') ? '(imagem PNG/JPG)' : '(vídeo ou imagem)'}</label>
+                <label>Arquivo {(assetType === 'LOGO' || isThumbType(assetType)) ? '(imagem PNG/JPG)' : '(vídeo ou imagem)'}</label>
                 <input
                   type="file"
-                  accept={(assetType === 'LOGO' || assetType === 'THUMB_SHORT' || assetType === 'THUMB_LONG') ? 'image/*' : 'video/*,image/*'}
+                  accept={(assetType === 'LOGO' || isThumbType(assetType)) ? 'image/*' : 'video/*,image/*'}
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                   required
                 />
               </div>
+              {isThumbType(assetType) && (
+                <TextZoneFields
+                  zone={textZone}
+                  onChange={updateZone}
+                  onReset={() => setTextZone(DEFAULT_TEXT_ZONE)}
+                  preview={filePreview}
+                />
+              )}
               <button type="submit" disabled={uploading}>
                 {uploading ? 'Enviando...' : 'Adicionar'}
               </button>
@@ -1363,6 +1602,20 @@ export default function IntroOutro() {
                   <div key={asset.id} className="asset-card">
                     <div className="asset-type">{typeLabel(asset.asset_type)}</div>
                     <div className="asset-label">{asset.label || asset.file?.split('/').pop() || '-'}</div>
+                    {isThumbType(asset.asset_type) && (
+                      <>
+                        {asset.file && (
+                          <img src={asset.file} alt={asset.label} className="asset-thumb" />
+                        )}
+                        <div className="asset-meta">
+                          Texto em {asset.text_zone_x}%, {asset.text_zone_y}% ·{' '}
+                          {asset.text_zone_w}×{asset.text_zone_h}%
+                        </div>
+                        {isDefaultTemplate(asset) && (
+                          <div className="asset-badge">Padrão da marca</div>
+                        )}
+                      </>
+                    )}
                     {asset.file && (
                       <a href={asset.file} target="_blank" rel="noreferrer" className="asset-link">
                         Ver arquivo

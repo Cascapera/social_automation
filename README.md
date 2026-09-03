@@ -168,7 +168,11 @@ Further detail: [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 
 ## 🧪 Testing & Quality
 
-- Pytest with coverage (~70%+ core modules)
+- Pytest with coverage over the whole codebase — **41%** of production statements today
+  (tests and migrations excluded from the measurement)
+- The `--cov-fail-under` in `pyproject.toml` is a **ratchet**, not a target: it holds the
+  coverage measured on the day it was set. Raise it when the real number goes up; never
+  lower it to turn a red build green
 - Ruff for linting
 - GitHub Actions CI pipeline
 - Isolated test environment (SQLite)
