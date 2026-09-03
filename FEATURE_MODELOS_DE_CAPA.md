@@ -12,7 +12,10 @@
 
 ## ⏸ PONTO DE RETOMADA
 
-**Estado: plano escrito, nada implementado.** Começar pelo PR 1.
+**Estado: 5/5 PRs feitos e em `develop` (#80, #81, #82, #83, #84). Falta o teste real.**
+
+Próximo passo concreto: subir um modelo de verdade numa marca, gerar um corte e conferir a capa
+— a seção 6 tem a lista. Só depois disso a feature está fechada.
 
 ---
 
@@ -209,55 +212,55 @@ frame do vídeo
 
 ### PR 1 · Modelo de dados dos modelos de capa
 
-- [ ] `apps/brands/models.py`: 10 campos novos em `BrandAsset` (§3.1) + `default_thumb_template_short/long` em `Brand`
-- [ ] `apps/auto_cuts/models.py`: `thumb_template_short` e `thumb_template_long` em `AutoCutAnalysis`
-- [ ] ~~`MultipleCreatorJob`~~ — descartado, ver §3.2: fan-out multi-marca resolve pelo padrão de cada marca
-- [ ] Migrações (`brands` a partir de `0035`, `auto_cuts` a partir de `0033`)
-- [ ] `apps/brands/admin.py`: expor os campos novos no `BrandAssetAdmin`
-- [ ] Teste: criar dois `BrandAsset` `THUMB_LONG` na mesma marca com rótulos diferentes e conferir que ambos persistem
+- [x] `apps/brands/models.py`: 10 campos novos em `BrandAsset` (§3.1) + `default_thumb_template_short/long` em `Brand`
+- [x] `apps/auto_cuts/models.py`: `thumb_template_short` e `thumb_template_long` em `AutoCutAnalysis`
+- [x] ~~`MultipleCreatorJob`~~ — descartado, ver §3.2: fan-out multi-marca resolve pelo padrão de cada marca
+- [x] Migrações (`brands` a partir de `0035`, `auto_cuts` a partir de `0033`)
+- [x] `apps/brands/admin.py`: expor os campos novos no `BrandAssetAdmin`
+- [x] Teste: criar dois `BrandAsset` `THUMB_LONG` na mesma marca com rótulos diferentes e conferir que ambos persistem
 
 ### PR 2 · Desenho do texto na zona do modelo
 
-- [ ] `thumbnail.py`: `_resolve_template(analysis, brand, is_short)` com a ordem de §3.3
-- [ ] `thumbnail.py`: `_resolve_text_zone` e `_draw_text_in_zone` (§3.4)
-- [ ] `generate_auto_thumbnail`: bifurcar com modelo / sem modelo; pular o logo quando há modelo
-- [ ] Cor/fonte/contorno do modelo com fallback para os da marca
-- [ ] `apps/auto_cuts/tests/test_thumbnail_modelo.py` (novo):
-  - [ ] sem modelo → pixel no centro da faixa inferior tem a `band_color` (fallback intacto)
-  - [ ] com modelo → a faixa inferior **não** é `band_color` e há pixels de texto dentro da zona
-  - [ ] com modelo → **nenhum** pixel de texto fora da zona (o bug que estamos corrigindo)
-  - [ ] título longo demais reduz o corpo e continua dentro da zona
-  - [ ] asset de outra marca é ignorado e cai no padrão da marca do corte
-  - [ ] marca com um `THUMB_LONG` e sem padrão configurado continua usando esse modelo (regressão do passo 3)
-- [ ] Gerar uma capa de amostra a partir de `docs/cortes_sala_modelo.png` e conferir a olho contra `docs/cortes_sala_exemplo.png`
+- [x] `thumbnail.py`: `_resolve_template(analysis, brand, is_short)` com a ordem de §3.3
+- [x] `thumbnail.py`: `_resolve_text_zone` e `_draw_text_in_zone` (§3.4)
+- [x] `generate_auto_thumbnail`: bifurcar com modelo / sem modelo; pular o logo quando há modelo
+- [x] Cor/fonte/contorno do modelo com fallback para os da marca
+- [x] `apps/auto_cuts/tests/test_thumbnail_modelo.py` (novo):
+  - [x] sem modelo → pixel no centro da faixa inferior tem a `band_color` (fallback intacto)
+  - [x] com modelo → a faixa inferior **não** é `band_color` e há pixels de texto dentro da zona
+  - [x] com modelo → **nenhum** pixel de texto fora da zona (o bug que estamos corrigindo)
+  - [x] título longo demais reduz o corpo e continua dentro da zona
+  - [x] asset de outra marca é ignorado e cai no padrão da marca do corte
+  - [x] marca com um `THUMB_LONG` e sem padrão configurado continua usando esse modelo (regressão do passo 3)
+- [x] Gerar uma capa de amostra a partir de `docs/cortes_sala_modelo.png` e conferir a olho contra `docs/cortes_sala_exemplo.png`
 
 ### PR 3 · API
 
-- [ ] `BrandAssetSerializer`: campos novos; validar faixas e `x+w ≤ 100`, `y+h ≤ 100`
-- [ ] `BrandAssetSerializer`: exigir `label` não vazio quando `asset_type` for `THUMB_*` (senão o segundo upload colide no `unique_together`) e aceitar só PNG/JPG
-- [ ] `BrandSerializer`: `default_thumb_template_short/long`, validando que o asset é da própria marca e do tipo certo
-- [ ] `AutoCutAnalysisSerializer`: `thumb_template_short`, `thumb_template_long`
-- [ ] `views/auto_cuts.py` `create` (~242), `upload_ready_cuts` (~342) e `finalizar` (~416): ler, validar (existe + é da marca + tipo bate com o formato) e gravar os dois FKs — mesmo formato do `long_overlay_asset`
-- [ ] `tasks_auto_fetch.py:236`: propagar `brand.default_thumb_template_*` para a análise criada
-- [ ] `multiple_creator/tasks.py:260`: copiar os FKs do job para a análise filha
-- [ ] Testes de API: escolha válida grava; asset de outra marca → 400; tipo trocado (short recebendo `THUMB_LONG`) → 400
+- [x] `BrandAssetSerializer`: campos novos; validar faixas e `x+w ≤ 100`, `y+h ≤ 100`
+- [x] `BrandAssetSerializer`: exigir `label` não vazio quando `asset_type` for `THUMB_*` (senão o segundo upload colide no `unique_together`) e aceitar só PNG/JPG
+- [x] `BrandSerializer`: `default_thumb_template_short/long`, validando que o asset é da própria marca e do tipo certo
+- [x] `AutoCutAnalysisSerializer`: `thumb_template_short`, `thumb_template_long`
+- [x] `views/auto_cuts.py` `create` (~242), `upload_ready_cuts` (~342) e `finalizar` (~416): ler, validar (existe + é da marca + tipo bate com o formato) e gravar os dois FKs — mesmo formato do `long_overlay_asset`
+- [ ] ~~`tasks_auto_fetch.py:236`: propagar o padrão da marca~~ — desnecessário: a cascata de §3.3 já o lê na hora de desenhar
+- [ ] ~~`multiple_creator/tasks.py:260`~~ — descartado com o FK do job (ver §3.2)
+- [x] Testes de API: escolha válida grava; asset de outra marca → 400; tipo trocado (short recebendo `THUMB_LONG`) → 400
 
 ### PR 4 · Frontend — cadastro de modelos
 
-- [ ] `IntroOutro.jsx:509`: **remover** o `delete` automático dos `THUMB_*` anteriores
-- [ ] Formulário de upload de modelo: rótulo obrigatório + campos da zona (x, y, largura, altura, alinhamento, cor, contorno, fonte) com os padrões de §3.1
-- [ ] Prévia: a imagem do modelo com um retângulo posicionado por CSS nas mesmas %, atualizando ao digitar — é o que evita ida e volta para acertar a zona
-- [ ] Lista de assets: miniatura, rótulo e zona de cada modelo, com editar e apagar
-- [ ] Configuração da marca: seletor do modelo padrão de shorts e de longs
-- [ ] Atualizar o texto de ajuda (`IntroOutro.jsx:1315`), que hoje diz "O título é desenhado por cima na faixa inferior"
+- [x] `IntroOutro.jsx:509`: **remover** o `delete` automático dos `THUMB_*` anteriores
+- [x] Formulário de upload de modelo: rótulo obrigatório + campos da zona (x, y, largura, altura, alinhamento, cor, contorno, fonte) com os padrões de §3.1
+- [x] Prévia: a imagem do modelo com um retângulo posicionado por CSS nas mesmas %, atualizando ao digitar — é o que evita ida e volta para acertar a zona
+- [x] Lista de assets: miniatura, rótulo e zona de cada modelo, com editar e apagar
+- [x] Configuração da marca: seletor do modelo padrão de shorts e de longs
+- [x] Atualizar o texto de ajuda (`IntroOutro.jsx:1315`), que hoje diz "O título é desenhado por cima na faixa inferior"
 
 ### PR 5 · Frontend — escolha no job
 
-- [ ] `CortesAutomaticos.jsx`: carregar `THUMB_SHORT` e `THUMB_LONG` da marca ativa (como já se faz com `OVERLAY_LONG` na linha 429)
-- [ ] Dois seletores no formulário de criação, com "Nenhum (faixa inferior)" como primeira opção e o padrão da marca pré-selecionado
-- [ ] Mesmos seletores no modal de cortes prontos
-- [ ] `api.js`: enviar `thumb_template_short`/`thumb_template_long` em `createAutoCut`, `uploadReadyCuts` e `finalizar`
-- [ ] Mensagem quando a marca não tem nenhum modelo cadastrado, com link para a página de Marcas
+- [x] `CortesAutomaticos.jsx`: carregar `THUMB_SHORT` e `THUMB_LONG` da marca ativa (como já se faz com `OVERLAY_LONG` na linha 429)
+- [x] Dois seletores no formulário de criação, com "Nenhum (faixa inferior)" como primeira opção e o padrão da marca pré-selecionado
+- [x] Mesmos seletores no modal de cortes prontos
+- [x] `api.js`: enviar `thumb_template_short`/`thumb_template_long` em `createAutoCut`, `uploadReadyCuts` e `finalizar` (a UI usa os dois primeiros; ver decisão 3)
+- [x] Mensagem quando a marca não tem nenhum modelo cadastrado, com link para a página de Marcas
 
 ### Fora do escopo (anotado, não feito)
 
@@ -281,10 +284,11 @@ frame do vídeo
 
 ## 6. Definition of Done
 
-- [ ] `.venv/Scripts/ruff.exe check .` limpo
-- [ ] `DJANGO_SETTINGS_MODULE=social_automation.settings_test python manage.py test` verde
-- [ ] Uma marca com **dois** modelos de long cadastrados, gerando cortes com cada um e as duas capas conferidas a olho
-- [ ] Uma marca **sem** modelo gerando capa idêntica à de antes da feature
+- [x] `.venv/Scripts/ruff.exe check .` limpo
+- [x] `manage.py test` sob `settings_test` verde (menos 6 falhas pré-existentes em `MultipleCreator`, idênticas a `develop`)
+- [x] `npm run build` limpo
+- [ ] **Teste real:** uma marca com **dois** modelos de long cadastrados, gerando cortes com cada um e as duas capas conferidas a olho
+- [ ] **Teste real:** uma marca **sem** modelo gerando capa idêntica à de antes da feature
 
 ---
 
@@ -292,4 +296,26 @@ frame do vídeo
 
 | Data | PR | O que entrou |
 | --- | --- | --- |
-| — | — | — |
+| 2026-09-03 | #80 | Modelo de dados: zona de texto no `BrandAsset`, padrão por marca, escolha no job |
+| 2026-09-03 | #81 | Desenho do título na zona do modelo; fallback da faixa inferior intacto |
+| 2026-09-03 | #82 | API: cadastro do modelo, padrão da marca e escolha nas 3 entradas de job |
+| 2026-09-03 | #83 | Cadastro de vários modelos na página de Marcas, com prévia da zona |
+| 2026-09-03 | #84 | Seletores de modelo no formulário de cortes e no modal de cortes prontos |
+
+### Decisões tomadas durante a execução (corrigem o plano original)
+
+1. **`MultipleCreatorJob` ficou de fora** (§3.2): fan-out multi-marca, asset é de uma marca só.
+2. **Não se propaga o padrão da marca na criação do job** (auto-fetch da Factory): a cascata de
+   resolução (§3.3) já lê o padrão da marca na hora de desenhar. Propagar seria duplicar a regra —
+   e congelaria a escolha, fazendo com que mudar o padrão da marca não afetasse jobs já criados.
+3. **A troca de modelo na finalização existe na API mas não tem UI.** O endpoint aceita e grava
+   (testado), mas o modal de finalização já está carregado de opções e a escolha na criação cobre o
+   caso real. Jobs antigos, sem modelo, caem no padrão da marca pela cascata.
+
+### Defeitos encontrados pelos próprios testes
+
+- Criar modelo sem enviar a zona lia `0` em vez do padrão do campo e o cadastro era recusado (PR 3).
+- Palavra mais larga que a zona era partida ao meio (`classificaç/ão`) em vez de encolher a fonte —
+  apanhado ao renderizar a amostra com o modelo real, não por teste (PR 2).
+- Com contorno, a tinta vazava 1 px à direita: a largura era ajustada sem o contorno e o
+  alinhamento medido com ele (PR 2).
