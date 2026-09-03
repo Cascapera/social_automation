@@ -932,6 +932,8 @@ export async function createReadyCutsAnalysis({
   titlesLanguage = 'pt',
   longOverlayEnabled = false,
   longOverlayAssetId = null,
+  thumbTemplateShortId = null,
+  thumbTemplateLongId = null,
 }) {
   const formData = new FormData()
   if (files?.length) {
@@ -950,6 +952,8 @@ export async function createReadyCutsAnalysis({
   if (longOverlayEnabled && longOverlayAssetId) {
     formData.append('long_overlay_asset', String(longOverlayAssetId))
   }
+  if (thumbTemplateShortId) formData.append('thumb_template_short', String(thumbTemplateShortId))
+  if (thumbTemplateLongId) formData.append('thumb_template_long', String(thumbTemplateLongId))
   const token = getToken()
   const res = await fetch(`${API_BASE}/auto-cuts/upload-ready-cuts/`, {
     method: 'POST',
@@ -979,6 +983,8 @@ export async function createAutoCutAnalysis({
   verticalMode = 'zoom_crop',
   longOverlayEnabled = false,
   longOverlayAssetId = null,
+  thumbTemplateShortId = null,
+  thumbTemplateLongId = null,
 }) {
   const formData = new FormData()
   if (file) formData.append('file', file)
@@ -1002,6 +1008,8 @@ export async function createAutoCutAnalysis({
   if (longOverlayEnabled && longOverlayAssetId) {
     formData.append('long_overlay_asset', String(longOverlayAssetId))
   }
+  if (thumbTemplateShortId) formData.append('thumb_template_short', String(thumbTemplateShortId))
+  if (thumbTemplateLongId) formData.append('thumb_template_long', String(thumbTemplateLongId))
   const token = getToken()
   const res = await fetch(`${API_BASE}/auto-cuts/`, {
     method: 'POST',
@@ -1108,6 +1116,8 @@ export async function finalizarAutoCutJob(analysisId, {
   overlay_height: overlayHeight,
   long_overlay_enabled: longOverlayEnabled,
   long_overlay_asset_id: longOverlayAssetId,
+  thumb_template_short: thumbTemplateShort,
+  thumb_template_long: thumbTemplateLong,
 } = {}) {
   const body = {
     subtitle_style: subtitleStyle,
@@ -1128,6 +1138,9 @@ export async function finalizarAutoCutJob(analysisId, {
   if (overlayHeight != null) body.overlay_height = overlayHeight
   if (longOverlayEnabled !== undefined) body.long_overlay_enabled = longOverlayEnabled
   if (longOverlayAssetId !== undefined) body.long_overlay_asset_id = longOverlayAssetId
+  // Ausente = mantém o modelo do job; string vazia = remove (volta à faixa inferior).
+  if (thumbTemplateShort !== undefined) body.thumb_template_short = thumbTemplateShort
+  if (thumbTemplateLong !== undefined) body.thumb_template_long = thumbTemplateLong
   return apiRequest(`/auto-cuts/${analysisId}/finalizar/`, {
     method: 'POST',
     body: JSON.stringify(body),

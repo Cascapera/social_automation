@@ -97,6 +97,9 @@ export default function CortesAutomaticos() {
   const [readyCutsLongLogo, setReadyCutsLongLogo] = useState(false)
   const [animationAssets, setAnimationAssets] = useState([])
   const [longOverlayAssets, setLongOverlayAssets] = useState([])
+  const [thumbTemplates, setThumbTemplates] = useState({ short: [], long: [] })
+  const [thumbTemplateShortId, setThumbTemplateShortId] = useState('')
+  const [thumbTemplateLongId, setThumbTemplateLongId] = useState('')
   const [longOverlayEnabled, setLongOverlayEnabled] = useState(false)
   const [longOverlayAssetId, setLongOverlayAssetId] = useState('')
   const [readyCutsLongOverlayEnabled, setReadyCutsLongOverlayEnabled] = useState(false)
@@ -424,10 +427,21 @@ export default function CortesAutomaticos() {
         : activeBrandId
     if (!bid) {
       setLongOverlayAssets([])
+      setThumbTemplates({ short: [], long: [] })
       return
     }
     getBrandAssets(bid, 'OVERLAY_LONG').then(setLongOverlayAssets).catch(() => setLongOverlayAssets([]))
-  }, [activeBrandId, readyCutsModalOpen, readyCutsBrandId, viewMode])
+    Promise.all([
+      getBrandAssets(bid, 'THUMB_SHORT').catch(() => []),
+      getBrandAssets(bid, 'THUMB_LONG').catch(() => []),
+    ]).then(([short, long]) => {
+      setThumbTemplates({ short: short || [], long: long || [] })
+      // Começa no padrão da marca; sem isso ficaria a escolha da marca anterior, que a API recusa.
+      const brand = brands.find((b) => String(b.id) === String(bid))
+      setThumbTemplateShortId(brand?.default_thumb_template_short || '')
+      setThumbTemplateLongId(brand?.default_thumb_template_long || '')
+    })
+  }, [activeBrandId, readyCutsModalOpen, readyCutsBrandId, viewMode, brands])
 
   async function handleGenerate(e) {
     e.preventDefault()
@@ -487,6 +501,8 @@ export default function CortesAutomaticos() {
         verticalMode: jobVerticalMode,
         longOverlayEnabled,
         longOverlayAssetId: longOverlayEnabled && longOverlayAssetId ? Number(longOverlayAssetId) : null,
+        thumbTemplateShortId: thumbTemplateShortId ? Number(thumbTemplateShortId) : null,
+        thumbTemplateLongId: thumbTemplateLongId ? Number(thumbTemplateLongId) : null,
       })
       setAnalysesPage(1)
       await loadAnalysesForView(1)
@@ -568,6 +584,8 @@ export default function CortesAutomaticos() {
           readyCutsLongOverlayEnabled && readyCutsLongOverlayAssetId
             ? Number(readyCutsLongOverlayAssetId)
             : null,
+        thumbTemplateShortId: thumbTemplateShortId ? Number(thumbTemplateShortId) : null,
+        thumbTemplateLongId: thumbTemplateLongId ? Number(thumbTemplateLongId) : null,
       })
       setAnalysesPage(1)
       if (a?.id) setExpandedId(a.id)
@@ -1083,6 +1101,32 @@ export default function CortesAutomaticos() {
                       </div>
                     </div>
                     <p className="form-hint">Overlay: só em cortes longos horizontais (PNG/JPG/MP4 na lateral direita).</p>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Modelo de capa — shorts</label>
+                        <select
+                          value={thumbTemplateShortId}
+                          onChange={(e) => setThumbTemplateShortId(e.target.value)}
+                        >
+                          <option value="">Nenhum (faixa inferior)</option>
+                          {thumbTemplates.short.map((a) => (
+                            <option key={a.id} value={a.id}>{a.label || `Modelo #${a.id}`}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Modelo de capa — longs</label>
+                        <select
+                          value={thumbTemplateLongId}
+                          onChange={(e) => setThumbTemplateLongId(e.target.value)}
+                        >
+                          <option value="">Nenhum (faixa inferior)</option>
+                          {thumbTemplates.long.map((a) => (
+                            <option key={a.id} value={a.id}>{a.label || `Modelo #${a.id}`}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                     {(viewMode === 'factory' ? readyCutsBrandId : activeBrandId) ? (
                       <div className="form-row" style={{ marginTop: '0.75rem' }}>
                         <div className="form-group">
@@ -1398,6 +1442,43 @@ export default function CortesAutomaticos() {
               )}
             </div>
           </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Modelo de capa — shorts</label>
+              <select
+                value={thumbTemplateShortId}
+                onChange={(e) => setThumbTemplateShortId(e.target.value)}
+              >
+                <option value="">Nenhum (faixa inferior)</option>
+                {thumbTemplates.short.map((a) => (
+                  <option key={a.id} value={a.id}>{a.label || `Modelo #${a.id}`}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Modelo de capa — longs</label>
+              <select
+                value={thumbTemplateLongId}
+                onChange={(e) => setThumbTemplateLongId(e.target.value)}
+              >
+                <option value="">Nenhum (faixa inferior)</option>
+                {thumbTemplates.long.map((a) => (
+                  <option key={a.id} value={a.id}>{a.label || `Modelo #${a.id}`}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {thumbTemplates.short.length === 0 && thumbTemplates.long.length === 0 ? (
+            <p className="form-hint">
+              Nenhum modelo de capa cadastrado nesta marca. Em <strong>Mídias da marca</strong>, envie
+              um modelo (Thumb Shorts ou Thumb Longs) e marque onde o título deve ser escrito.
+            </p>
+          ) : (
+            <p className="form-hint">
+              Com modelo, o título é escrito na zona definida no modelo. Sem modelo, vai na faixa
+              inferior, como antes.
+            </p>
+          )}
           {activeBrandId ? (
             <div className="form-row">
               <div className="form-group">
