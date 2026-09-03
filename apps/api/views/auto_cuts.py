@@ -45,6 +45,43 @@ logger = logging.getLogger(__name__)
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
+def _parse_thumb_template(value, brand_id, *, is_short):
+    """Valida o modelo de capa escolhido. Devolve (asset_id, erro) — vazio significa sem modelo.
+
+    O asset tem de ser da própria brand e do formato certo: um THUMB_LONG (16:9) esticado num
+    short (9:16) sai deformado.
+    """
+    if value in (None, "", "null", "none", 0, "0"):
+        return None, None
+    asset_type = "THUMB_SHORT" if is_short else "THUMB_LONG"
+    formato = "shorts" if is_short else "longs"
+    try:
+        asset_id = int(value)
+    except (TypeError, ValueError):
+        return None, f"Modelo de capa inválido para {formato}."
+    exists = brand_id and BrandAsset.objects.filter(
+        id=asset_id, brand_id=brand_id, asset_type=asset_type
+    ).exists()
+    if not exists:
+        return None, f"Modelo de capa de {formato} inválido para esta brand."
+    return asset_id, None
+
+
+def _read_thumb_templates(data, brand_id):
+    """Lê os dois modelos do payload. Devolve (short_id, long_id, erro)."""
+    short_id, error = _parse_thumb_template(
+        data.get("thumb_template_short"), brand_id, is_short=True
+    )
+    if error:
+        return None, None, error
+    long_id, error = _parse_thumb_template(
+        data.get("thumb_template_long"), brand_id, is_short=False
+    )
+    if error:
+        return None, None, error
+    return short_id, long_id, None
+
+
 def _delete_auto_cut_job_files(analysis):
     """Remove vídeo original, chunks e arquivos de cortes do job.
 
@@ -209,6 +246,10 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        thumb_short_id, thumb_long_id, thumb_error = _read_thumb_templates(request.data, brand_id)
+        if thumb_error:
+            return Response({"error": thumb_error}, status=status.HTTP_400_BAD_REQUEST)
+
         sources_count = sum([bool(file_obj), bool(source_id), bool(youtube_url)])
         if sources_count == 0:
             return Response(
@@ -260,6 +301,8 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             vertical_mode=vertical_mode,
             long_overlay_enabled=long_overlay_enabled,
             long_overlay_asset_id=long_overlay_asset_id if long_overlay_enabled else None,
+            thumb_template_short_id=thumb_short_id,
+            thumb_template_long_id=thumb_long_id,
         )
         analysis.save()
 
@@ -336,6 +379,9 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                 {"error": "Envie pelo menos um arquivo de vídeo (files ou file)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        thumb_short_id, thumb_long_id, thumb_error = _read_thumb_templates(request.data, brand_id)
+        if thumb_error:
+            return Response({"error": thumb_error}, status=status.HTTP_400_BAD_REQUEST)
         from apps.auto_cuts.models import AutoCutAnalysis, AutoCutReadyChunk
         from apps.auto_cuts.tasks import analyze_auto_cuts_task
 
@@ -352,6 +398,8 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
             ready_cuts_titles_language=titles_language,
             long_overlay_enabled=long_overlay_enabled,
             long_overlay_asset_id=long_overlay_asset_id if long_overlay_enabled else None,
+            thumb_template_short_id=thumb_short_id,
+            thumb_template_long_id=thumb_long_id,
         )
         analysis.save()
         for i, file_obj in enumerate(files):
@@ -442,6 +490,21 @@ class AutoCutAnalysisViewSet(viewsets.ModelViewSet):
                     {"error": "Overlay inválido para esta brand."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        # O modelo de capa é lido do job na hora de desenhar, então trocá-lo aqui é gravá-lo.
+        changed_fields = []
+        for key, is_short in (("thumb_template_short", True), ("thumb_template_long", False)):
+            if key not in data:
+                continue
+            asset_id, thumb_error = _parse_thumb_template(
+                data.get(key), getattr(analysis, "brand_id", None), is_short=is_short
+            )
+            if thumb_error:
+                return Response({"error": thumb_error}, status=status.HTTP_400_BAD_REQUEST)
+            setattr(analysis, f"{key}_id", asset_id)
+            changed_fields.append(f"{key}_id")
+        if changed_fields:
+            analysis.save(update_fields=changed_fields)
+
         finalizar_auto_cut_task.delay(
             analysis.id,
             subtitle_style=subtitle_style,

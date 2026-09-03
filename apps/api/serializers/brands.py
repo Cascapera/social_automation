@@ -138,6 +138,8 @@ class BrandSerializer(serializers.ModelSerializer):
             "upload_post_youtube_enabled",
             "long_video_subtitles_enabled",
             "long_video_logo_enabled",
+            "default_thumb_template_short",
+            "default_thumb_template_long",
         ]
         extra_kwargs = {"slug": {"required": False}}
 
@@ -204,13 +206,55 @@ class BrandSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"theme_category": "Categoria inválida ou inativa para esta factory."}
                 )
+
+        # Modelo de capa padrão: tem de ser um asset da própria brand e do formato certo.
+        for field, asset_type in (
+            ("default_thumb_template_short", "THUMB_SHORT"),
+            ("default_thumb_template_long", "THUMB_LONG"),
+        ):
+            asset = attrs.get(field)
+            if asset is None:
+                continue
+            if asset.asset_type != asset_type:
+                raise serializers.ValidationError(
+                    {field: f"O modelo escolhido não é do tipo {asset_type}."}
+                )
+            # Na criação a brand ainda não tem id — nem assets: qualquer modelo aqui é de outra brand.
+            if asset.brand_id != getattr(self.instance, "id", None):
+                raise serializers.ValidationError(
+                    {field: "O modelo escolhido é de outra marca."}
+                )
         return attrs
 
 
 class BrandAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = BrandAsset
-        fields = ["id", "brand", "asset_type", "label", "file"]
+        fields = [
+            "id",
+            "brand",
+            "asset_type",
+            "label",
+            "file",
+            "text_zone_x",
+            "text_zone_y",
+            "text_zone_w",
+            "text_zone_h",
+            "text_align",
+            "text_valign",
+            "text_color",
+            "stroke_enabled",
+            "stroke_color",
+            "font",
+        ]
+
+    def _current(self, attrs, field):
+        """Valor a validar: o enviado agora, o já gravado (PATCH) ou o padrão do modelo."""
+        if field in attrs:
+            return attrs[field]
+        if self.instance is not None:
+            return getattr(self.instance, field, None)
+        return BrandAsset._meta.get_field(field).get_default()
 
     def validate(self, attrs):
         at = attrs.get("asset_type")
@@ -224,7 +268,41 @@ class BrandAssetSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"file": "Formato inválido. Use MP4, PNG ou JPG."}
                 )
+        if at in BrandAsset.THUMB_ASSET_TYPES:
+            if f:
+                name = (getattr(f, "name", "") or "").lower()
+                ext = name.rsplit(".", 1)[-1] if "." in name else ""
+                if ext not in ("png", "jpg", "jpeg"):
+                    raise serializers.ValidationError(
+                        {"file": "Formato inválido. Use PNG ou JPG."}
+                    )
+            # Sem rótulo, o segundo modelo da marca colidia no unique_together (brand, tipo, label).
+            if not (self._current(attrs, "label") or "").strip():
+                raise serializers.ValidationError(
+                    {"label": "Dê um rótulo ao modelo de capa para distinguir dos outros."}
+                )
+            self._validate_text_zone(attrs)
         return attrs
+
+    def _validate_text_zone(self, attrs):
+        zone = {
+            field: int(self._current(attrs, field) or 0)
+            for field in ("text_zone_x", "text_zone_y", "text_zone_w", "text_zone_h")
+        }
+        for field in ("text_zone_w", "text_zone_h"):
+            if not (1 <= zone[field] <= 100):
+                raise serializers.ValidationError({field: "Use um valor entre 1 e 100 (%)."})
+        for field in ("text_zone_x", "text_zone_y"):
+            if not (0 <= zone[field] <= 99):
+                raise serializers.ValidationError({field: "Use um valor entre 0 e 99 (%)."})
+        if zone["text_zone_x"] + zone["text_zone_w"] > 100:
+            raise serializers.ValidationError(
+                {"text_zone_w": "A caixa passa da borda direita da imagem."}
+            )
+        if zone["text_zone_y"] + zone["text_zone_h"] > 100:
+            raise serializers.ValidationError(
+                {"text_zone_h": "A caixa passa da borda inferior da imagem."}
+            )
 
 
 class BrandSocialAccountSerializer(serializers.ModelSerializer):

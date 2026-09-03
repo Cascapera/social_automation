@@ -143,6 +143,8 @@ class AutoCutAnalysisSerializer(serializers.ModelSerializer):
             "ready_cuts_titles_language",
             "long_overlay_enabled",
             "long_overlay_asset",
+            "thumb_template_short",
+            "thumb_template_long",
             "suggestions",
             "cortes",
             "ready_chunks",
