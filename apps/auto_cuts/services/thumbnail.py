@@ -25,6 +25,9 @@ THUMB_FALLBACK_SEC_IN_CUT = 5.0
 
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
+# YouTube limita thumbnail a 2MB.
+YT_THUMB_MAX_BYTES = 2 * 1024 * 1024
+
 
 def _safe_font(preferred_font: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     # 4 opções fixas configuradas no app.
@@ -130,6 +133,244 @@ def _fit_text_into_box(
     lines = _wrap_text(draw, text, font, max_width) or [text]
     line_spacing = max(4, int(floor * 0.2))
     return font, lines, line_spacing
+
+
+def _block_metrics(font, n_lines: int) -> tuple[int, int, int]:
+    """Altura de linha, espaçamento e altura do bloco, pela métrica da fonte.
+
+    Medir por `ascent + descent` (e não pelo bbox da tinta) mantém o espaçamento uniforme:
+    medindo a tinta, uma linha sem acento nem descendente fica mais baixa que a de cima e as
+    linhas "pulam".
+    """
+    try:
+        ascent, descent = font.getmetrics()
+        line_h = max(1, int(ascent + descent))
+    except (AttributeError, OSError):
+        line_h = max(1, int(getattr(font, "size", 16) * 1.2))
+    spacing = max(2, int(line_h * 0.12))
+    n = max(1, n_lines)
+    return line_h, spacing, (n * line_h) + ((n - 1) * spacing)
+
+
+def _fit_text_into_zone(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    preferred_font: str,
+    max_width: int,
+    max_height: int,
+    initial_font_size: int,
+    min_font_size: int,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str], int, int, int]:
+    """Maior corpo de fonte que faz o texto caber na zona, quebrando em linhas.
+
+    Irmão de `_fit_text_into_box` (usado no fallback da faixa inferior), mas medindo pela
+    métrica da fonte — ver `_block_metrics`.
+    """
+    words = (text or "").split()
+    floor = max(8, min_font_size)
+    font_size = max(floor, initial_font_size)
+    while True:
+        font = _safe_font(preferred_font, font_size)
+        lines = _wrap_text(draw, text, font, max_width) or [text]
+        line_h, spacing, block_h = _block_metrics(font, len(lines))
+        # Palavra mais larga que a zona seria partida ao meio ("classificaç/ão"); antes disso,
+        # vale a pena encolher a fonte — só se parte palavra no corpo mínimo.
+        widest_word = max((_text_width(draw, w, font) for w in words), default=0)
+        if (block_h <= max_height and widest_word <= max_width) or font_size <= floor:
+            return font, lines, line_h, spacing, block_h
+        font_size -= 2
+
+
+def _resolve_thumb_template(analysis, brand, is_short: bool):
+    """Modelo de capa a usar neste corte, ou None (= faixa inferior).
+
+    Ordem: escolha do job > padrão da marca > primeiro asset da marca.
+
+    O último degrau é compatibilidade: marcas que já usam modelo hoje (quando a geração pegava
+    `.order_by("id").first()`) continuam com o mesmo modelo sem ter de configurar nada.
+
+    A escolha do job só vale se o asset for da marca *do corte*: com roteamento por tema, o
+    corte da marca B não pode sair com a arte da marca A.
+    """
+    brand_id = getattr(brand, "id", None)
+    if not brand_id:
+        return None
+    asset_type = "THUMB_SHORT" if is_short else "THUMB_LONG"
+    suffix = "short" if is_short else "long"
+
+    def _usable(asset):
+        return (
+            asset
+            and asset.brand_id == brand_id
+            and asset.asset_type == asset_type
+            and asset.file
+        )
+
+    for candidate in (
+        getattr(analysis, f"thumb_template_{suffix}", None),
+        getattr(brand, f"default_thumb_template_{suffix}", None),
+    ):
+        if _usable(candidate):
+            return candidate
+    return (
+        BrandAsset.objects.filter(brand_id=brand_id, asset_type=asset_type)
+        .order_by("id")
+        .first()
+    )
+
+
+def _resolve_text_zone(w: int, h: int, template) -> tuple[int, int, int, int]:
+    """Caixa de texto do modelo (percentagens → pixels), sempre dentro da imagem."""
+
+    def _pct(attr: str, fallback: int) -> int:
+        try:
+            value = int(getattr(template, attr, fallback))
+        except (TypeError, ValueError):
+            value = fallback
+        return max(0, min(100, value))
+
+    x1 = int(w * _pct("text_zone_x", 60) / 100)
+    y1 = int(h * _pct("text_zone_y", 8) / 100)
+    x2 = min(w, x1 + int(w * _pct("text_zone_w", 38) / 100))
+    y2 = min(h, y1 + int(h * _pct("text_zone_h", 84) / 100))
+    if (x2 - x1) < 16 or (y2 - y1) < 16:
+        # Zona inutilizável (mal configurada): melhor a imagem inteira do que perder o texto.
+        return 0, 0, w, h
+    return x1, y1, x2, y2
+
+
+def _line_ink_bbox(draw: ImageDraw.ImageDraw, line: str, font, stroke_width: int):
+    """Caixa da tinta de uma linha desenhada com âncora `la` na origem (contorno incluído)."""
+    try:
+        return draw.textbbox((0, 0), line, font=font, anchor="la", stroke_width=stroke_width)
+    except (ValueError, TypeError):
+        # Fonte bitmap (load_default): sem âncora.
+        return draw.textbbox((0, 0), line, font=font)
+
+
+def _ink_extents(draw, lines, font, line_h: int, spacing: int, stroke_width: int) -> tuple[int, int]:
+    """Topo e base da tinta do bloco, relativos ao y da primeira linha.
+
+    A métrica da fonte diz onde ficam as linhas; a tinta pode passar disso — um acento
+    ultrapassa o ascendente, um `ç` ultrapassa a base. É pela tinta que a zona é garantida.
+    """
+    top: int | None = None
+    bottom: int | None = None
+    for index, line in enumerate(lines):
+        offset = index * (line_h + spacing)
+        bbox = _line_ink_bbox(draw, line, font, stroke_width)
+        top = bbox[1] + offset if top is None else min(top, bbox[1] + offset)
+        bottom = bbox[3] + offset if bottom is None else max(bottom, bbox[3] + offset)
+    if top is None or bottom is None:
+        return 0, 0
+    return top, bottom
+
+
+def _draw_text_in_zone(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    zone: tuple[int, int, int, int],
+    *,
+    preferred_font: str,
+    text_color: tuple[int, int, int],
+    stroke_color: tuple[int, int, int],
+    stroke_enabled: bool,
+    align: str,
+    valign: str,
+) -> None:
+    """Escreve o texto dentro da zona, sem deixar tinta escapar dela."""
+    x1, y1, x2, y2 = zone
+    zone_w = x2 - x1
+    zone_h = y2 - y1
+    # Folga de 2%: sem ela a tinta encosta na borda da arte.
+    inset = max(2, int(min(zone_w, zone_h) * 0.02))
+    left = x1 + inset
+    right = x2 - inset
+    top = y1 + inset
+    bottom = y2 - inset
+    box_w = max(16, right - left)
+    box_h = max(16, bottom - top)
+    initial_font_size = max(16, int(box_w * 0.22))
+    min_font_size = max(12, int(box_w * 0.06))
+
+    max_width = box_w
+    max_height = box_h
+    font, lines, line_h, spacing, _ = _fit_text_into_zone(
+        draw, text, preferred_font, max_width, max_height, initial_font_size, min_font_size
+    )
+    stroke_width = max(1, int(getattr(font, "size", min_font_size) * 0.08)) if stroke_enabled else 0
+
+    # A métrica subestima a tinta: acentos passam do ascendente, `ç` passa da base e o contorno
+    # engrossa tudo para os lados. Encolhe pela tinta medida até caber mesmo.
+    for _ in range(6):
+        ink_top, ink_bottom = _ink_extents(draw, lines, font, line_h, spacing, stroke_width)
+        widest = max(
+            (
+                bbox[2] - bbox[0]
+                for bbox in (_line_ink_bbox(draw, ln, font, stroke_width) for ln in lines)
+            ),
+            default=0,
+        )
+        overflow_h = (ink_bottom - ink_top) - box_h
+        overflow_w = widest - box_w
+        at_floor = getattr(font, "size", min_font_size) <= min_font_size
+        if (overflow_h <= 0 and overflow_w <= 0) or at_floor:
+            break
+        max_height = max(16, max_height - max(0, overflow_h))
+        max_width = max(16, max_width - max(0, overflow_w))
+        font, lines, line_h, spacing, _ = _fit_text_into_zone(
+            draw, text, preferred_font, max_width, max_height, initial_font_size, min_font_size
+        )
+        if stroke_enabled:
+            stroke_width = max(1, int(getattr(font, "size", min_font_size) * 0.08))
+
+    ink_top, ink_bottom = _ink_extents(draw, lines, font, line_h, spacing, stroke_width)
+    ink_h = ink_bottom - ink_top
+    if valign == "top":
+        desired_ink_top = top
+    elif valign == "bottom":
+        desired_ink_top = bottom - ink_h
+    else:
+        desired_ink_top = top + max(0, (box_h - ink_h) // 2)
+    cursor_y = desired_ink_top - ink_top
+
+    for index, line in enumerate(lines):
+        bbox = _line_ink_bbox(draw, line, font, stroke_width)
+        line_ink_w = bbox[2] - bbox[0]
+        if align == "left":
+            desired_ink_left = left
+        elif align == "right":
+            desired_ink_left = right - line_ink_w
+        else:
+            desired_ink_left = left + max(0, (box_w - line_ink_w) // 2)
+        draw.text(
+            (desired_ink_left - bbox[0], cursor_y + index * (line_h + spacing)),
+            line,
+            font=font,
+            fill=text_color,
+            anchor="la",  # topo do ascendente em y: baselines regulares entre as linhas
+            stroke_width=stroke_width,
+            stroke_fill=stroke_color,
+        )
+
+
+def _save_thumbnail(corte, img: Image.Image, out_path: Path) -> None:
+    """Grava a capa no corte, respeitando o limite de 2 MB do YouTube."""
+    img.save(out_path, format="JPEG", quality=92, optimize=True)
+    if out_path.stat().st_size > YT_THUMB_MAX_BYTES:
+        for quality in (85, 75, 65):
+            img.save(out_path, format="JPEG", quality=quality, optimize=True)
+            if out_path.stat().st_size <= YT_THUMB_MAX_BYTES:
+                break
+
+    # Substitui thumbnail antiga, se existir.
+    try:
+        if corte.thumbnail:
+            corte.thumbnail.delete(save=False)
+    except Exception:
+        pass
+    with open(out_path, "rb") as f:
+        corte.thumbnail.save(f"autocut_{corte.id}.jpg", File(f), save=True)
 
 
 def _extract_frame_at(video_path: Path, output_image_path: Path, sec: float) -> None:
@@ -348,7 +589,39 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                     w, h = img.size
             draw = ImageDraw.Draw(img)
 
-            # Logo topo-esquerda (se houver) - usa target_brand ou analysis.brand
+            # Modelo de capa (Thumb Shorts ou Thumb Longs) - sobrepõe ao frame
+            template = _resolve_thumb_template(analysis, brand, is_short)
+            has_thumb_model = bool(template and template.file)
+
+            if has_thumb_model:
+                try:
+                    overlay_img = Image.open(template.file.path).convert("RGBA")
+                    overlay_resized = overlay_img.resize((w, h), Image.Resampling.LANCZOS)
+                    img_rgba = img.convert("RGBA")
+                    img = Image.alpha_composite(img_rgba, overlay_resized).convert("RGB")
+                    draw = ImageDraw.Draw(img)
+                except Exception as e:
+                    logger.warning("[THUMB] Failed to apply template %s: %s", template.asset_type, e)
+                    has_thumb_model = False
+
+            if has_thumb_model:
+                # Texto na zona configurada no modelo (por omissão, a lateral direita).
+                # Sem logo: a arte do modelo já é a identidade da marca — e, sendo opaca, taparia o logo.
+                _draw_text_in_zone(
+                    draw,
+                    thumb_text,
+                    _resolve_text_zone(w, h, template),
+                    preferred_font=(template.font or "").strip().lower() or selected_font,
+                    text_color=_hex_to_rgb(template.text_color, text_color),
+                    stroke_color=_hex_to_rgb(template.stroke_color, stroke_color),
+                    stroke_enabled=bool(template.stroke_enabled),
+                    align=(template.text_align or "center"),
+                    valign=(template.text_valign or "middle"),
+                )
+                _save_thumbnail(corte, img, out_path)
+                return True
+
+            # Sem modelo: logo no canto superior esquerdo + faixa inferior com o texto centrado.
             logo_asset = (
                 BrandAsset.objects.filter(brand=brand, asset_type="LOGO")
                 .order_by("id")
@@ -367,38 +640,13 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 except Exception:
                     pass
 
-            # Modelo de capa (Thumb Shorts ou Thumb Longs) - sobrepõe ao frame
-            thumb_asset_type = "THUMB_SHORT" if is_short else "THUMB_LONG"
-            thumb_asset = (
-                BrandAsset.objects.filter(brand=brand, asset_type=thumb_asset_type)
-                .order_by("id")
-                .first()
-                if brand and getattr(brand, "id", None)
-                else None
-            )
-            has_thumb_model = thumb_asset and thumb_asset.file
-
             rect_h = max(1, int(h * 0.20))
             rect_w = w
             rect_x1 = 0
             rect_y1 = h - rect_h
             rect_x2 = rect_x1 + rect_w
             rect_y2 = h
-
-            if has_thumb_model:
-                try:
-                    overlay_img = Image.open(thumb_asset.file.path).convert("RGBA")
-                    overlay_resized = overlay_img.resize((w, h), Image.Resampling.LANCZOS)
-                    img_rgba = img.convert("RGBA")
-                    img = Image.alpha_composite(img_rgba, overlay_resized).convert("RGB")
-                    draw = ImageDraw.Draw(img)
-                except Exception as e:
-                    logger.warning("[THUMB] Failed to apply template %s: %s", thumb_asset_type, e)
-                    has_thumb_model = False
-
-            if not has_thumb_model:
-                # Fixed bottom band at 20% of height (fallback when no template asset)
-                draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], fill=band_color)
+            draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], fill=band_color)
 
             # Texto totalmente contido na faixa (quebra + redução de fonte).
             text_padding_x = max(20, int(w * 0.03))
@@ -442,23 +690,7 @@ def generate_auto_thumbnail(corte, target_brand=None) -> bool:
                 )
                 cursor_y += ln_h + line_spacing
 
-            img.save(out_path, format="JPEG", quality=92, optimize=True)
-            # YouTube limita thumbnail a 2MB; reduz qualidade se necessário.
-            YT_THUMB_MAX_BYTES = 2 * 1024 * 1024
-            if out_path.stat().st_size > YT_THUMB_MAX_BYTES:
-                for q in (85, 75, 65):
-                    img.save(out_path, format="JPEG", quality=q, optimize=True)
-                    if out_path.stat().st_size <= YT_THUMB_MAX_BYTES:
-                        break
-
-            # Substitui thumbnail antiga, se existir.
-            try:
-                if corte.thumbnail:
-                    corte.thumbnail.delete(save=False)
-            except Exception:
-                pass
-            with open(out_path, "rb") as f:
-                corte.thumbnail.save(f"autocut_{corte.id}.jpg", File(f), save=True)
+            _save_thumbnail(corte, img, out_path)
             return True
     except Exception as e:
         logger.warning("[THUMB] Failed to generate thumbnail for cut %s: %s", getattr(corte, "id", "?"), e)
